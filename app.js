@@ -1,8 +1,9 @@
 const FORCE_COLORS = {
-  friendly: "#38bdf8",
-  enemy: "#ff6b6b",
-  "host-nation": "#f7b955",
-  civilian: "#a78bfa",
+  friendly: "#7ec8e3",
+  enemy: "#f28b82",
+  "host-nation": "#81c995",
+  civilian: "#ffffff",
+  other: "#aaaaaa",
 };
 
 const FORCE_LABELS = {
@@ -10,6 +11,7 @@ const FORCE_LABELS = {
   enemy: "Enemy",
   "host-nation": "Host Nation",
   civilian: "Civilian",
+  other: "Other",
 };
 
 const BASEMAPS = {
@@ -33,15 +35,404 @@ const BASEMAPS = {
   },
 };
 
+// ─── Radio Library ────────────────────────────────────────────────────────────
+// Each entry: radioType → { label, programs: { programKey → profile } }
+// Profile schema mirrors the emitter modal fields.
+const RADIO_LIBRARY = {
+  "prc-163": {
+    label: "AN/PRC-163 Falcon IV",
+    programs: {
+      "vhf-sincgars": {
+        label: "VHF LOS — SINCGARS",
+        rf: { frequencyMHz: 46, bandwidthKHz: 25, modulation: "FHSS", waveform: "SINCGARS", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 6, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 200, adaptiveDataRate: false },
+      },
+      "uhf-los": {
+        label: "UHF LOS — Tactical",
+        rf: { frequencyMHz: 370, bandwidthKHz: 25, modulation: "FM", waveform: "analog", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 2.4 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 6, requiredSnrDb: 12, acrDb: 65, bdrDb: 85 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 150, adaptiveDataRate: false },
+      },
+      "srw-manet": {
+        label: "SRW MANET — Soldier Radio",
+        rf: { frequencyMHz: 2400, bandwidthKHz: 5000, modulation: "OFDM", waveform: "SRW", duplex: "full-duplex", channelSpacingKHz: 5000 },
+        tx: { powerW: 2, dutyCycle: 1, papr: 8, spectralEfficiency: 1.5 },
+        rx: { sensitivityDbm: -95, noiseFigDb: 8, requiredSnrDb: 10, acrDb: 30, bdrDb: 60 },
+        antenna: { type: "blade", gainDbi: 0, pattern: "omnidirectional", polarization: "vertical", heightM: 1.5, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: true, relayCapable: true, maxHops: 8, latencyMs: 50, adaptiveDataRate: true },
+      },
+      "muos-satcom": {
+        label: "MUOS SATCOM — WCDMA",
+        rf: { frequencyMHz: 300, bandwidthKHz: 5000, modulation: "QPSK", waveform: "MUOS", duplex: "full-duplex", channelSpacingKHz: 5000 },
+        tx: { powerW: 20, dutyCycle: 1, papr: 6, spectralEfficiency: 2 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 4, requiredSnrDb: 8, acrDb: 60, bdrDb: 80 },
+        antenna: { type: "satcom_patch", gainDbi: 10, pattern: "directional", polarization: "circular", heightM: 1.5, cableLossDb: 1, systemLossDb: 4 },
+        prop: { model: "itu-p528", clutter: "open", terrainEnabled: false, diffractionEnabled: false },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 600, adaptiveDataRate: true, satcomEnabled: true, satType: "GEO", satUplinkMHz: 292, satDownlinkMHz: 243, satGainDbi: 10 },
+      },
+    },
+  },
+  "prc-152a": {
+    label: "AN/PRC-152A Falcon III",
+    programs: {
+      "vhf-los": {
+        label: "VHF LOS — SINCGARS",
+        rf: { frequencyMHz: 60, bandwidthKHz: 25, modulation: "FHSS", waveform: "SINCGARS", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 6, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 200, adaptiveDataRate: false },
+      },
+      "anw2": {
+        label: "ANW2 MANET",
+        rf: { frequencyMHz: 1800, bandwidthKHz: 2000, modulation: "OFDM", waveform: "ANW2", duplex: "full-duplex", channelSpacingKHz: 2000 },
+        tx: { powerW: 5, dutyCycle: 1, papr: 6, spectralEfficiency: 2 },
+        rx: { sensitivityDbm: -98, noiseFigDb: 7, requiredSnrDb: 10, acrDb: 40, bdrDb: 70 },
+        antenna: { type: "blade", gainDbi: 0, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: true, relayCapable: true, maxHops: 6, latencyMs: 80, adaptiveDataRate: true },
+      },
+    },
+  },
+  "prc-117g": {
+    label: "AN/PRC-117G Falcon III",
+    programs: {
+      "vhf-cmd": {
+        label: "VHF Command Net",
+        rf: { frequencyMHz: 50, bandwidthKHz: 25, modulation: "FM", waveform: "analog", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 20, dutyCycle: 0.5, papr: 0, spectralEfficiency: 2.4 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: true, maxHops: 1, latencyMs: 200, adaptiveDataRate: false },
+      },
+      "uhf-satcom-dama": {
+        label: "UHF SATCOM DAMA",
+        rf: { frequencyMHz: 305, bandwidthKHz: 25, modulation: "PSK", waveform: "MUOS", duplex: "full-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 20, dutyCycle: 1, papr: 3, spectralEfficiency: 1.2 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 4, requiredSnrDb: 8, acrDb: 60, bdrDb: 80 },
+        antenna: { type: "satcom_patch", gainDbi: 10, pattern: "directional", polarization: "circular", heightM: 1.5, cableLossDb: 1, systemLossDb: 4 },
+        prop: { model: "itu-p528", clutter: "open", terrainEnabled: false, diffractionEnabled: false },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 600, adaptiveDataRate: false, satcomEnabled: true, satType: "GEO", satUplinkMHz: 305, satDownlinkMHz: 255, satGainDbi: 10 },
+      },
+      "wb-anw2": {
+        label: "Wideband ANW2",
+        rf: { frequencyMHz: 1500, bandwidthKHz: 5000, modulation: "OFDM", waveform: "ANW2", duplex: "full-duplex", channelSpacingKHz: 5000 },
+        tx: { powerW: 20, dutyCycle: 1, papr: 8, spectralEfficiency: 3 },
+        rx: { sensitivityDbm: -95, noiseFigDb: 6, requiredSnrDb: 10, acrDb: 40, bdrDb: 75 },
+        antenna: { type: "blade", gainDbi: 2, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: true, relayCapable: true, maxHops: 6, latencyMs: 60, adaptiveDataRate: true },
+      },
+    },
+  },
+  "prc-160": {
+    label: "AN/PRC-160",
+    programs: {
+      "hf-nvis": {
+        label: "HF NVIS — Short Range",
+        rf: { frequencyMHz: 5.5, bandwidthKHz: 3, modulation: "USB", waveform: "ALE", duplex: "half-duplex", channelSpacingKHz: 3 },
+        tx: { powerW: 20, dutyCycle: 0.5, papr: 0, spectralEfficiency: 0.4 },
+        rx: { sensitivityDbm: -110, noiseFigDb: 10, requiredSnrDb: 6, acrDb: 60, bdrDb: 90 },
+        antenna: { type: "dipole", gainDbi: 2, pattern: "omnidirectional", polarization: "horizontal", heightM: 5, cableLossDb: 0.5, systemLossDb: 2 },
+        prop: { model: "hf-skywave", clutter: "open", terrainEnabled: false, diffractionEnabled: false, nvisEnabled: true, ionoModel: "itu-r", timeDayEffects: true, solarIndex: 80 },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 500, adaptiveDataRate: false },
+      },
+      "hf-longhaul": {
+        label: "HF Long-Haul — Skywave",
+        rf: { frequencyMHz: 14, bandwidthKHz: 3, modulation: "USB", waveform: "ALE", duplex: "half-duplex", channelSpacingKHz: 3 },
+        tx: { powerW: 20, dutyCycle: 0.5, papr: 0, spectralEfficiency: 0.4 },
+        rx: { sensitivityDbm: -110, noiseFigDb: 10, requiredSnrDb: 6, acrDb: 60, bdrDb: 90 },
+        antenna: { type: "dipole", gainDbi: 2, pattern: "directional", polarization: "horizontal", heightM: 8, cableLossDb: 1, systemLossDb: 3 },
+        prop: { model: "hf-skywave", clutter: "open", terrainEnabled: false, diffractionEnabled: false, nvisEnabled: false, ionoModel: "itu-r", timeDayEffects: true, solarIndex: 80 },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 800, adaptiveDataRate: false },
+      },
+      "vhf-fallback": {
+        label: "VHF Fallback — Analog",
+        rf: { frequencyMHz: 50, bandwidthKHz: 25, modulation: "FM", waveform: "analog", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 2.4 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 6, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 200, adaptiveDataRate: false },
+      },
+    },
+  },
+  "prc-77": {
+    label: "AN/PRC-77",
+    programs: {
+      "vhf-analog": {
+        label: "VHF Analog — Legacy",
+        rf: { frequencyMHz: 60, bandwidthKHz: 50, modulation: "FM", waveform: "analog", duplex: "simplex", channelSpacingKHz: 50 },
+        tx: { powerW: 4, dutyCycle: 0.5, papr: 0, spectralEfficiency: 1 },
+        rx: { sensitivityDbm: -105, noiseFigDb: 8, requiredSnrDb: 15, acrDb: 55, bdrDb: 75 },
+        antenna: { type: "whip", gainDbi: 2, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 0, adaptiveDataRate: false },
+      },
+    },
+  },
+  "vrc-90": {
+    label: "AN/VRC-90 SINCGARS",
+    programs: {
+      "sincgars-fh": {
+        label: "SINCGARS Frequency Hop",
+        rf: { frequencyMHz: 50, bandwidthKHz: 25, modulation: "FHSS", waveform: "SINCGARS", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 50, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 3, cableLossDb: 1, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: true, maxHops: 1, latencyMs: 200, adaptiveDataRate: false },
+      },
+    },
+  },
+  "prc-119": {
+    label: "AN/PRC-119 SINCGARS",
+    programs: {
+      "sincgars-fh": {
+        label: "SINCGARS Frequency Hop",
+        rf: { frequencyMHz: 50, bandwidthKHz: 25, modulation: "FHSS", waveform: "SINCGARS", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 6, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 200, adaptiveDataRate: false },
+      },
+    },
+  },
+  "mbitr": {
+    label: "AN/PRC-148 MBITR",
+    programs: {
+      "vhf-los": {
+        label: "VHF LOS",
+        rf: { frequencyMHz: 150, bandwidthKHz: 25, modulation: "FM", waveform: "analog", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 2.4 },
+        rx: { sensitivityDbm: -107, noiseFigDb: 7, requiredSnrDb: 12, acrDb: 65, bdrDb: 85 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 2, cableLossDb: 0.5, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 200, adaptiveDataRate: false },
+      },
+    },
+  },
+  "prc-154": {
+    label: "AN/PRC-154 Rifleman Radio",
+    programs: {
+      "srw": {
+        label: "Soldier Radio Waveform",
+        rf: { frequencyMHz: 2400, bandwidthKHz: 5000, modulation: "OFDM", waveform: "SRW", duplex: "full-duplex", channelSpacingKHz: 5000 },
+        tx: { powerW: 0.4, dutyCycle: 1, papr: 8, spectralEfficiency: 1.5 },
+        rx: { sensitivityDbm: -95, noiseFigDb: 8, requiredSnrDb: 10, acrDb: 30, bdrDb: 60 },
+        antenna: { type: "blade", gainDbi: 0, pattern: "omnidirectional", polarization: "vertical", heightM: 1.5, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: true, relayCapable: true, maxHops: 8, latencyMs: 50, adaptiveDataRate: true },
+      },
+    },
+  },
+  // ── Commercial P25 ───────────────────────────────────────────────────────────
+  "p25-portable": {
+    label: "P25 Portable (generic)",
+    programs: {
+      "p25-ph1-vhf": {
+        label: "P25 Phase 1 VHF",
+        rf: { frequencyMHz: 155, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-C4FM", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 100, adaptiveDataRate: false },
+      },
+      "p25-ph1-uhf": {
+        label: "P25 Phase 1 UHF",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-CQPSK", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 4, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 100, adaptiveDataRate: false },
+      },
+      "p25-ph2-tdma": {
+        label: "P25 Phase 2 TDMA",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "QPSK", waveform: "P25-TDMA", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 4, dutyCycle: 0.5, papr: 3, spectralEfficiency: 9.6 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 80, adaptiveDataRate: false },
+      },
+    },
+  },
+  "p25-mobile": {
+    label: "P25 Mobile (generic)",
+    programs: {
+      "p25-vhf-mobile": {
+        label: "P25 VHF Mobile",
+        rf: { frequencyMHz: 155, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-C4FM", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 50, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 4, requiredSnrDb: 12, acrDb: 75, bdrDb: 95 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.5, cableLossDb: 1, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "suburban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 100, adaptiveDataRate: false },
+      },
+    },
+  },
+  "p25-repeater": {
+    label: "P25 Repeater",
+    programs: {
+      "vhf-repeat": {
+        label: "VHF Repeater",
+        rf: { frequencyMHz: 155, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-C4FM", duplex: "full-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 100, dutyCycle: 1, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -120, noiseFigDb: 3, requiredSnrDb: 12, acrDb: 80, bdrDb: 100 },
+        antenna: { type: "dipole", gainDbi: 6, pattern: "omnidirectional", polarization: "vertical", heightM: 30, cableLossDb: 2, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: true, maxHops: 1, latencyMs: 50, adaptiveDataRate: false },
+      },
+    },
+  },
+  // ── Commercial DMR ───────────────────────────────────────────────────────────
+  "dmr-portable": {
+    label: "DMR Portable (Tier II)",
+    programs: {
+      "dmr-uhf": {
+        label: "DMR UHF Direct",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "QPSK", waveform: "DMR", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 4, dutyCycle: 0.5, papr: 3, spectralEfficiency: 9.6 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 80, adaptiveDataRate: false },
+      },
+    },
+  },
+  "dmr-mobile": {
+    label: "DMR Mobile (Tier II)",
+    programs: {
+      "dmr-uhf-mobile": {
+        label: "DMR UHF Mobile",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "QPSK", waveform: "DMR", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 25, dutyCycle: 0.5, papr: 3, spectralEfficiency: 9.6 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 4, requiredSnrDb: 12, acrDb: 75, bdrDb: 95 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.5, cableLossDb: 1, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "suburban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 80, adaptiveDataRate: false },
+      },
+    },
+  },
+  "dmr-repeater": {
+    label: "DMR Repeater (Tier III)",
+    programs: {
+      "dmr-tier3": {
+        label: "DMR Trunked Repeater",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "QPSK", waveform: "DMR", duplex: "full-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 100, dutyCycle: 1, papr: 3, spectralEfficiency: 9.6 },
+        rx: { sensitivityDbm: -120, noiseFigDb: 3, requiredSnrDb: 12, acrDb: 80, bdrDb: 100 },
+        antenna: { type: "dipole", gainDbi: 6, pattern: "omnidirectional", polarization: "vertical", heightM: 30, cableLossDb: 2, systemLossDb: 3 },
+        prop: { model: "itu-p526", clutter: "open", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: true, maxHops: 1, latencyMs: 50, adaptiveDataRate: true },
+      },
+    },
+  },
+  "mototrbo-r7": {
+    label: "Motorola MOTOTRBO R7",
+    programs: {
+      "dmr-vhf": {
+        label: "DMR VHF",
+        rf: { frequencyMHz: 155, bandwidthKHz: 12.5, modulation: "QPSK", waveform: "DMR", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 3, spectralEfficiency: 9.6 },
+        rx: { sensitivityDbm: -118, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 80, adaptiveDataRate: false },
+      },
+      "p25-analog": {
+        label: "P25 / Analog Fallback",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-C4FM", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 4, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -118, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 100, adaptiveDataRate: false },
+      },
+    },
+  },
+  "harris-xg100p": {
+    label: "Harris XG-100P (P25/LTE)",
+    programs: {
+      "p25-uhf": {
+        label: "P25 UHF",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-CQPSK", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 100, adaptiveDataRate: false },
+      },
+    },
+  },
+  "broadband-lte": {
+    label: "Broadband LTE (FirstNet)",
+    programs: {
+      "firstnet-700": {
+        label: "FirstNet Band 14 (700 MHz)",
+        rf: { frequencyMHz: 758, bandwidthKHz: 10000, modulation: "OFDM", waveform: "LTE", duplex: "full-duplex", channelSpacingKHz: 10000 },
+        tx: { powerW: 0.2, dutyCycle: 1, papr: 10, spectralEfficiency: 6 },
+        rx: { sensitivityDbm: -97, noiseFigDb: 7, requiredSnrDb: 8, acrDb: 45, bdrDb: 70 },
+        antenna: { type: "panel", gainDbi: 0, pattern: "omnidirectional", polarization: "vertical", heightM: 1.5, cableLossDb: 0.2, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "suburban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 20, adaptiveDataRate: true },
+      },
+    },
+  },
+};
+
+// ─── Link budget helpers ──────────────────────────────────────────────────────
+function wattsToDbm(w) { return 10 * Math.log10(w * 1000); }
+function dbmToWatts(dbm) { return Math.pow(10, dbm / 10) / 1000; }
+function fsplDb(freqMHz, distM) {
+  return 20 * Math.log10(distM) + 20 * Math.log10(freqMHz * 1e6) - 147.55;
+}
+function computeLinkBudget(profile) {
+  const txDbm = wattsToDbm(profile.tx.powerW);
+  const gainDbi = profile.antenna.gainDbi;
+  const cableLossDb = profile.antenna.cableLossDb;
+  const systemLossDb = profile.antenna.systemLossDb;
+  const eirpDbm = txDbm + gainDbi - cableLossDb - (systemLossDb - cableLossDb);
+  const rxSensDbm = profile.rx.sensitivityDbm;
+  const freqMHz = profile.rf.frequencyMHz;
+  const fspl10km = fsplDb(freqMHz, 10000);
+  const rxPower10km = eirpDbm - fspl10km + gainDbi;
+  const margin10km = rxPower10km - rxSensDbm;
+  // Max range where margin = 0: solve eirp - fspl + gain = rxSens
+  // fspl = 20log(d) + 20log(f) - 147.55 → d = 10^((eirp+gain-rxSens+147.55 - 20log(f))/20)
+  const maxRangeM = Math.pow(10, (eirpDbm + gainDbi - rxSensDbm + 147.55 - 20 * Math.log10(freqMHz * 1e6)) / 20);
+  return { txDbm, eirpDbm, fspl10km, rxPower10km, margin10km, maxRangeM };
+}
+
 const PROFILE_STORAGE_KEY = "ew-sim-emitter-profiles";
 const SETTINGS_STORAGE_KEY = "ew-sim-map-settings";
 const CESIUM_ION_TOKEN_STORAGE_KEY = "ew-sim-cesium-ion-token";
+const AI_PROVIDER_STORAGE_KEY = "ew-sim-ai-provider";
+const MAP_STATE_STORAGE_KEY = "ew-sim-map-state";
+const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
+const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
+const GENAI_MIL_MODEL = "gemini-2.5-flash";
 
 const dom = {
   collapsePanelBtn: document.querySelector("#collapsePanelBtn"),
   collapsePanelIcon: document.querySelector("#collapsePanelIcon"),
   controlPanel: document.querySelector("#controlPanel"),
   panelDivider: document.querySelector("#panelDivider"),
+  controlPanelSectionDivider: document.querySelector("#controlPanelSectionDivider"),
+  aiPanelDivider: document.querySelector("#aiPanelDivider"),
   imageryMenuBtn: document.querySelector("#imageryMenuBtn"),
   imageryMenu: document.querySelector("#imageryMenu"),
   imageryMenuValue: document.querySelector("#imageryMenuValue"),
@@ -51,11 +442,26 @@ const dom = {
   weatherMenuBtn: document.querySelector("#weatherMenuBtn"),
   weatherMenu: document.querySelector("#weatherMenu"),
   weatherMenuValue: document.querySelector("#weatherMenuValue"),
+  topBarDropdownLayer: document.querySelector("#topBarDropdownLayer"),
+  aiMenuBtn: null,
+  aiMenu: null,
+  aiMenuValue: null,
+  aiProviderSelect: document.querySelector("#aiProviderSelect"),
+  aiApiKeyInput: document.querySelector("#aiApiKeyInput"),
+  aiApiKeyLabelText: document.querySelector("#aiApiKeyLabelText"),
+  aiProviderSummary: document.querySelector("#aiProviderSummary"),
+  testAiConnectionBtn: document.querySelector("#testAiConnectionBtn"),
+  clearAiProviderBtn: document.querySelector("#clearAiProviderBtn"),
+  openAiPanelBtn: null, // removed from topbar — kept as null so refs don't throw
+  aiChatToggleBtn: document.querySelector("#aiChatToggleBtn"),
+  aiChatToggleValue: document.querySelector("#aiChatToggleValue"),
+  aiChatToggleChevron: document.querySelector("#aiChatToggleChevron"),
   gpsMenuBtn: document.querySelector("#gpsMenuBtn"),
   gpsMenu: document.querySelector("#gpsMenu"),
   settingsMenuBtn: document.querySelector("#settingsMenuBtn"),
   settingsMenu: document.querySelector("#settingsMenu"),
   measurementUnitsSelect: document.querySelector("#measurementUnitsSelect"),
+  themeSelect: document.querySelector("#themeSelect"),
   coordinateSystemSelect: document.querySelector("#coordinateSystemSelect"),
   gridlinesToggle: document.querySelector("#gridlinesToggle"),
   gridlinesColor: document.querySelector("#gridlinesColor"),
@@ -80,6 +486,20 @@ const dom = {
   mapContentsCard: document.querySelector("#mapContentsCard"),
   mapContentsList: document.querySelector("#mapContentsList"),
   addMapFolderBtn: document.querySelector("#addMapFolderBtn"),
+  drawShapeBtn: document.querySelector("#drawShapeBtn"),
+  drawDropdown: document.querySelector("#drawDropdown"),
+  drawCircleBtn: document.querySelector("#drawCircleBtn"),
+  drawRectangleBtn: document.querySelector("#drawRectangleBtn"),
+  drawPolylineBtn: document.querySelector("#drawPolylineBtn"),
+  shapeStylePanel: document.querySelector("#shapeStylePanel"),
+  shapeColorInput: document.querySelector("#shapeColorInput"),
+  shapeLineStyleSelect: document.querySelector("#shapeLineStyleSelect"),
+  shapeOpacityInput: document.querySelector("#shapeOpacityInput"),
+  shapeWeightInput: document.querySelector("#shapeWeightInput"),
+  shapeOpacityValue: document.querySelector("#shapeOpacityValue"),
+  shapeWeightValue: document.querySelector("#shapeWeightValue"),
+  shapeStyleEditVerticesBtn: document.querySelector("#shapeStyleEditVerticesBtn"),
+  shapeStyleDoneBtn: document.querySelector("#shapeStyleDoneBtn"),
   mapContentsMenu: document.querySelector("#mapContentsMenu"),
   mapContentsRename: document.querySelector("#mapContentsRename"),
   mapContentsRenameInput: document.querySelector("#mapContentsRenameInput"),
@@ -115,10 +535,12 @@ const dom = {
   assetNotes: document.querySelector("#assetNotes"),
   emittersSection: document.querySelector("#emittersSection"),
   assetList: document.querySelector("#assetList"),
+  exportMenuBtn: document.querySelector("#exportMenuBtn"),
+  exportDropdown: document.querySelector("#exportDropdown"),
   exportGeoJsonBtn: document.querySelector("#exportGeoJsonBtn"),
   exportKmlBtn: document.querySelector("#exportKmlBtn"),
   exportKmzBtn: document.querySelector("#exportKmzBtn"),
-  clearAssetsBtn: document.querySelector("#clearAssetsBtn"),
+  exportZipBtn: document.querySelector("#exportZipBtn"),
   assetSelect: document.querySelector("#assetSelect"),
   propagationModel: document.querySelector("#propagationModel"),
   viewshedOpacity: document.querySelector("#viewshedOpacity"),
@@ -152,6 +574,24 @@ const dom = {
   centerElevationValue: document.querySelector("#centerElevationValue"),
   cesiumCompassBtn: document.querySelector("#cesiumCompassBtn"),
   cesiumCompassRose: document.querySelector("#cesiumCompassRose"),
+  aiPanel: document.querySelector("#aiPanel"),
+  collapseAiPanelBtn: document.querySelector("#collapseAiPanelBtn"),
+  collapseAiPanelIcon: document.querySelector("#collapseAiPanelIcon"),
+  aiPanelStatus: document.querySelector("#aiPanelStatus"),
+  aiChatMessages: document.querySelector("#aiChatMessages"),
+  aiChatForm: document.querySelector("#aiChatForm"),
+  aiChatInput: document.querySelector("#aiChatInput"),
+  aiSendBtn: document.querySelector("#aiSendBtn"),
+  aiClearChatBtn: document.querySelector("#aiClearChatBtn"),
+  aiAttachmentBar: document.querySelector("#aiAttachmentBar"),
+  aiImagePreviews: document.querySelector("#aiImagePreviews"),
+  aiContextChips: document.querySelector("#aiContextChips"),
+  aiAttachImageBtn: document.querySelector("#aiAttachImageBtn"),
+  aiImageFileInput: document.querySelector("#aiImageFileInput"),
+  aiAddContextBtn: document.querySelector("#aiAddContextBtn"),
+  aiContextPicker: document.querySelector("#aiContextPicker"),
+  aiVoiceBtn: document.querySelector("#aiVoiceBtn"),
+  aiMentionDropdown: document.querySelector("#aiMentionDropdown"),
   map: document.querySelector("#map"),
   cesiumContainer: document.querySelector("#cesiumContainer"),
 };
@@ -160,6 +600,12 @@ const state = {
   map: null,
   baseLayer: null,
   placingAsset: false,
+  draw: {
+    mode: null,        // "circle" | "rectangle" | "polyline" | null
+    points: [],        // accumulated latlngs for polyline/rectangle
+    previewLayer: null,
+    editingItemId: null,
+  },
   assetMarkers: new Map(),
   assets: [],
   importedItems: [],
@@ -176,7 +622,10 @@ const state = {
   terrainReadyIds: new Set(),
   terrainCacheResolvers: new Map(),
   ionTerrainCache: new Map(),
-  worker: new Worker("./simulation-worker.js", { type: "module" }),
+  cesiumPointElevationCache: new Map(),
+  centerElevationRequestId: null,
+  cesiumTerrainProviderKey: null,
+  worker: new Worker("./simulation-worker.js?v=20260424-2", { type: "module" }),
   pendingInspection: null,
   pendingPlanningRequestId: null,
   editingAssetId: null,
@@ -184,15 +633,18 @@ const state = {
   mapContentOrder: [],
   mapContentFolders: [],
   mapContentAssignments: new Map(),
+  hiddenContentIds: new Set(),
   activeMapContentMenuId: null,
   renamingMapContentId: null,
   imageryMenuOpen: false,
   terrainMenuOpen: false,
   weatherMenuOpen: false,
+  aiMenuOpen: false,
   gpsMenuOpen: false,
   settingsMenuOpen: false,
   settings: {
-    measurementUnits: "metric",
+    measurementUnits: "standard",
+    theme: "dark",
     coordinateSystem: "mgrs",
     gridLinesEnabled: false,
     gridColor: "#8fb7ff",
@@ -225,17 +677,415 @@ const state = {
   },
   ui: {
     resizeActive: false,
+    sectionResizeActive: false,
+    aiResizeActive: false,
+    aiPanelWidth: 400,
+  },
+  ai: {
+    provider: "",
+    apiKey: "",
+    status: "offline",
+    statusMessage: "Add a provider and API key to enable the AI planning assistant.",
+    pendingImages: [],    // [{dataUrl, mediaType}]
+    contextItemIds: [],  // content IDs to include as extra context
+    activeContextId: null,
+    voiceRecording: false,
+    panelOpen: false,
+    messages: [],
+    requestInFlight: false,
   },
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMITTER MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const emitterModal = {
+  // Cached DOM refs set once on first open
+  backdrop: null,
+  radioTypeSelect: null,
+  programSelect: null,
+  libSummary: null,
+  tabs: null,
+  panels: null,
+  fields: {},
+  linkBudgetEls: {},
+
+  init() {
+    this.backdrop      = document.querySelector("#emitterModal");
+    this.radioTypeSelect = document.querySelector("#emitterRadioType");
+    this.programSelect   = document.querySelector("#emitterProgramSelect");
+    this.libSummary      = document.querySelector("#emitterLibSummary");
+    this.tabs    = [...document.querySelectorAll(".emitter-tab")];
+    this.panels  = [...document.querySelectorAll(".emitter-tab-panel")];
+
+    // Map all input/select field IDs
+    const ids = [
+      "emName","emUnit","emForce","emIcon","emColor","emNotes",
+      "emFreqMHz","emBandwidthKHz","emModulation","emWaveform","emDuplex","emChannelSpacingKHz",
+      "emPowerW","emPowerDbm","emDutyCycle","emPapr","emSpectralEff","emEirpDbm",
+      "emRxSensDbm","emNoiseFigDb","emReqSnrDb","emAcrDb","emBdrDb",
+      "emAntennaType","emAntennaGainDbi","emRadPattern","emPolarization","emAntennaHeightM","emCableLossDb","emSystemLossDb",
+      "emPropModel","emClutterType","emTerrainEnabled","emDiffractionEnabled",
+      "emNvisEnabled","emIonoModel","emTimeDayEffects","emSolarIndex",
+      "emIsManet","emRelayCapable","emMaxHops","emLatencyMs","emAdaptiveDataRate",
+      "emSatcomEnabled","emSatType","emSatUplinkMHz","emSatDownlinkMHz","emSatGainDbi",
+    ];
+    ids.forEach((id) => { this.fields[id] = document.querySelector(`#${id}`); });
+
+    const lbIds = ["lb_txPower","lb_antennaGain","lb_cableLoss","lb_eirp","lb_fspl10","lb_rxPower10","lb_rxSens","lb_margin10","lb_maxRange"];
+    lbIds.forEach((id) => { this.linkBudgetEls[id] = document.querySelector(`#${id}`); });
+
+    // Tab switching
+    this.tabs.forEach((tab) => {
+      tab.addEventListener("click", () => this.switchTab(tab.dataset.tab));
+    });
+
+    // Radio type → populate programs
+    this.radioTypeSelect.addEventListener("change", () => this.onRadioTypeChange());
+
+    // Program → load profile
+    this.programSelect.addEventListener("change", () => this.onProgramChange());
+
+    // Live link budget update on any param change
+    ["emFreqMHz","emPowerW","emAntennaGainDbi","emCableLossDb","emSystemLossDb","emRxSensDbm"].forEach((id) => {
+      this.fields[id]?.addEventListener("input", () => this.updateLinkBudget());
+    });
+
+    // Derived dBm display
+    this.fields.emPowerW?.addEventListener("input", () => this.updateDerivedFields());
+
+    // Close buttons
+    document.querySelector("#emitterModalCloseBtn")?.addEventListener("click", () => this.close());
+    document.querySelector("#emitterCancelBtn")?.addEventListener("click", () => this.close());
+    this.backdrop.addEventListener("click", (e) => { if (e.target === this.backdrop) this.close(); });
+
+    // Place on map
+    document.querySelector("#emitterPlaceBtn")?.addEventListener("click", () => this.placeOnMap());
+
+    // Save custom profile
+    document.querySelector("#emitterSaveCustomBtn")?.addEventListener("click", () => this.saveCustomProfile());
+
+    // Open via add-emitter button in map contents header
+    document.querySelector("#addEmitterBtn")?.addEventListener("click", () => this.open());
+  },
+
+  open(prefill = null) {
+    this.backdrop.classList.remove("hidden");
+    document.body.classList.add("emitter-modal-open");
+    this.switchTab("rf");
+    if (prefill) {
+      this.applyProfile(prefill);
+    } else {
+      this.resetToDefaults();
+    }
+    this.updateDerivedFields();
+    this.updateLinkBudget();
+    this.fields.emName?.focus();
+  },
+
+  close() {
+    this.backdrop.classList.add("hidden");
+    document.body.classList.remove("emitter-modal-open");
+    document.querySelector("#emitterValidation").textContent = "";
+  },
+
+  switchTab(name) {
+    this.tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+    this.panels.forEach((p) => p.classList.toggle("active", p.dataset.panel === name));
+    if (name === "link") this.updateLinkBudget();
+  },
+
+  onRadioTypeChange() {
+    const key = this.radioTypeSelect.value;
+    const radio = RADIO_LIBRARY[key];
+    const sel = this.programSelect;
+    sel.innerHTML = "";
+    if (!radio) {
+      sel.disabled = true;
+      sel.innerHTML = '<option value="">— Manual —</option>';
+      this.libSummary.innerHTML = "<p>Configure all parameters manually.</p>";
+      return;
+    }
+    sel.disabled = false;
+    Object.entries(radio.programs).forEach(([pKey, prog]) => {
+      const opt = document.createElement("option");
+      opt.value = pKey;
+      opt.textContent = prog.label;
+      sel.appendChild(opt);
+    });
+    this.onProgramChange();
+  },
+
+  onProgramChange() {
+    const radioKey = this.radioTypeSelect.value;
+    const progKey  = this.programSelect.value;
+    const radio    = RADIO_LIBRARY[radioKey];
+    const prog     = radio?.programs[progKey];
+    if (!prog) return;
+    this.applyProfile(prog);
+    this.libSummary.innerHTML = `
+      <strong>${radio.label}</strong><br>
+      <em>${prog.label}</em><br>
+      <span>${prog.rf.frequencyMHz} MHz · ${prog.tx.powerW} W · ${prog.antenna.gainDbi} dBi · ${prog.rf.waveform}</span>
+    `;
+  },
+
+  applyProfile(prog) {
+    const f = this.fields;
+    const set = (id, val) => { if (f[id] && val !== undefined && val !== null) f[id].value = val; };
+    const setCheck = (id, val) => { if (f[id]) f[id].checked = Boolean(val); };
+
+    // RF
+    set("emFreqMHz",          prog.rf?.frequencyMHz);
+    set("emBandwidthKHz",     prog.rf?.bandwidthKHz);
+    set("emModulation",       prog.rf?.modulation);
+    set("emWaveform",         prog.rf?.waveform);
+    set("emDuplex",           prog.rf?.duplex);
+    set("emChannelSpacingKHz",prog.rf?.channelSpacingKHz);
+    // TX
+    set("emPowerW",           prog.tx?.powerW);
+    set("emDutyCycle",        prog.tx?.dutyCycle);
+    set("emPapr",             prog.tx?.papr);
+    set("emSpectralEff",      prog.tx?.spectralEfficiency);
+    // RX
+    set("emRxSensDbm",        prog.rx?.sensitivityDbm);
+    set("emNoiseFigDb",       prog.rx?.noiseFigDb);
+    set("emReqSnrDb",         prog.rx?.requiredSnrDb);
+    set("emAcrDb",            prog.rx?.acrDb);
+    set("emBdrDb",            prog.rx?.bdrDb);
+    // Antenna
+    set("emAntennaType",      prog.antenna?.type);
+    set("emAntennaGainDbi",   prog.antenna?.gainDbi);
+    set("emRadPattern",       prog.antenna?.pattern);
+    set("emPolarization",     prog.antenna?.polarization);
+    set("emAntennaHeightM",   prog.antenna?.heightM);
+    set("emCableLossDb",      prog.antenna?.cableLossDb);
+    set("emSystemLossDb",     prog.antenna?.systemLossDb);
+    // Propagation
+    set("emPropModel",        prog.prop?.model);
+    set("emClutterType",      prog.prop?.clutter);
+    setCheck("emTerrainEnabled",    prog.prop?.terrainEnabled);
+    setCheck("emDiffractionEnabled",prog.prop?.diffractionEnabled);
+    setCheck("emNvisEnabled",       prog.prop?.nvisEnabled);
+    set("emIonoModel",        prog.prop?.ionoModel);
+    setCheck("emTimeDayEffects",    prog.prop?.timeDayEffects);
+    set("emSolarIndex",       prog.prop?.solarIndex);
+    // Network
+    setCheck("emIsManet",           prog.net?.isManet);
+    setCheck("emRelayCapable",      prog.net?.relayCapable);
+    set("emMaxHops",          prog.net?.maxHops);
+    set("emLatencyMs",        prog.net?.latencyMs);
+    setCheck("emAdaptiveDataRate",  prog.net?.adaptiveDataRate);
+    setCheck("emSatcomEnabled",     prog.net?.satcomEnabled);
+    set("emSatType",          prog.net?.satType);
+    set("emSatUplinkMHz",     prog.net?.satUplinkMHz);
+    set("emSatDownlinkMHz",   prog.net?.satDownlinkMHz);
+    set("emSatGainDbi",       prog.net?.satGainDbi);
+
+    this.updateDerivedFields();
+    this.updateLinkBudget();
+    this.validateInputs();
+  },
+
+  resetToDefaults() {
+    this.radioTypeSelect.value = "";
+    this.programSelect.disabled = true;
+    this.programSelect.innerHTML = '<option value="">Select a radio type first</option>';
+    this.libSummary.innerHTML = "<p>Select a radio type and program to auto-fill parameters, or configure manually below.</p>";
+    // Sensible manual defaults
+    this.fields.emFreqMHz && (this.fields.emFreqMHz.value = "150");
+    this.fields.emPowerW && (this.fields.emPowerW.value = "5");
+    this.fields.emAntennaGainDbi && (this.fields.emAntennaGainDbi.value = "2.15");
+    this.fields.emAntennaHeightM && (this.fields.emAntennaHeightM.value = "2");
+    this.fields.emRxSensDbm && (this.fields.emRxSensDbm.value = "-107");
+    this.fields.emCableLossDb && (this.fields.emCableLossDb.value = "0.5");
+    this.fields.emSystemLossDb && (this.fields.emSystemLossDb.value = "3");
+    this.fields.emName && (this.fields.emName.value = "");
+    this.fields.emForce && (this.fields.emForce.value = "friendly");
+  },
+
+  updateDerivedFields() {
+    const pw = parseFloat(this.fields.emPowerW?.value);
+    if (Number.isFinite(pw) && pw > 0) {
+      const dbm = (10 * Math.log10(pw * 1000)).toFixed(1);
+      if (this.fields.emPowerDbm) this.fields.emPowerDbm.value = `${dbm} dBm`;
+    }
+    this.updateLinkBudget();
+  },
+
+  updateLinkBudget() {
+    const el = this.linkBudgetEls;
+    const freqMHz  = parseFloat(this.fields.emFreqMHz?.value);
+    const powerW   = parseFloat(this.fields.emPowerW?.value);
+    const gainDbi  = parseFloat(this.fields.emAntennaGainDbi?.value);
+    const cableLoss= parseFloat(this.fields.emCableLossDb?.value) || 0;
+    const sysLoss  = parseFloat(this.fields.emSystemLossDb?.value) || 0;
+    const rxSens   = parseFloat(this.fields.emRxSensDbm?.value);
+    if (!Number.isFinite(freqMHz) || !Number.isFinite(powerW) || !Number.isFinite(gainDbi) || !Number.isFinite(rxSens)) return;
+    const txDbm = 10 * Math.log10(powerW * 1000);
+    const totalLoss = cableLoss + (sysLoss - cableLoss);
+    const eirp = txDbm + gainDbi - totalLoss;
+    const fspl = 20 * Math.log10(10000) + 20 * Math.log10(freqMHz * 1e6) - 147.55;
+    const rxPwr = eirp - fspl + gainDbi;
+    const margin = rxPwr - rxSens;
+    const maxRangeM = Math.pow(10, (eirp + gainDbi - rxSens + 147.55 - 20 * Math.log10(freqMHz * 1e6)) / 20);
+    const fmt = (v, unit) => `${v.toFixed(1)} ${unit}`;
+    const fmtRange = (m) => m > 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+    if (el.lb_txPower)   el.lb_txPower.textContent   = fmt(txDbm, "dBm");
+    if (el.lb_antennaGain) el.lb_antennaGain.textContent = fmt(gainDbi, "dBi");
+    if (el.lb_cableLoss) el.lb_cableLoss.textContent = fmt(totalLoss, "dB");
+    if (el.lb_eirp)      el.lb_eirp.textContent      = fmt(eirp, "dBm");
+    if (el.lb_fspl10)    el.lb_fspl10.textContent     = fmt(fspl, "dB");
+    if (el.lb_rxPower10) el.lb_rxPower10.textContent  = fmt(rxPwr, "dBm");
+    if (el.lb_rxSens)    el.lb_rxSens.textContent     = fmt(rxSens, "dBm");
+    if (el.lb_margin10) {
+      el.lb_margin10.textContent = fmt(margin, "dB");
+      el.lb_margin10.style.color = margin >= 0 ? "var(--accent)" : "var(--enemy)";
+    }
+    if (el.lb_maxRange)  el.lb_maxRange.textContent   = fmtRange(maxRangeM);
+    if (this.fields.emEirpDbm) this.fields.emEirpDbm.value = fmt(eirp, "dBm");
+  },
+
+  validateInputs() {
+    const warnings = [];
+    const f = this.fields;
+    const freq  = parseFloat(f.emFreqMHz?.value);
+    const power = parseFloat(f.emPowerW?.value);
+    const gain  = parseFloat(f.emAntennaGainDbi?.value);
+    const height= parseFloat(f.emAntennaHeightM?.value);
+    const sens  = parseFloat(f.emRxSensDbm?.value);
+    if (Number.isFinite(power)) {
+      if (power > 100) warnings.push("Power >100 W is unusual for man-portable systems.");
+      if (power < 0.01) warnings.push("Power <10 mW — signal will be extremely weak.");
+    }
+    if (Number.isFinite(gain) && gain > 15) warnings.push("Antenna gain >15 dBi is physically implausible for a portable whip/blade.");
+    if (Number.isFinite(height)) {
+      if (height < 0.5) warnings.push("Antenna height <0.5 m — may be body-shadowed.");
+      if (height > 30 && f.emAntennaType?.value !== "tower") warnings.push("Antenna height >30 m — requires a tower or mast.");
+    }
+    if (Number.isFinite(sens) && sens > -80) warnings.push("Receiver sensitivity >−80 dBm is poor — check your value.");
+    const el = document.querySelector("#emitterValidation");
+    if (el) el.textContent = warnings.join(" · ");
+  },
+
+  readFields() {
+    const f = this.fields;
+    const v = (id) => f[id]?.value;
+    const n = (id) => parseFloat(f[id]?.value);
+    const b = (id) => f[id]?.checked ?? false;
+    const emitterType = this.radioTypeSelect.value
+      ? (RADIO_LIBRARY[this.radioTypeSelect.value]?.label ?? v("emName") ?? "radio")
+      : "radio";
+    return {
+      type: emitterType,
+      force: v("emForce") || "friendly",
+      name: v("emName") || "Emitter",
+      unit: v("emUnit") || "",
+      icon: v("emIcon") || "radio",
+      color: v("emColor") || FORCE_COLORS["friendly"],
+      notes: v("emNotes") || "",
+      frequencyMHz: n("emFreqMHz") || 150,
+      powerW: n("emPowerW") || 5,
+      antennaHeightM: n("emAntennaHeightM") || 2,
+      antennaGainDbi: n("emAntennaGainDbi") || 2.15,
+      receiverSensitivityDbm: n("emRxSensDbm") || -107,
+      systemLossDb: n("emSystemLossDb") || 3,
+      // Extended fields stored on asset for future use
+      ext: {
+        bandwidthKHz: n("emBandwidthKHz"),
+        modulation: v("emModulation"),
+        waveform: v("emWaveform"),
+        duplex: v("emDuplex"),
+        dutyCycle: n("emDutyCycle"),
+        noiseFigDb: n("emNoiseFigDb"),
+        requiredSnrDb: n("emReqSnrDb"),
+        antennaType: v("emAntennaType"),
+        cableLossDb: n("emCableLossDb"),
+        propModel: v("emPropModel"),
+        clutterType: v("emClutterType"),
+        isManet: b("emIsManet"),
+        relayCapable: b("emRelayCapable"),
+        satcomEnabled: b("emSatcomEnabled"),
+      },
+    };
+  },
+
+  placeOnMap() {
+    this.validateInputs();
+    const data = this.readFields();
+    if (!data.name.trim()) {
+      document.querySelector("#emitterValidation").textContent = "Enter an emitter name before placing.";
+      this.fields.emName?.focus();
+      return;
+    }
+    // Write back into the legacy hidden form fields so addAsset() picks them up
+    applyEmitterFormData({
+      type: data.type,
+      force: data.force,
+      name: data.name,
+      unit: data.unit,
+      frequencyMHz: data.frequencyMHz,
+      powerW: data.powerW,
+      antennaHeightM: data.antennaHeightM,
+      antennaGainDbi: data.antennaGainDbi,
+      receiverSensitivityDbm: data.receiverSensitivityDbm,
+      systemLossDb: data.systemLossDb,
+      icon: data.icon,
+      color: data.color,
+      notes: data.notes,
+    });
+    this.close();
+    state.placingAsset = true;
+    setStatus("Click on the map to place the emitter.");
+  },
+
+  saveCustomProfile() {
+    const data = this.readFields();
+    const profileName = prompt("Save profile as:", data.name || "Custom Profile");
+    if (!profileName) return;
+    const profile = {
+      id: crypto.randomUUID(),
+      profileName,
+      type: data.type,
+      force: data.force,
+      name: data.name,
+      unit: data.unit,
+      frequencyMHz: data.frequencyMHz,
+      powerW: data.powerW,
+      antennaHeightM: data.antennaHeightM,
+      antennaGainDbi: data.antennaGainDbi,
+      receiverSensitivityDbm: data.receiverSensitivityDbm,
+      systemLossDb: data.systemLossDb,
+      icon: data.icon,
+      color: data.color,
+      notes: data.notes,
+    };
+    state.profiles.push(profile);
+    persistProfiles();
+    renderProfiles();
+    setStatus(`Saved profile "${profileName}".`);
+  },
+};
+
+function initEmitterModal() {
+  emitterModal.init();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+
 function init() {
   initMap();
+  initTopBarDropdowns();
+  initEmitterModal();
   loadCesiumIonToken();
+  loadAiProviderSettings();
   loadSettings();
   loadProfiles();
   applyBasemap(dom.basemapSelect.value);
   updateImageryMenuValue();
   wireEvents();
+  loadMapState();
   renderAssets();
   renderTerrains();
   renderViewsheds();
@@ -246,14 +1096,107 @@ function init() {
   applySettings();
   updateMapOverlayMetrics();
   updateClock();
+  syncAiUi();
+  if (state.ai.provider && state.ai.apiKey && state.ai.status === "pending") {
+    testAiProviderConnection({ openPanelOnSuccess: false });
+  }
   window.setInterval(updateClock, 1000);
   setStatus("Ready.");
 
   state.map.on("click", onMapClick);
+  state.map.on("dblclick", onMapDblClick);
+  state.map.on("mousemove", onMapMouseMove);
+  state.map.on("contextmenu", onMapContextMenu);
   state.map.on("moveend zoomend resize", updateMapOverlayMetrics);
+  state.map.on("moveend zoomend", saveMapState);
+
+  // Middle-mouse click on Leaflet map: switch to 3D with a tilted perspective
+  dom.map.addEventListener("mousedown", async (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    if (state.view3dEnabled) return;
+    state.view3dEnabled = true;
+    dom.view3dToggleBtn.textContent = "2D View";
+    dom.cesiumContainer.classList.remove("hidden");
+    dom.cesiumCompassBtn.classList.remove("hidden");
+    dom.map.style.visibility = "hidden";
+    await initCesiumIfNeeded();
+    const viewer = state.cesiumViewer;
+    viewer.imageryLayers.removeAll();
+    viewer.imageryLayers.addImageryProvider(buildImageryProvider());
+    try { viewer.terrainProvider = await buildTerrainProvider(); } catch (_) {}
+    const center = state.map.getCenter();
+    const alt = zoomToAltitude(state.map.getZoom());
+    viewer.camera.flyTo({
+      destination: window.Cesium.Cartesian3.fromDegrees(center.lng, center.lat, alt),
+      orientation: {
+        heading: 0,
+        pitch: window.Cesium.Math.toRadians(-45),
+        roll: 0,
+      },
+      duration: 0,
+    });
+    syncCesiumEntities();
+    updateCesiumCompass();
+  });
   state.map.on(L.Draw.Event.CREATED, onPlanningRegionCreated);
   state.worker.addEventListener("message", onWorkerMessage);
   state.planning.markersLayer.addTo(state.map);
+}
+
+function getTopBarDropdownConfigs() {
+  return [
+    { button: dom.imageryMenuBtn, menu: dom.imageryMenu },
+    { button: dom.terrainMenuBtn, menu: dom.terrainMenu },
+    { button: dom.weatherMenuBtn, menu: dom.weatherMenu },
+    { button: dom.gpsMenuBtn, menu: dom.gpsMenu },
+    { button: dom.settingsMenuBtn, menu: dom.settingsMenu },
+  ];
+}
+
+function initTopBarDropdowns() {
+  if (!dom.topBarDropdownLayer) {
+    return;
+  }
+
+  getTopBarDropdownConfigs().forEach(({ menu }) => {
+    if (!menu) {
+      return;
+    }
+    dom.topBarDropdownLayer.appendChild(menu);
+  });
+
+  window.addEventListener("resize", positionOpenTopBarDropdowns);
+}
+
+function positionTopBarDropdown(menu, button) {
+  if (!menu || !button) {
+    return;
+  }
+
+  const buttonRect = button.getBoundingClientRect();
+  const computedWidth = parseFloat(getComputedStyle(menu).width);
+  const menuWidth = Number.isFinite(computedWidth) ? computedWidth : menu.offsetWidth || buttonRect.width;
+  const viewportPadding = 12;
+  const left = Math.min(
+    Math.max(viewportPadding, buttonRect.right - menuWidth),
+    Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding),
+  );
+  const top = buttonRect.bottom + 8;
+  const maxHeight = Math.max(160, window.innerHeight - top - viewportPadding);
+
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.maxHeight = `${maxHeight}px`;
+}
+
+function positionOpenTopBarDropdowns() {
+  getTopBarDropdownConfigs().forEach(({ menu, button }) => {
+    if (!menu || menu.classList.contains("hidden")) {
+      return;
+    }
+    positionTopBarDropdown(menu, button);
+  });
 }
 
 function initMap() {
@@ -266,14 +1209,21 @@ function initMap() {
 function wireEvents() {
   dom.collapsePanelBtn.addEventListener("click", togglePanelCollapse);
   dom.panelDivider.addEventListener("mousedown", beginPanelResize);
+  dom.controlPanelSectionDivider.addEventListener("mousedown", beginControlPanelSectionResize);
+  dom.aiPanelDivider.addEventListener("mousedown", beginAiPanelResize);
   window.addEventListener("mousemove", onPanelResize);
+  window.addEventListener("mousemove", onControlPanelSectionResize);
+  window.addEventListener("mousemove", onAiPanelResize);
   window.addEventListener("mouseup", endPanelResize);
+  window.addEventListener("mouseup", endControlPanelSectionResize);
+  window.addEventListener("mouseup", endAiPanelResize);
   dom.imageryMenuBtn.addEventListener("click", toggleImageryMenu);
   dom.imageryMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.terrainMenuBtn.addEventListener("click", toggleTerrainMenu);
   dom.terrainMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.weatherMenuBtn.addEventListener("click", toggleWeatherMenu);
   dom.weatherMenu.addEventListener("click", (event) => event.stopPropagation());
+  dom.aiChatToggleBtn.addEventListener("click", toggleAiPanelCollapse);
   dom.gpsMenuBtn.addEventListener("click", toggleGpsMenu);
   dom.gpsMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.settingsMenuBtn.addEventListener("click", toggleSettingsMenu);
@@ -281,16 +1231,41 @@ function wireEvents() {
   document.addEventListener("click", closeTopBarMenus);
   document.addEventListener("click", closeMapContentsMenu);
   document.addEventListener("click", closeRenamePopover);
+  document.addEventListener("click", (e) => {
+    if (isShapeVertexEditingActive()) {
+      return;
+    }
+    if (!dom.shapeStylePanel.contains(e.target)) closeShapeStylePanel({ stopEditing: false });
+  });
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
+  dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
+  dom.drawCircleBtn.addEventListener("click", () => startDrawing("circle"));
+  dom.drawRectangleBtn.addEventListener("click", () => startDrawing("rectangle"));
+  dom.drawPolylineBtn.addEventListener("click", () => startDrawing("polyline"));
+  document.addEventListener("click", closeDrawDropdown);
+  dom.shapeStylePanel.addEventListener("click", (e) => e.stopPropagation());
+  dom.shapeColorInput.addEventListener("input", onShapeStyleChanged);
+  dom.shapeLineStyleSelect.addEventListener("input", onShapeStyleChanged);
+  dom.shapeOpacityInput.addEventListener("input", onShapeStyleChanged);
+  dom.shapeWeightInput.addEventListener("input", onShapeStyleChanged);
+  dom.shapeStyleEditVerticesBtn.addEventListener("click", onShapeStyleEditVertices);
+  dom.shapeStyleDoneBtn.addEventListener("click", () => closeShapeStylePanel());
   dom.mapContentsMenu.addEventListener("click", onMapContentsMenuAction);
   dom.mapContentsRename.addEventListener("click", (event) => event.stopPropagation());
   dom.mapContentsRenameSave.addEventListener("click", commitRenameMapContent);
   dom.mapContentsRenameCancel.addEventListener("click", closeRenamePopover);
   dom.mapContentsRenameInput.addEventListener("keydown", onRenamePopoverKeyDown);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (state.draw.mode) cancelDrawing();
+      else closeShapeStylePanel();
+    }
+  });
   dom.map.addEventListener("dragover", onMapFileDragOver);
   dom.map.addEventListener("dragleave", onMapFileDragLeave);
   dom.map.addEventListener("drop", onMapFileDrop);
   dom.measurementUnitsSelect.addEventListener("change", onSettingsChanged);
+  dom.themeSelect.addEventListener("change", onSettingsChanged);
   dom.coordinateSystemSelect.addEventListener("change", onSettingsChanged);
   dom.gridlinesToggle.addEventListener("change", onSettingsChanged);
   dom.gridlinesColor.addEventListener("input", onSettingsChanged);
@@ -302,6 +1277,26 @@ function wireEvents() {
   dom.imagerySourceSelect.addEventListener("change", syncCesiumScene);
   dom.customTerrainUrl.addEventListener("change", onTerrainSourceSettingsChanged);
   dom.cesiumIonToken.addEventListener("change", onCesiumIonTokenChanged);
+  dom.aiProviderSelect.addEventListener("change", onAiProviderChanged);
+  dom.aiApiKeyInput.addEventListener("change", onAiProviderChanged);
+  dom.testAiConnectionBtn.addEventListener("click", testAiProviderConnection);
+  dom.clearAiProviderBtn.addEventListener("click", clearAiProvider);
+  dom.collapseAiPanelBtn.addEventListener("click", toggleAiPanelCollapse);
+  dom.aiChatForm.addEventListener("submit", onAiChatSubmit);
+  dom.aiClearChatBtn.addEventListener("click", clearAiChat);
+  dom.aiChatInput.addEventListener("paste", onAiChatPaste);
+  dom.aiChatInput.addEventListener("keydown", onAiChatKeyDown);
+  dom.aiChatInput.addEventListener("input", onAiChatInput);
+  dom.aiAttachImageBtn.addEventListener("click", () => dom.aiImageFileInput.click());
+  dom.aiImageFileInput.addEventListener("change", onAiImageFileChange);
+  dom.aiAddContextBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleAiContextPicker(); });
+  dom.aiContextPicker.addEventListener("click", (e) => e.stopPropagation());
+  dom.aiVoiceBtn.addEventListener("click", toggleVoiceInput);
+  dom.aiMentionDropdown.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => {
+    dom.aiContextPicker.classList.add("hidden");
+    dom.aiMentionDropdown.classList.add("hidden");
+  });
   dom.dtedInput.addEventListener("change", onTerrainImport);
   dom.clearTerrainBtn.addEventListener("click", clearTerrain);
   dom.fetchWeatherBtn.addEventListener("click", fetchWeather);
@@ -309,6 +1304,9 @@ function wireEvents() {
   dom.deleteProfileBtn.addEventListener("click", deleteProfile);
   dom.applyProfileBtn.addEventListener("click", applySelectedProfile);
   dom.profileSelect.addEventListener("change", onProfileSelectionChange);
+  dom.assetForce.addEventListener("change", () => {
+    dom.assetColor.value = FORCE_COLORS[dom.assetForce.value];
+  });
   dom.placeAssetBtn.addEventListener("click", () => {
     if (state.editingAssetId) {
       saveAssetEdits();
@@ -317,10 +1315,15 @@ function wireEvents() {
     state.placingAsset = true;
     setStatus("Click on the map to place the emitter.");
   });
-  dom.clearAssetsBtn.addEventListener("click", clearAssets);
-  dom.exportGeoJsonBtn.addEventListener("click", exportAssetsGeoJson);
-  dom.exportKmlBtn.addEventListener("click", () => exportAssetsKml(false));
-  dom.exportKmzBtn.addEventListener("click", () => exportAssetsKml(true));
+  dom.exportMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dom.exportDropdown.classList.toggle("hidden");
+  });
+  document.addEventListener("click", () => dom.exportDropdown.classList.add("hidden"));
+  dom.exportGeoJsonBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsGeoJson(); });
+  dom.exportKmlBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsKml(false); });
+  dom.exportKmzBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsKml(true); });
+  dom.exportZipBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsZip(); });
   dom.clearViewshedsBtn.addEventListener("click", clearViewsheds);
   dom.runSimulationBtn.addEventListener("click", runSimulation);
   dom.connectGeolocationBtn.addEventListener("click", connectBrowserGeolocation);
@@ -343,6 +1346,9 @@ function loadSettings() {
     state.settings.measurementUnits = ["metric", "standard"].includes(parsed.measurementUnits)
       ? parsed.measurementUnits
       : state.settings.measurementUnits;
+    state.settings.theme = ["dark", "light"].includes(parsed.theme)
+      ? parsed.theme
+      : state.settings.theme;
     state.settings.coordinateSystem = ["mgrs", "latlon", "dms"].includes(parsed.coordinateSystem)
       ? parsed.coordinateSystem
       : state.settings.coordinateSystem;
@@ -357,15 +1363,170 @@ function persistSettings() {
   window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
 }
 
+function saveMapState() {
+  const center = state.map.getCenter();
+  const serializedImported = state.importedItems.map((item) => {
+    let coordinates;
+    if (item.geometryType === "Point") {
+      const ll = item.layer.getLatLng();
+      coordinates = [ll.lat, ll.lng];
+    } else if (item.geometryType === "LineString") {
+      coordinates = item.layer.getLatLngs().map((p) => [p.lat, p.lng]);
+    } else {
+      const rings = item.layer.getLatLngs();
+      const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+      coordinates = outer.map((p) => [p.lat, p.lng]);
+    }
+    return {
+      id: item.id,
+      name: item.name,
+      subtitle: item.subtitle,
+      kind: item.kind,
+      geometryType: item.geometryType,
+      properties: item.properties,
+      drawn: item.drawn ?? false,
+      shapeStyle: item.shapeStyle ?? null,
+      coordinates,
+    };
+  });
+
+  const payload = {
+    mapView: { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() },
+    assets: state.assets,
+    importedItems: serializedImported,
+    mapContentFolders: state.mapContentFolders,
+    mapContentOrder: state.mapContentOrder,
+    mapContentAssignments: Array.from(state.mapContentAssignments.entries()),
+    hiddenContentIds: [...state.hiddenContentIds],
+    activeTerrainId: state.activeTerrainId,
+  };
+  try {
+    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // localStorage quota exceeded — fail silently
+  }
+}
+
+function loadMapState() {
+  const stored = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
+  if (!stored) return;
+  let saved;
+  try {
+    saved = JSON.parse(stored);
+  } catch {
+    window.localStorage.removeItem(MAP_STATE_STORAGE_KEY);
+    return;
+  }
+
+  // Restore map view
+  if (saved.mapView) {
+    state.map.setView([saved.mapView.lat, saved.mapView.lng], saved.mapView.zoom, { animate: false });
+  }
+
+  // Restore folders
+  if (Array.isArray(saved.mapContentFolders)) {
+    state.mapContentFolders = saved.mapContentFolders;
+  }
+
+  // Restore content order and assignments (will be extended as items are restored below)
+  if (Array.isArray(saved.mapContentOrder)) {
+    state.mapContentOrder = saved.mapContentOrder;
+  }
+  if (Array.isArray(saved.mapContentAssignments)) {
+    state.mapContentAssignments = new Map(saved.mapContentAssignments);
+  }
+  if (Array.isArray(saved.hiddenContentIds)) {
+    state.hiddenContentIds = new Set(saved.hiddenContentIds);
+  }
+
+  // Restore assets
+  if (Array.isArray(saved.assets)) {
+    saved.assets.forEach((asset) => {
+      state.assets.push(asset);
+      const marker = L.marker([asset.lat, asset.lon], {
+        icon: createEmitterIcon(asset),
+        pane: getMapContentPaneName(`asset:${asset.id}`),
+      }).addTo(state.map);
+      marker.bindPopup(renderAssetPopup(asset));
+      state.assetMarkers.set(asset.id, marker);
+    });
+  }
+
+  // Restore imported items
+  if (Array.isArray(saved.importedItems)) {
+    saved.importedItems.forEach((saved) => {
+      const item = {
+        id: saved.id,
+        name: saved.name,
+        subtitle: saved.subtitle,
+        kind: saved.kind,
+        geometryType: saved.geometryType,
+        properties: saved.properties ?? {},
+        drawn: saved.drawn ?? false,
+        shapeStyle: saved.shapeStyle ?? null,
+        layer: null,
+      };
+      const contentId = `imported:${item.id}`;
+      const pane = getMapContentPaneName(contentId);
+      if (saved.geometryType === "Point") {
+        item.layer = L.marker(saved.coordinates, { pane, draggable: false });
+      } else if (saved.shapeStyle) {
+        const s = saved.shapeStyle;
+        if (saved.geometryType === "Polygon") {
+          item.layer = L.polygon(saved.coordinates, {
+            pane,
+            color: s.color,
+            fillColor: s.color,
+            fillOpacity: s.fillOpacity,
+            weight: s.weight,
+            dashArray: getLeafletDashArray(s.lineStyle),
+          });
+        } else {
+          item.layer = L.polyline(saved.coordinates, {
+            pane,
+            color: s.color,
+            weight: s.weight,
+            dashArray: getLeafletDashArray(s.lineStyle),
+          });
+        }
+      } else if (saved.geometryType === "LineString") {
+        item.layer = L.polyline(saved.coordinates, { pane, color: "#f7b955", weight: 3 });
+      } else {
+        item.layer = L.polygon(saved.coordinates, { pane, color: "#34d399", weight: 2, fillOpacity: 0.12 });
+      }
+      item.layer.addTo(state.map);
+      item.layer.bindPopup(renderImportedItemPopup(item));
+      item.layer.on?.("click", () => focusMapContent(contentId));
+      item.layer.on?.("dragend edit", () => {
+        renderMapContents();
+        saveMapState();
+        syncShapeVertexEditUi(item);
+      });
+      state.importedItems.push(item);
+    });
+  }
+
+  if (saved.activeTerrainId) {
+    state.activeTerrainId = saved.activeTerrainId;
+  }
+
+  // Apply hidden visibility after all layers are added
+  state.hiddenContentIds.forEach((contentId) => setContentLayerVisible(contentId, false));
+}
+
 function toggleSettingsMenu(event) {
   event.stopPropagation();
   closeImageryMenu();
   closeTerrainMenu();
   closeWeatherMenu();
+  closeAiMenu();
   closeGpsMenu();
   state.settingsMenuOpen = !state.settingsMenuOpen;
   dom.settingsMenu.classList.toggle("hidden", !state.settingsMenuOpen);
   dom.settingsMenuBtn.setAttribute("aria-expanded", String(state.settingsMenuOpen));
+  if (state.settingsMenuOpen) {
+    positionTopBarDropdown(dom.settingsMenu, dom.settingsMenuBtn);
+  }
 }
 
 function toggleImageryMenu(event) {
@@ -373,43 +1534,61 @@ function toggleImageryMenu(event) {
   closeSettingsMenu();
   closeTerrainMenu();
   closeWeatherMenu();
+  closeAiMenu();
   closeGpsMenu();
   state.imageryMenuOpen = !state.imageryMenuOpen;
   dom.imageryMenu.classList.toggle("hidden", !state.imageryMenuOpen);
   dom.imageryMenuBtn.setAttribute("aria-expanded", String(state.imageryMenuOpen));
+  if (state.imageryMenuOpen) {
+    positionTopBarDropdown(dom.imageryMenu, dom.imageryMenuBtn);
+  }
 }
 
 function toggleTerrainMenu(event) {
   event.stopPropagation();
   closeImageryMenu();
   closeWeatherMenu();
+  closeAiMenu();
   closeGpsMenu();
   closeSettingsMenu();
   state.terrainMenuOpen = !state.terrainMenuOpen;
   dom.terrainMenu.classList.toggle("hidden", !state.terrainMenuOpen);
   dom.terrainMenuBtn.setAttribute("aria-expanded", String(state.terrainMenuOpen));
+  if (state.terrainMenuOpen) {
+    positionTopBarDropdown(dom.terrainMenu, dom.terrainMenuBtn);
+  }
 }
 
 function toggleWeatherMenu(event) {
   event.stopPropagation();
   closeImageryMenu();
   closeTerrainMenu();
+  closeAiMenu();
   closeGpsMenu();
   closeSettingsMenu();
   state.weatherMenuOpen = !state.weatherMenuOpen;
   dom.weatherMenu.classList.toggle("hidden", !state.weatherMenuOpen);
   dom.weatherMenuBtn.setAttribute("aria-expanded", String(state.weatherMenuOpen));
+  if (state.weatherMenuOpen) {
+    positionTopBarDropdown(dom.weatherMenu, dom.weatherMenuBtn);
+  }
 }
+
+function toggleAiMenu() { /* AI menu removed — settings now in gear dropdown */ }
 
 function toggleGpsMenu(event) {
   event.stopPropagation();
   closeImageryMenu();
   closeTerrainMenu();
   closeWeatherMenu();
+  closeAiMenu();
   closeSettingsMenu();
   state.gpsMenuOpen = !state.gpsMenuOpen;
   dom.gpsMenu.classList.toggle("hidden", !state.gpsMenuOpen);
   dom.gpsMenuBtn.setAttribute("aria-expanded", String(state.gpsMenuOpen));
+  if (state.gpsMenuOpen) {
+    positionTopBarDropdown(dom.gpsMenu, dom.gpsMenuBtn);
+  }
 }
 
 function closeSettingsMenu() {
@@ -448,6 +1627,8 @@ function closeWeatherMenu() {
   dom.weatherMenuBtn.setAttribute("aria-expanded", "false");
 }
 
+function closeAiMenu() { /* no-op: AI menu removed */ }
+
 function closeGpsMenu() {
   if (!state.gpsMenuOpen) {
     return;
@@ -462,6 +1643,7 @@ function closeTopBarMenus() {
   closeImageryMenu();
   closeTerrainMenu();
   closeWeatherMenu();
+  closeAiMenu();
   closeGpsMenu();
 }
 
@@ -489,6 +1671,7 @@ function onRenamePopoverKeyDown(event) {
 
 function onSettingsChanged() {
   state.settings.measurementUnits = dom.measurementUnitsSelect.value;
+  state.settings.theme = dom.themeSelect.value;
   state.settings.coordinateSystem = dom.coordinateSystemSelect.value;
   state.settings.gridLinesEnabled = dom.gridlinesToggle.checked;
   state.settings.gridColor = dom.gridlinesColor.value;
@@ -498,9 +1681,11 @@ function onSettingsChanged() {
 
 function applySettings() {
   dom.measurementUnitsSelect.value = state.settings.measurementUnits;
+  dom.themeSelect.value = state.settings.theme;
   dom.coordinateSystemSelect.value = state.settings.coordinateSystem;
   dom.gridlinesToggle.checked = state.settings.gridLinesEnabled;
   dom.gridlinesColor.value = state.settings.gridColor;
+  document.body.classList.toggle("theme-light", state.settings.theme === "light");
   dom.coordsLabel.textContent = coordinateSystemStatusLabel(state.settings.coordinateSystem);
   updateWeatherUnitLabels();
   syncWeatherInputsFromState();
@@ -509,6 +1694,7 @@ function applySettings() {
   updateGridLayer();
   renderViewsheds();
   renderPlanningResults();
+  syncCesiumEntities();
 }
 
 function updateWeatherUnitLabels() {
@@ -559,13 +1745,51 @@ function updateMapOverlayMetrics() {
   dom.centerCoordinateValue.textContent = formatCoordinate(center.lat, center.lng, state.settings.coordinateSystem);
 
   const centerElevationM = sampleTerrainElevation(center.lat, center.lng);
-  dom.centerElevationValue.textContent = centerElevationM === null
-    ? "No terrain"
-    : formatElevation(centerElevationM);
+  if (centerElevationM !== null) {
+    dom.centerElevationValue.textContent = formatElevation(centerElevationM);
+    return;
+  }
+
+  if (!usesConfiguredCesiumTerrain()) {
+    dom.centerElevationValue.textContent = "No terrain";
+    return;
+  }
+
+  const requestId = crypto.randomUUID();
+  state.centerElevationRequestId = requestId;
+  dom.centerElevationValue.textContent = "Loading terrain...";
+  sampleTerrainElevationAsync(center.lat, center.lng)
+    .then((elevationM) => {
+      if (state.centerElevationRequestId !== requestId) {
+        return;
+      }
+      dom.centerElevationValue.textContent = elevationM === null
+        ? "No terrain"
+        : formatElevation(elevationM);
+    })
+    .catch(() => {
+      if (state.centerElevationRequestId !== requestId) {
+        return;
+      }
+      dom.centerElevationValue.textContent = "No terrain";
+    });
 }
 
 function sampleTerrainElevation(lat, lon) {
   return sampleTerrainElevationForTerrain(lat, lon, getActiveTerrain());
+}
+
+async function sampleTerrainElevationAsync(lat, lon) {
+  const localElevation = sampleTerrainElevation(lat, lon);
+  if (localElevation !== null) {
+    return localElevation;
+  }
+
+  if (!usesConfiguredCesiumTerrain()) {
+    return null;
+  }
+
+  return await sampleCesiumPointElevation(lat, lon);
 }
 
 function sampleTerrainElevationForTerrainId(lat, lon, terrainId) {
@@ -599,6 +1823,49 @@ function sampleTerrainElevationForTerrain(lat, lon, terrain) {
   return bilinear(q11, q21, q12, q22, colRatio, rowRatio);
 }
 
+function usesConfiguredCesiumTerrain() {
+  return dom.terrainSourceSelect.value === "cesium-world" || dom.terrainSourceSelect.value === "custom";
+}
+
+function buildCesiumTerrainProviderKey() {
+  if (dom.terrainSourceSelect.value === "cesium-world") {
+    return `world:${dom.cesiumIonToken.value.trim()}`;
+  }
+  if (dom.terrainSourceSelect.value === "custom") {
+    return `custom:${dom.customTerrainUrl.value.trim()}`;
+  }
+  return "ellipsoid";
+}
+
+async function sampleCesiumPointElevation(lat, lon) {
+  const cacheKey = `${buildCesiumTerrainProviderKey()}:${lat.toFixed(6)},${lon.toFixed(6)}`;
+  const cached = state.cesiumPointElevationCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const provider = await getConfiguredCesiumTerrainProvider();
+  if (!provider) {
+    state.cesiumPointElevationCache.set(cacheKey, null);
+    return null;
+  }
+
+  const [sampled] = await window.Cesium.sampleTerrainMostDetailed(provider, [
+    window.Cesium.Cartographic.fromDegrees(lon, lat),
+  ]);
+  const elevation = Number.isFinite(sampled?.height) ? sampled.height : null;
+  state.cesiumPointElevationCache.set(cacheKey, elevation);
+  return elevation;
+}
+
+async function refreshAssetGroundElevation(asset) {
+  const groundElevationM = await sampleTerrainElevationAsync(asset.lat, asset.lon);
+  asset.groundElevationM = groundElevationM;
+  updateAssetMarker(asset);
+  syncCesiumEntities();
+  return groundElevationM;
+}
+
 function resolveAbsoluteHeight(position, terrainId = null) {
   const groundElevationM = Number.isFinite(position.groundElevationM)
     ? position.groundElevationM
@@ -628,6 +1895,7 @@ function updateGridLayer() {
       state.gridLayer.remove();
       state.gridLayer = null;
     }
+    syncCesiumEntities();
     return;
   }
 
@@ -639,10 +1907,12 @@ function updateGridLayer() {
   if (!state.gridLayer) {
     state.gridLayer = new CoordinateGridLayer(options);
     state.gridLayer.addTo(state.map);
+    syncCesiumEntities();
     return;
   }
 
   state.gridLayer.setOptions(options);
+  syncCesiumEntities();
 }
 
 function onWorkerMessage(event) {
@@ -702,13 +1972,20 @@ function onCesiumIonTokenChanged() {
     }
   }
   state.cesiumTerrainProvider = null;
+  state.cesiumTerrainProviderKey = null;
   state.ionTerrainCache.clear();
+  state.cesiumPointElevationCache.clear();
   syncCesiumScene();
+  updateMapOverlayMetrics();
+  updateTerrainMenuValue();
 }
 
 function onTerrainSourceSettingsChanged() {
   state.cesiumTerrainProvider = null;
+  state.cesiumTerrainProviderKey = null;
+  state.cesiumPointElevationCache.clear();
   syncCesiumScene();
+  updateMapOverlayMetrics();
 }
 
 function togglePanelCollapse() {
@@ -720,11 +1997,61 @@ function togglePanelCollapse() {
   }
 }
 
+function toggleAiPanelCollapse() {
+  state.ai.panelOpen = !state.ai.panelOpen;
+  document.body.classList.toggle("ai-panel-open", state.ai.panelOpen);
+  if (state.ai.panelOpen) {
+    const nextWidth = Number.isFinite(Number(state.ui.aiPanelWidth)) && state.ui.aiPanelWidth > 0
+      ? state.ui.aiPanelWidth
+      : 400;
+    document.documentElement.style.setProperty("--ai-panel-width", `${nextWidth}px`);
+  } else {
+    const currentWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ai-panel-width"));
+    if (Number.isFinite(currentWidth) && currentWidth > 0) {
+      state.ui.aiPanelWidth = currentWidth;
+    }
+    document.documentElement.style.setProperty("--ai-panel-width", "0px");
+  }
+  dom.collapseAiPanelIcon.innerHTML = state.ai.panelOpen ? "&#9654;" : "&#9664;";
+  syncAiChatToggleBtn();
+  state.map.invalidateSize();
+  if (state.cesiumViewer) {
+    state.cesiumViewer.resize();
+  }
+}
+
+function syncAiChatToggleBtn() {
+  if (!dom.aiChatToggleBtn) return;
+  const open = state.ai.panelOpen;
+  dom.aiChatToggleChevron.innerHTML = open ? "&#9664;" : "&#9654;";
+  dom.aiChatToggleBtn.classList.toggle("ai-chat-toggle-active", open);
+  const statusLabel =
+    state.ai.status === "ready" ? "Online" :
+    state.ai.status === "testing" ? "Testing" :
+    state.ai.status === "pending" ? "Configured" :
+    state.ai.status === "error" ? "Error" : "Offline";
+  dom.aiChatToggleValue.textContent = statusLabel;
+}
+
 function beginPanelResize() {
   if (window.innerWidth <= 1024 || document.body.classList.contains("panel-collapsed")) {
     return;
   }
   state.ui.resizeActive = true;
+}
+
+function beginAiPanelResize() {
+  if (window.innerWidth <= 1024 || !document.body.classList.contains("ai-panel-open")) {
+    return;
+  }
+  state.ui.aiResizeActive = true;
+}
+
+function beginControlPanelSectionResize() {
+  if (window.innerWidth <= 1024 || document.body.classList.contains("panel-collapsed")) {
+    return;
+  }
+  state.ui.sectionResizeActive = true;
 }
 
 function onPanelResize(event) {
@@ -736,8 +2063,2030 @@ function onPanelResize(event) {
   state.map.invalidateSize();
 }
 
+function onAiPanelResize(event) {
+  if (!state.ui.aiResizeActive) {
+    return;
+  }
+  const nextWidth = clamp(window.innerWidth - event.clientX, 300, 620);
+  state.ui.aiPanelWidth = nextWidth;
+  document.documentElement.style.setProperty("--ai-panel-width", `${nextWidth}px`);
+  state.map.invalidateSize();
+}
+
+function onControlPanelSectionResize(event) {
+  if (!state.ui.sectionResizeActive) {
+    return;
+  }
+  const rect = dom.controlPanel.getBoundingClientRect();
+  const offsetTop = event.clientY - rect.top - 14;
+  const nextHeight = clamp(offsetTop, 160, rect.height - 260);
+  document.documentElement.style.setProperty("--control-panel-top-height", `${nextHeight}px`);
+}
+
 function endPanelResize() {
   state.ui.resizeActive = false;
+}
+
+function endControlPanelSectionResize() {
+  state.ui.sectionResizeActive = false;
+}
+
+function endAiPanelResize() {
+  state.ui.aiResizeActive = false;
+}
+
+function loadAiProviderSettings() {
+  const stored = window.localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
+  if (!stored) {
+    return;
+  }
+  try {
+    const parsed = JSON.parse(stored);
+    state.ai.provider = typeof parsed.provider === "string" ? parsed.provider : "";
+    state.ai.apiKey = typeof parsed.apiKey === "string" ? parsed.apiKey : "";
+    if (state.ai.provider && state.ai.apiKey) {
+      state.ai.status = "pending";
+      state.ai.statusMessage = "Stored provider found. Revalidating access...";
+    }
+  } catch {
+    window.localStorage.removeItem(AI_PROVIDER_STORAGE_KEY);
+  }
+}
+
+function persistAiProviderSettings() {
+  window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify({
+    provider: state.ai.provider,
+    apiKey: state.ai.apiKey,
+  }));
+}
+
+async function onAiProviderChanged() {
+  state.ai.provider = dom.aiProviderSelect.value;
+  state.ai.apiKey = dom.aiApiKeyInput.value.trim();
+  state.ai.status = state.ai.provider && state.ai.apiKey ? "pending" : "offline";
+  state.ai.statusMessage = state.ai.provider && state.ai.apiKey
+    ? "Provider configured. Testing connection..."
+    : "Add a provider and API key to enable the AI planning assistant.";
+  persistAiProviderSettings();
+  syncAiUi();
+  if (state.ai.provider && state.ai.apiKey) {
+    await testAiProviderConnection();
+  }
+}
+
+function clearAiProvider() {
+  state.ai.provider = "";
+  state.ai.apiKey = "";
+  state.ai.status = "offline";
+  state.ai.statusMessage = "Add a provider and API key to enable the AI planning assistant.";
+  state.ai.panelOpen = false;
+  window.localStorage.removeItem(AI_PROVIDER_STORAGE_KEY);
+  document.body.classList.remove("ai-panel-open");
+  dom.collapseAiPanelIcon.innerHTML = "&#9664;";
+  clearAiChat();
+  syncAiUi();
+}
+
+function syncAiUi() {
+  if (!dom.aiProviderSelect || !dom.aiApiKeyInput) {
+    return;
+  }
+
+  dom.aiProviderSelect.value = state.ai.provider;
+  dom.aiApiKeyInput.value = state.ai.apiKey;
+  if (dom.aiProviderSummary) {
+    dom.aiProviderSummary.textContent = state.ai.statusMessage;
+  }
+
+  if (dom.aiApiKeyLabelText) {
+    dom.aiApiKeyLabelText.textContent = state.ai.provider === "genai-mil"
+      ? "GenAI.mil API Key"
+      : state.ai.provider === "anthropic"
+        ? "Anthropic API Key"
+        : "API Key";
+    dom.aiApiKeyInput.placeholder = state.ai.provider === "genai-mil"
+      ? "Paste STARK_ API key"
+      : state.ai.provider === "anthropic"
+        ? "Paste sk-ant-... API key"
+        : "Paste API key";
+  }
+
+  const providerLabel = state.ai.provider === "genai-mil"
+    ? "GenAI.mil"
+    : state.ai.provider === "anthropic"
+      ? "Claude"
+      : null;
+  if (dom.aiMenuValue) {
+    dom.aiMenuValue.textContent = providerLabel
+      ? state.ai.status === "ready"
+        ? "Ready"
+        : state.ai.status === "testing"
+          ? "Testing"
+          : state.ai.status === "pending"
+            ? "Configured"
+            : state.ai.status === "error"
+              ? "Error"
+              : "Offline"
+      : "No Provider";
+  }
+  if (dom.aiPanelStatus) {
+    dom.aiPanelStatus.textContent = state.ai.status === "ready"
+      ? "Provider connected"
+      : state.ai.status === "testing"
+        ? "Testing provider"
+        : state.ai.status === "pending"
+          ? "Awaiting validation"
+          : state.ai.status === "error"
+            ? "Provider error"
+            : "Provider offline";
+  }
+  const hasConfiguredProvider = Boolean(state.ai.provider && state.ai.apiKey);
+  const controlsEnabled = hasConfiguredProvider && state.ai.status !== "testing";
+  const actionButtonsEnabled = controlsEnabled && !state.ai.requestInFlight;
+  const sendEnabled = actionButtonsEnabled;
+  if (dom.aiChatInput) {
+    dom.aiChatInput.disabled = !controlsEnabled;
+  }
+  if (dom.aiSendBtn) {
+    dom.aiSendBtn.disabled = !sendEnabled;
+  }
+  if (dom.aiAttachImageBtn) {
+    dom.aiAttachImageBtn.disabled = !actionButtonsEnabled;
+  }
+  if (dom.aiAddContextBtn) {
+    dom.aiAddContextBtn.disabled = !actionButtonsEnabled;
+  }
+  if (dom.aiVoiceBtn) {
+    dom.aiVoiceBtn.disabled = !actionButtonsEnabled || !("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
+  }
+  if (dom.testAiConnectionBtn) {
+    dom.testAiConnectionBtn.disabled = !state.ai.provider || !state.ai.apiKey || state.ai.status === "testing";
+  }
+  syncAiChatToggleBtn();
+}
+
+function openAiPanel() {
+  if (!state.ai.panelOpen) {
+    toggleAiPanelCollapse();
+  }
+}
+
+async function onAiChatSubmit(event) {
+  event.preventDefault();
+  const prompt = dom.aiChatInput.value.trim();
+  if (!prompt && state.ai.pendingImages.length === 0) return;
+  if (state.ai.requestInFlight) return;
+  if (state.ai.status !== "ready") {
+    if (!state.ai.provider || !state.ai.apiKey) {
+      return;
+    }
+    await testAiProviderConnection({ openPanelOnSuccess: false });
+    if (state.ai.status !== "ready") {
+      return;
+    }
+  }
+
+  const images = [...state.ai.pendingImages];
+  const contextIds = getAiContextIds(state.ai.contextItemIds);
+
+  // Render user message in chat
+  appendAiMessage("user", prompt, images);
+
+  // Clear inputs
+  dom.aiChatInput.value = "";
+  clearAiAttachments();
+
+  state.ai.requestInFlight = true;
+  state.ai.statusMessage = "AI assistant is processing your request.";
+  syncAiUi();
+  const assistantMessageController = createAiMessageController("assistant", "Thinking");
+  const stopThinkingIndicator = startAiThinkingIndicator(assistantMessageController);
+
+  try {
+    const response = await callAiPlanningAssistant(prompt, images, contextIds, {
+      onStatus: (statusText) => assistantMessageController.setStatus(statusText),
+    });
+    const executionSummary = await executeAiActions(response.actions ?? []);
+    const reply = executionSummary.length
+      ? `${response.assistantMessage}\n\nExecuted actions:\n- ${executionSummary.join("\n- ")}`
+      : response.assistantMessage;
+    stopThinkingIndicator();
+    assistantMessageController.setStatus(executionSummary.length ? "Applied changes" : "Response ready");
+    await streamAiMessageText(assistantMessageController, reply);
+    state.ai.statusMessage = "AI assistant ready.";
+  } catch (error) {
+    stopThinkingIndicator();
+    assistantMessageController.setStatus("Request failed");
+    assistantMessageController.setText(`Request failed: ${error.message}`);
+    state.ai.statusMessage = error.message;
+  } finally {
+    state.ai.requestInFlight = false;
+  }
+  syncAiUi();
+}
+
+function clearAiChat() {
+  state.ai.messages = [];
+  clearAiAttachments();
+  dom.aiChatMessages.innerHTML = `
+    <article class="ai-chat-message ai-chat-message-system">
+      <strong>Assistant</strong>
+      <p>Add a working AI provider (GenAI.mil or Anthropic) in the top bar to enable chat-assisted planning.</p>
+    </article>
+  `;
+}
+
+function createAiMessageController(role, text = "", images = []) {
+  state.ai.messages.push({ role, text });
+  const article = document.createElement("article");
+  article.className = `ai-chat-message ${role === "user" ? "ai-chat-message-user" : role === "assistant" ? "ai-chat-message-assistant" : "ai-chat-message-system"}`;
+
+  const header = document.createElement("div");
+  header.className = "ai-chat-message-header";
+
+  const title = document.createElement("strong");
+  title.textContent = role === "user" ? "You" : "Assistant";
+  header.appendChild(title);
+
+  const status = document.createElement("span");
+  status.className = "ai-chat-message-status";
+  header.appendChild(status);
+
+  article.appendChild(header);
+
+  if (images.length) {
+    const imgRow = document.createElement("div");
+    imgRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;";
+    images.forEach(({ dataUrl }) => {
+      const img = document.createElement("img");
+      img.src = dataUrl;
+      img.className = "ai-chat-message-image";
+      imgRow.appendChild(img);
+    });
+    article.appendChild(imgRow);
+  }
+
+  const body = document.createElement("p");
+  body.className = "ai-chat-message-body";
+  body.textContent = text;
+  article.appendChild(body);
+
+  dom.aiChatMessages.append(article);
+  dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
+
+  return {
+    article,
+    body,
+    status,
+    setText(nextText) {
+      body.textContent = nextText;
+      dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
+    },
+    setStatus(nextStatus) {
+      status.textContent = nextStatus ?? "";
+      article.classList.toggle("is-streaming", Boolean(nextStatus && nextStatus !== "Response ready" && nextStatus !== "Applied changes" && nextStatus !== "Request failed"));
+      dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
+    },
+  };
+}
+
+function startAiThinkingIndicator(controller) {
+  let frame = 0;
+  const frames = ["Thinking", "Thinking.", "Thinking..", "Thinking..."];
+  controller.setStatus(frames[0]);
+  const intervalId = window.setInterval(() => {
+    frame = (frame + 1) % frames.length;
+    controller.setStatus(frames[frame]);
+  }, 300);
+  return () => {
+    window.clearInterval(intervalId);
+  };
+}
+
+async function streamAiMessageText(controller, text) {
+  controller.setText("");
+  const chunks = splitTextIntoStreamChunks(text);
+  let rendered = "";
+  for (let index = 0; index < chunks.length; index += 1) {
+    rendered += chunks[index];
+    controller.setText(rendered);
+    if (index < chunks.length - 1) {
+      await wait(18);
+    }
+  }
+}
+
+function splitTextIntoStreamChunks(text) {
+  const chunks = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const remaining = text.length - cursor;
+    const chunkSize = Math.min(remaining, text[cursor] === "\n" ? 1 : remaining > 240 ? 10 : remaining > 120 ? 7 : 4);
+    chunks.push(text.slice(cursor, cursor + chunkSize));
+    cursor += chunkSize;
+  }
+  return chunks;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+// ── Enter-to-send & @mention ──────────────────────────────────────────────────
+
+function onAiChatKeyDown(event) {
+  // Navigate mention dropdown with arrow keys / Escape
+  if (!dom.aiMentionDropdown.classList.contains("hidden")) {
+    const items = [...dom.aiMentionDropdown.querySelectorAll(".ai-mention-item")];
+    const active = dom.aiMentionDropdown.querySelector(".ai-mention-item.active");
+    const idx = items.indexOf(active);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      items[idx === -1 ? 0 : Math.min(idx + 1, items.length - 1)]?.classList.add("active");
+      if (idx !== -1) items[idx].classList.remove("active");
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      items[idx <= 0 ? 0 : idx - 1]?.classList.add("active");
+      if (idx > 0) items[idx].classList.remove("active");
+      return;
+    }
+    if (event.key === "Tab" || event.key === "Enter") {
+      const pick = active ?? items[0];
+      if (pick) {
+        event.preventDefault();
+        pick.click();
+        return;
+      }
+    }
+    if (event.key === "Escape") {
+      dom.aiMentionDropdown.classList.add("hidden");
+      return;
+    }
+  }
+
+  // Enter = submit; Shift+Enter = newline
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    dom.aiChatForm.requestSubmit();
+  }
+}
+
+function onAiChatInput() {
+  const val = dom.aiChatInput.value;
+  const pos = dom.aiChatInput.selectionStart;
+  // Find the most recent @ before cursor with no space after it
+  const textBefore = val.slice(0, pos);
+  const match = textBefore.match(/@([^@\n]*)$/);
+  if (!match) {
+    dom.aiMentionDropdown.classList.add("hidden");
+    return;
+  }
+  const query = match[1].toLowerCase();
+  const entries = getMapContentEntries().filter((e) => !e.id.startsWith("folder:"));
+  const filtered = query.length === 0
+    ? entries
+    : entries.filter((e) => e.name.toLowerCase().includes(query));
+
+  if (!filtered.length) {
+    dom.aiMentionDropdown.classList.add("hidden");
+    return;
+  }
+
+  dom.aiMentionDropdown.innerHTML = "";
+  filtered.slice(0, 12).forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "ai-mention-item";
+    item.innerHTML = `<span>${escapeHtml(entry.name)}</span><span class="ai-mention-item-kind">${escapeHtml(entry.kind ?? "")}</span>`;
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // Don't blur textarea
+      // Replace the @query with @"name" in the textarea
+      const before = val.slice(0, pos - match[0].length);
+      const after = val.slice(pos);
+      const inserted = `@"${entry.name}" `;
+      dom.aiChatInput.value = before + inserted + after;
+      dom.aiChatInput.selectionStart = dom.aiChatInput.selectionEnd = (before + inserted).length;
+      dom.aiMentionDropdown.classList.add("hidden");
+      // Auto-add to context chips
+      if (!state.ai.contextItemIds.includes(entry.id)) {
+        toggleAiContextItem(entry.id, entry.name);
+      }
+    });
+    dom.aiMentionDropdown.appendChild(item);
+  });
+  dom.aiMentionDropdown.classList.remove("hidden");
+}
+
+// ── Voice-to-text ─────────────────────────────────────────────────────────────
+
+let _speechRecognition = null;
+
+function toggleVoiceInput() {
+  if (state.ai.voiceRecording) {
+    _speechRecognition?.stop();
+    return;
+  }
+  const SpeechRecognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setStatus("Voice input is not supported in this browser.");
+    return;
+  }
+  _speechRecognition = new SpeechRecognition();
+  _speechRecognition.continuous = true;
+  _speechRecognition.interimResults = true;
+  _speechRecognition.lang = "en-US";
+
+  let baseText = dom.aiChatInput.value;
+  _speechRecognition.onstart = () => {
+    state.ai.voiceRecording = true;
+    dom.aiVoiceBtn.classList.add("ai-voice-recording");
+    dom.aiVoiceBtn.title = "Stop recording";
+    setStatus("Listening… speak your prompt.");
+  };
+  _speechRecognition.onresult = (event) => {
+    let interim = "";
+    let final = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) final += t;
+      else interim += t;
+    }
+    if (final) baseText += (baseText && !baseText.endsWith(" ") ? " " : "") + final;
+    dom.aiChatInput.value = baseText + interim;
+  };
+  _speechRecognition.onend = () => {
+    state.ai.voiceRecording = false;
+    dom.aiVoiceBtn.classList.remove("ai-voice-recording");
+    dom.aiVoiceBtn.title = "Voice to text";
+    dom.aiChatInput.value = baseText;
+    setStatus("Ready.");
+    _speechRecognition = null;
+  };
+  _speechRecognition.onerror = (e) => {
+    setStatus(`Voice error: ${e.error}`);
+    _speechRecognition?.stop();
+  };
+  _speechRecognition.start();
+}
+
+// ── Map content visibility (eye icon) ────────────────────────────────────────
+
+function toggleContentVisibility(contentId) {
+  const isHidden = state.hiddenContentIds.has(contentId);
+  if (isHidden) {
+    state.hiddenContentIds.delete(contentId);
+    setContentLayerVisible(contentId, true);
+  } else {
+    state.hiddenContentIds.add(contentId);
+    setContentLayerVisible(contentId, false);
+  }
+  renderMapContents();
+  syncCesiumEntities();
+}
+
+function setContentLayerVisible(contentId, visible) {
+  if (contentId.startsWith("asset:")) {
+    const id = contentId.slice("asset:".length);
+    const marker = state.assetMarkers.get(id);
+    if (marker) {
+      if (visible) marker.addTo(state.map);
+      else marker.remove();
+    }
+  } else if (contentId.startsWith("imported:")) {
+    const item = state.importedItems.find((i) => `imported:${i.id}` === contentId);
+    if (item?.layer) {
+      if (visible) item.layer.addTo(state.map);
+      else item.layer.remove();
+    }
+  } else if (contentId.startsWith("viewshed:")) {
+    const vs = state.viewsheds.find((v) => `viewshed:${v.id}` === contentId);
+    if (vs?.layer) {
+      if (visible) vs.layer.addTo(state.map);
+      else vs.layer.remove();
+    }
+  } else if (contentId.startsWith("terrain:")) {
+    const t = state.terrains.find((t) => `terrain:${t.id}` === contentId);
+    if (t) {
+      const layer = state.terrainCoverageLayers.get(t.id);
+      if (layer) {
+        if (visible) layer.addTo(state.map);
+        else layer.remove();
+      }
+    }
+  }
+}
+
+// ── Chat image & context attachments ─────────────────────────────────────────
+
+function clearAiAttachments() {
+  state.ai.pendingImages = [];
+  state.ai.contextItemIds = [];
+  dom.aiImagePreviews.innerHTML = "";
+  dom.aiContextChips.innerHTML = "";
+  dom.aiAttachmentBar.classList.add("hidden");
+}
+
+function syncAttachmentBar() {
+  const hasContent = state.ai.pendingImages.length > 0 || state.ai.contextItemIds.length > 0;
+  dom.aiAttachmentBar.classList.toggle("hidden", !hasContent);
+}
+
+function onAiChatPaste(event) {
+  const items = event.clipboardData?.items ?? [];
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      event.preventDefault();
+      const blob = item.getAsFile();
+      if (blob) addAiPendingImage(blob, item.type);
+    }
+  }
+}
+
+function onAiImageFileChange(event) {
+  const files = [...(event.target.files ?? [])];
+  files.forEach((f) => addAiPendingImage(f, f.type));
+  event.target.value = "";
+}
+
+function addAiPendingImage(blob, mediaType) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    const validType = ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mediaType) ? mediaType : "image/png";
+    state.ai.pendingImages.push({ dataUrl, mediaType: validType });
+    const idx = state.ai.pendingImages.length - 1;
+
+    const thumb = document.createElement("div");
+    thumb.className = "ai-image-thumb";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = "Attached image";
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "ai-image-thumb-remove";
+    removeBtn.textContent = "×";
+    removeBtn.type = "button";
+    removeBtn.addEventListener("click", () => {
+      state.ai.pendingImages.splice(idx, 1);
+      thumb.remove();
+      syncAttachmentBar();
+    });
+    thumb.append(img, removeBtn);
+    dom.aiImagePreviews.appendChild(thumb);
+    syncAttachmentBar();
+  };
+  reader.readAsDataURL(blob);
+}
+
+function toggleAiContextPicker() {
+  const hidden = dom.aiContextPicker.classList.toggle("hidden");
+  if (!hidden) renderAiContextPicker();
+}
+
+function renderAiContextPicker() {
+  dom.aiContextPicker.innerHTML = "";
+  const entries = getMapContentEntries().filter((e) => !e.id.startsWith("folder:"));
+  if (!entries.length) {
+    dom.aiContextPicker.innerHTML = `<div style="padding:10px 12px;font-size:12px;opacity:0.5;">No map contents</div>`;
+    return;
+  }
+  entries.forEach((entry) => {
+    const isSelected = state.ai.contextItemIds.includes(entry.id);
+    const row = document.createElement("div");
+    row.className = `ai-context-picker-item${isSelected ? " selected" : ""}`;
+    row.innerHTML = `
+      <span class="ai-context-picker-item-icon">${isSelected ? "✓" : "○"}</span>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.name)}</span>
+      <span style="opacity:0.4;font-size:10px;margin-left:auto;flex-shrink:0;">${escapeHtml(entry.kind ?? "")}</span>
+    `;
+    row.addEventListener("click", () => toggleAiContextItem(entry.id, entry.name));
+    dom.aiContextPicker.appendChild(row);
+  });
+}
+
+function toggleAiContextItem(id, name) {
+  const idx = state.ai.contextItemIds.indexOf(id);
+  if (idx === -1) {
+    state.ai.contextItemIds.push(id);
+    addAiContextChip(id, name);
+  } else {
+    state.ai.contextItemIds.splice(idx, 1);
+    dom.aiContextChips.querySelector(`[data-context-id="${CSS.escape(id)}"]`)?.remove();
+  }
+  syncAttachmentBar();
+  renderAiContextPicker();
+}
+
+function addAiContextChip(id, name) {
+  const chip = document.createElement("div");
+  chip.className = "ai-context-chip";
+  chip.dataset.contextId = id;
+  chip.title = name;
+  const label = document.createElement("span");
+  label.textContent = name;
+  label.style.cssText = "overflow:hidden;text-overflow:ellipsis;";
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "ai-context-chip-remove";
+  removeBtn.textContent = "×";
+  removeBtn.type = "button";
+  removeBtn.addEventListener("click", () => {
+    const idx = state.ai.contextItemIds.indexOf(id);
+    if (idx !== -1) state.ai.contextItemIds.splice(idx, 1);
+    chip.remove();
+    syncAttachmentBar();
+  });
+  chip.append(label, removeBtn);
+  dom.aiContextChips.appendChild(chip);
+}
+
+function buildContextDetail(contextIds) {
+  if (!contextIds.length) return "";
+  const details = contextIds
+    .map((contentId) => serializeMapContentForAi(contentId))
+    .filter(Boolean);
+  if (!details.length) {
+    return "";
+  }
+  return JSON.stringify(details, null, 2);
+}
+
+function roundAiNumber(value, digits = 6) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+  return Number(number.toFixed(digits));
+}
+
+function serializeLatLngForAi(latLng) {
+  if (!latLng) {
+    return null;
+  }
+  return {
+    lat: roundAiNumber(latLng.lat),
+    lon: roundAiNumber(latLng.lng ?? latLng.lon),
+  };
+}
+
+function serializeLatLngCollectionForAi(latLngs) {
+  if (!Array.isArray(latLngs)) {
+    return [];
+  }
+  return latLngs.map((entry) => (Array.isArray(entry)
+    ? serializeLatLngCollectionForAi(entry)
+    : serializeLatLngForAi(entry)));
+}
+
+function serializeBoundsForAi(bounds) {
+  if (!bounds?.isValid?.()) {
+    return null;
+  }
+  return {
+    southWest: serializeLatLngForAi(bounds.getSouthWest()),
+    northEast: serializeLatLngForAi(bounds.getNorthEast()),
+  };
+}
+
+function getImportedItemGeometryForAi(item) {
+  if (!item?.layer) {
+    return null;
+  }
+
+  if (item.geometryType === "Point") {
+    return {
+      type: "Point",
+      coordinates: serializeLatLngForAi(item.layer.getLatLng()),
+    };
+  }
+
+  if (item.geometryType === "LineString") {
+    return {
+      type: "LineString",
+      coordinates: serializeLatLngCollectionForAi(item.layer.getLatLngs()),
+    };
+  }
+
+  const rings = item.layer.getLatLngs();
+  const polygonRings = Array.isArray(rings[0]) ? rings : [rings];
+  return {
+    type: item.geometryType,
+    coordinates: serializeLatLngCollectionForAi(polygonRings),
+  };
+}
+
+function getImportedItemMetricsForAi(item) {
+  if (!item?.layer) {
+    return {};
+  }
+
+  const metrics = {};
+  const radiusMeters = Number(item.properties?.radiusM);
+  if (Boolean(item.properties?.isCircle) && Number.isFinite(radiusMeters)) {
+    metrics.radiusMeters = roundAiNumber(radiusMeters, 2);
+    metrics.radiusLabel = formatDistance(radiusMeters);
+  }
+
+  if (item.geometryType === "LineString") {
+    const lengthMeters = measureLatLngPath(item.layer.getLatLngs());
+    if (lengthMeters > 0) {
+      metrics.lengthMeters = roundAiNumber(lengthMeters, 2);
+      metrics.lengthLabel = formatDistance(lengthMeters);
+    }
+    return metrics;
+  }
+
+  if (item.geometryType === "Polygon") {
+    const rings = item.layer.getLatLngs();
+    const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+    const perimeterMeters = measureLatLngPath(outer, true);
+    const areaSqMeters = measurePolygonAreaSqMeters(outer);
+    if (areaSqMeters > 0) {
+      metrics.areaSqMeters = roundAiNumber(areaSqMeters, 2);
+      metrics.areaLabel = formatShapeArea(areaSqMeters);
+    }
+    if (perimeterMeters > 0) {
+      metrics.perimeterMeters = roundAiNumber(perimeterMeters, 2);
+      metrics.perimeterLabel = formatDistance(perimeterMeters);
+    }
+  }
+
+  return metrics;
+}
+
+function serializeAssetForAi(asset) {
+  if (!asset) {
+    return null;
+  }
+  return {
+    id: asset.id,
+    contentId: `asset:${asset.id}`,
+    kind: "asset",
+    name: asset.name,
+    type: asset.type ?? "",
+    force: asset.force ?? "",
+    unit: asset.unit ?? "",
+    icon: asset.icon ?? "",
+    color: asset.color ?? "",
+    notes: asset.notes ?? "",
+    lat: roundAiNumber(asset.lat),
+    lon: roundAiNumber(asset.lon),
+    frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
+    powerW: roundAiNumber(asset.powerW, 3),
+    antennaHeightM: roundAiNumber(asset.antennaHeightM, 3),
+    gainDBi: roundAiNumber(asset.gainDBi ?? 2.1, 3),
+    receiverSensitivityDbm: roundAiNumber(asset.receiverSensitivityDbm ?? asset.receiverSensitivity, 3),
+    systemLossDb: roundAiNumber(asset.systemLossDb ?? asset.systemLoss, 3),
+    groundElevationM: roundAiNumber(asset.groundElevationM, 2),
+    hidden: state.hiddenContentIds.has(`asset:${asset.id}`),
+    folderId: getMapContentFolderId(`asset:${asset.id}`),
+  };
+}
+
+function serializeViewshedForAi(viewshed) {
+  if (!viewshed) {
+    return null;
+  }
+  return {
+    id: viewshed.id,
+    contentId: `viewshed:${viewshed.id}`,
+    kind: "viewshed",
+    name: viewshed.name ?? `${viewshed.asset.name} Coverage`,
+    assetId: viewshed.asset.id,
+    assetName: viewshed.asset.name,
+    propagationModel: viewshed.propagationModel,
+    propagationModelLabel: viewshed.propagationModelLabel,
+    radiusMeters: roundAiNumber(viewshed.radiusMeters, 2),
+    radiusKm: roundAiNumber(viewshed.radiusMeters / 1000, 2),
+    receiverHeight: roundAiNumber(viewshed.receiverHeight, 2),
+    opacity: roundAiNumber(viewshed.opacity, 3),
+    bounds: serializeBoundsForAi(viewshed.bounds),
+    hidden: state.hiddenContentIds.has(`viewshed:${viewshed.id}`),
+    folderId: getMapContentFolderId(`viewshed:${viewshed.id}`),
+  };
+}
+
+function serializeImportedItemForAi(item) {
+  if (!item) {
+    return null;
+  }
+  const contentId = `imported:${item.id}`;
+  const geometry = getImportedItemGeometryForAi(item);
+  const coordinateCount = item.geometryType === "Point"
+    ? 1
+    : item.geometryType === "LineString"
+      ? geometry?.coordinates?.length ?? 0
+      : geometry?.coordinates?.[0]?.length ?? 0;
+  return {
+    id: item.id,
+    contentId,
+    kind: item.kind,
+    name: item.name,
+    subtitle: item.subtitle,
+    geometryType: item.geometryType,
+    drawn: Boolean(item.drawn),
+    hidden: state.hiddenContentIds.has(contentId),
+    folderId: getMapContentFolderId(contentId),
+    coordinateCount,
+    properties: item.properties ?? {},
+    shapeStyle: item.shapeStyle ?? null,
+    geometry,
+    bounds: typeof item.layer?.getBounds === "function"
+      ? serializeBoundsForAi(item.layer.getBounds())
+      : null,
+    metrics: getImportedItemMetricsForAi(item),
+  };
+}
+
+function serializeTerrainForAi(terrain) {
+  if (!terrain) {
+    return null;
+  }
+  return {
+    id: terrain.id,
+    contentId: `terrain:${terrain.id}`,
+    kind: "terrain",
+    name: terrain.name,
+    rows: terrain.rows,
+    cols: terrain.cols,
+    sourceLabel: terrain.sourceLabel ?? null,
+    extentVisible: Boolean(terrain.extentVisible),
+    hasCoverageLayer: state.terrainCoverageLayers.has(terrain.id),
+    hidden: state.hiddenContentIds.has(`terrain:${terrain.id}`),
+    folderId: getMapContentFolderId(`terrain:${terrain.id}`),
+  };
+}
+
+function serializePlanningRegionForAi() {
+  if (!state.planning.regionLayer) {
+    return null;
+  }
+  const latLngs = state.planning.regionLayer.getLatLngs?.() ?? [];
+  const outer = Array.isArray(latLngs[0]) ? latLngs[0] : latLngs;
+  const areaSqMeters = measurePolygonAreaSqMeters(outer);
+  const perimeterMeters = measureLatLngPath(outer, true);
+  return {
+    contentId: "planning-region",
+    kind: "planning-region",
+    name: state.planning.regionName,
+    geometryType: "Polygon",
+    hidden: state.hiddenContentIds.has("planning-region"),
+    geometry: {
+      type: "Polygon",
+      coordinates: [serializeLatLngCollectionForAi(outer)],
+    },
+    bounds: serializeBoundsForAi(state.planning.regionLayer.getBounds?.()),
+    metrics: {
+      areaSqMeters: roundAiNumber(areaSqMeters, 2),
+      areaLabel: areaSqMeters > 0 ? formatShapeArea(areaSqMeters) : null,
+      perimeterMeters: roundAiNumber(perimeterMeters, 2),
+      perimeterLabel: perimeterMeters > 0 ? formatDistance(perimeterMeters) : null,
+    },
+  };
+}
+
+function serializePlanningResultsForAi() {
+  if (!state.planning.recommendations.length) {
+    return null;
+  }
+  return {
+    contentId: "planning-results",
+    kind: "planning-results",
+    name: state.planning.resultsName,
+    hidden: state.hiddenContentIds.has("planning-results"),
+    recommendations: state.planning.recommendations.map((recommendation, index) => ({
+      index: index + 1,
+      score: roundAiNumber(recommendation.score, 4),
+      tx: recommendation.tx
+        ? {
+          id: recommendation.tx.id,
+          name: recommendation.tx.name,
+          lat: roundAiNumber(recommendation.tx.lat),
+          lon: roundAiNumber(recommendation.tx.lon),
+        }
+        : null,
+      rx: recommendation.rx
+        ? {
+          id: recommendation.rx.id,
+          name: recommendation.rx.name,
+          lat: roundAiNumber(recommendation.rx.lat),
+          lon: roundAiNumber(recommendation.rx.lon),
+        }
+        : null,
+    })),
+  };
+}
+
+function serializeMapContentForAi(contentId) {
+  if (!contentId || contentId.startsWith("folder:")) {
+    return null;
+  }
+
+  if (contentId.startsWith("asset:")) {
+    return serializeAssetForAi(state.assets.find((asset) => `asset:${asset.id}` === contentId));
+  }
+
+  if (contentId.startsWith("viewshed:")) {
+    return serializeViewshedForAi(state.viewsheds.find((viewshed) => `viewshed:${viewshed.id}` === contentId));
+  }
+
+  if (contentId.startsWith("imported:")) {
+    return serializeImportedItemForAi(state.importedItems.find((item) => `imported:${item.id}` === contentId));
+  }
+
+  if (contentId.startsWith("terrain:")) {
+    return serializeTerrainForAi(state.terrains.find((terrain) => `terrain:${terrain.id}` === contentId));
+  }
+
+  if (contentId === "planning-region") {
+    return serializePlanningRegionForAi();
+  }
+
+  if (contentId === "planning-results") {
+    return serializePlanningResultsForAi();
+  }
+
+  return null;
+}
+
+function getAiContextIds(explicitContextIds = []) {
+  const merged = [...explicitContextIds];
+  if (state.ai.activeContextId && !merged.includes(state.ai.activeContextId)) {
+    merged.unshift(state.ai.activeContextId);
+  }
+  return merged.filter((contentId, index) => merged.indexOf(contentId) === index && Boolean(serializeMapContentForAi(contentId)));
+}
+
+function appendAiMessage(role, text, images = []) {
+  const controller = createAiMessageController(role, text, images);
+  controller.setStatus(role === "assistant" ? "Response ready" : "Sent");
+}
+
+function isGenAiMilKey(key) {
+  return key.startsWith("STARK_") || key.startsWith("STARK-");
+}
+
+async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
+  const { provider, apiKey } = state.ai;
+
+  if (provider === "genai-mil") {
+    if (!isGenAiMilKey(apiKey)) {
+      state.ai.status = "error";
+      state.ai.statusMessage = "GenAI.mil keys must start with STARK_.";
+      syncAiUi();
+      return;
+    }
+    state.ai.status = "testing";
+    state.ai.statusMessage = "Testing GenAI.mil access. If direct access is blocked, the app will try the local proxy on 127.0.0.1:8787.";
+    syncAiUi();
+    try {
+      const text = await callGenAiMil([{ role: "user", content: "Reply with READY only." }], 16, 0);
+      if (!/READY/i.test(text)) throw new Error("GenAI.mil returned an unexpected validation response.");
+      state.ai.status = "ready";
+      state.ai.statusMessage = "GenAI.mil connected. AI chat is enabled.";
+      syncAiUi();
+      if (openPanelOnSuccess) {
+        openAiPanel();
+      }
+    } catch (error) {
+      state.ai.status = "error";
+      state.ai.statusMessage = error.message;
+      syncAiUi();
+    }
+    return;
+  }
+
+  if (provider === "anthropic") {
+    if (!apiKey.startsWith("sk-")) {
+      state.ai.status = "error";
+      state.ai.statusMessage = "Anthropic API keys must start with sk-.";
+      syncAiUi();
+      return;
+    }
+    state.ai.status = "testing";
+    state.ai.statusMessage = "Testing Anthropic API access...";
+    syncAiUi();
+    try {
+      await callAnthropic([{ role: "user", content: "Reply with READY only." }], 16, 0);
+      state.ai.status = "ready";
+      state.ai.statusMessage = "Anthropic (Claude) connected. AI chat is enabled.";
+      syncAiUi();
+      if (openPanelOnSuccess) {
+        openAiPanel();
+      }
+    } catch (error) {
+      state.ai.status = "error";
+      state.ai.statusMessage = error.message;
+      syncAiUi();
+    }
+    return;
+  }
+
+  state.ai.status = "error";
+  state.ai.statusMessage = "Unknown provider selected.";
+  syncAiUi();
+}
+
+async function callAiPlanningAssistant(prompt, images = [], contextIds = [], { onStatus } = {}) {
+  const scenarioSummary = buildAiScenarioSummary();
+  const contextDetail = buildContextDetail(contextIds);
+
+  const systemText = [
+    "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
+    "You have deep knowledge of military and civilian radio systems, link budget analysis, antenna theory, terrain effects on propagation, and spectrum management.",
+    "",
+    "You are given the full current scenario state. You can answer questions AND execute actions that manipulate the live map and simulation.",
+    "Return ONLY valid JSON with this schema:",
+    '{"assistantMessage":"string","actions":[{"type":"ACTION_TYPE","...":"fields"}]}',
+    "If you are only answering a question with no map changes, you MAY reply with plain text instead of JSON.",
+    "",
+    "═══════════════════════════════════════",
+    "ACTION TYPES (ONLY use these exact strings for the \"type\" field):",
+    "═══════════════════════════════════════",
+    "  set-map-view          → lat, lon, zoom",
+    "  focus-map-content     → contentId",
+    "  set-settings          → measurementUnits?, theme?, coordinateSystem?, gridLinesEnabled?",
+    "  set-weather           → temperatureC?, humidity?, pressure?, windSpeed?",
+    "  set-imagery           → basemap?",
+    "  set-emitter-form      → (emitter fields — pre-fills the UI form only, does NOT place an asset)",
+    "  add-asset             → lat, lon, emitterType, name, force?, unit?, frequencyMHz, powerW, antennaHeightM, antennaGainDbi, receiverSensitivityDbm, systemLossDb, notes?",
+    "  update-asset          → assetId (exact id), lat?, lon?, emitterType?, name?, force?, unit?, frequencyMHz?, powerW?, antennaHeightM?, antennaGainDbi?, receiverSensitivityDbm?, systemLossDb?",
+    "  remove-asset          → assetId (exact id)",
+    "  draw-shape            → shapeType (circle|rectangle|polyline|polygon), name?, color?, fillOpacity?, weight?, coordinates [{lat,lon}], radiusM? (circle only)",
+    "  update-shape          → shapeId or name, color?, fillOpacity?, weight?, coordinates?",
+    "  remove-shape          → shapeId or name",
+    "  set-planning-parameters → txAssetId?, rxAssetId?, gridMeters?, minSeparation?, enemyWeight?, separationWeight?, floorM?, ceilingM?",
+    "  set-planning-region   → polygon [{lat,lon}], name?",
+    "  run-simulation        → assetId OR placedIndex (0-based index into assets placed THIS batch), propagationModel?, radiusKm?, gridMeters?, receiverHeight?, opacity?",
+    "  run-planning          → (no fields)",
+    "  toggle-3d             → enabled?",
+    "  check-los             → candidates: [{lat, lon, name, antennaHeightM?}] — checks terrain LOS between candidate positions BEFORE placement. Returns BLOCKED/CLEAR for each pair. Use this when you are uncertain about terrain obstruction.",
+    "",
+    "═══════════════════════════════════════",
+    "ADD-ASSET FIELD REFERENCE:",
+    "═══════════════════════════════════════",
+    "  emitterType           → Equipment category string: \"radio\", \"jammer\", \"radar\", \"relay\", \"sensor\", or a model name like \"PRC-163\"",
+    "                          ⚠ This is DIFFERENT from the action \"type\" field. Use \"emitterType\" for the equipment label.",
+    "  force                 → \"friendly\" | \"enemy\" | \"host-nation\" | \"civilian\"  (default: \"friendly\")",
+    "  name                  → Display name, e.g. \"PRC-163 Alpha\", \"Radio 1\"",
+    "  unit                  → Unit/callsign, e.g. \"1-68 AR\", \"K 1\"",
+    "  frequencyMHz          → Operating frequency in MHz (REQUIRED — no default)",
+    "  powerW                → Transmit power in watts (REQUIRED — no default)",
+    "  antennaHeightM        → Antenna height above ground in meters",
+    "  antennaGainDbi        → Antenna gain in dBi",
+    "  receiverSensitivityDbm → Receiver sensitivity in dBm (negative number)",
+    "  systemLossDb          → Feeder/system losses in dB",
+    "",
+    "KNOWN RADIO PROFILES (use these exact values unless user specifies otherwise):",
+    "  PRC-163 (Harris Falcon III multiband):  frequencyMHz=150, powerW=5, antennaHeightM=2, antennaGainDbi=2.15, receiverSensitivityDbm=-107, systemLossDb=3",
+    "  PRC-152A (Harris Falcon III):           frequencyMHz=150, powerW=5, antennaHeightM=2, antennaGainDbi=2.15, receiverSensitivityDbm=-107, systemLossDb=3",
+    "  PRC-117G (SATCOM/VHF/UHF):              frequencyMHz=300, powerW=20, antennaHeightM=2, antennaGainDbi=2.15, receiverSensitivityDbm=-107, systemLossDb=3",
+    "  AN/PRC-77 (legacy VHF):                 frequencyMHz=60, powerW=4, antennaHeightM=2, antennaGainDbi=2.0, receiverSensitivityDbm=-105, systemLossDb=3",
+    "  SINCGARS (AN/VRC-90):                   frequencyMHz=50, powerW=50, antennaHeightM=3, antennaGainDbi=2.15, receiverSensitivityDbm=-107, systemLossDb=2",
+    "",
+    "═══════════════════════════════════════",
+    "MULTI-ASSET PLACEMENT + SIMULATION PATTERN:",
+    "═══════════════════════════════════════",
+    "When placing N assets and then simulating each:",
+    "  1. Emit N add-asset actions (they execute in order). Each returns the placed asset's ID.",
+    "  2. Emit N run-simulation actions. Use placedIndex to reference each new asset by its",
+    "     position in the placement list: placedIndex=0 targets the 1st add-asset, placedIndex=1 the 2nd, etc.",
+    "  3. NEVER use assetId for newly added assets — the ID doesn't exist yet at prompt time.",
+    "  4. NEVER run-simulation without a placedIndex or assetId — it will run on the wrong asset.",
+    "",
+    "Example for 3 radios + 3 simulations:",
+    '  {"type":"add-asset","lat":34.41,"lon":-116.57,"emitterType":"PRC-163","name":"PRC-163 Alpha",...}',
+    '  {"type":"add-asset","lat":34.42,"lon":-116.55,"emitterType":"PRC-163","name":"PRC-163 Bravo",...}',
+    '  {"type":"add-asset","lat":34.40,"lon":-116.55,"emitterType":"PRC-163","name":"PRC-163 Charlie",...}',
+    '  {"type":"run-simulation","placedIndex":0,"radiusKm":30}',
+    '  {"type":"run-simulation","placedIndex":1,"radiusKm":30}',
+    '  {"type":"run-simulation","placedIndex":2,"radiusKm":30}',
+    "",
+    "═══════════════════════════════════════",
+    "TERRAIN LINE-OF-SIGHT AWARENESS:",
+    "═══════════════════════════════════════",
+    "The scenario summary includes a `terrainLosMatrix` array. Each entry covers one asset pair:",
+    "  { from, to, distanceKm, losBlocked, minClearanceM, obstructionFrac, obstructionLat, obstructionLon, terrainAvailable }",
+    "  losBlocked=true  → terrain physically blocks the LOS path between those assets.",
+    "  minClearanceM    → how many meters of clearance the LOS line has above terrain at the worst point (negative = blocked).",
+    "  obstructionFrac  → where along the path (0=from, 1=to) the worst obstruction occurs.",
+    "  terrainAvailable=false → no DTED loaded, LOS cannot be verified.",
+    "",
+    "BEFORE recommending or placing assets, CHECK the terrainLosMatrix for existing assets.",
+    "WHEN PLACING NEW ASSETS, the system will compute LOS after placement and report warnings.",
+    "LOS PLACEMENT RULES:",
+    "  • Never place a radio on the VALLEY side of a mountain range relative to its intended peer — it will be blocked.",
+    "  • Ridgelines and hilltops maximise LOS. Place assets near the highest local terrain within the polygon.",
+    "  • If two assets must communicate across a valley, they both need to be on elevated terrain above the valley floor.",
+    "  • Repeater/relay placement: if direct LOS is impossible, suggest a relay on an intermediate high point.",
+    "  • For 3 radios requiring mutual coverage: a triangular arrangement on elevated terrain at polygon corners/ridges is ideal — NOT a cluster in one area.",
+    "  • Earth curvature matters for links >30 km: a 5 W VHF radio at 2 m antenna height has radio horizon of ~7–10 km in flat terrain.",
+    "  • If terrain data is NOT available (terrainAvailable=false), state this limitation clearly and place assets conservatively on estimated high ground based on polygon geometry.",
+    "",
+    "═══════════════════════════════════════",
+    "SPATIAL REASONING:",
+    "═══════════════════════════════════════",
+    "- Polygon boundaries (AO Boundary, drawn polygons) are in importedItems[].geometry.coordinates[0] as [{lat,lon}].",
+    "- Compute the polygon centroid and bounding box. Place assets distributed inside — NOT outside.",
+    "- For 'highest elevation': examine the polygon vertex coordinates. Vertices at the extremes of the bounding box (especially corners) tend to be on ridgelines. Avoid placing in the center of a large polygon — that's often a valley or flat plain.",
+    "- Separation check: compute haversine distance between all pairs. With 1 km minimum and 3 assets, use a triangle with ~1.5–3 km sides.",
+    "- Always verify all placed coordinates are actually inside the polygon before including them.",
+    "",
+    "═══════════════════════════════════════",
+    "RF PLANNING EXPERTISE — SANITY CHECKS:",
+    "═══════════════════════════════════════",
+    "Before executing any RF configuration, check for these issues and FLAG them to the user:",
+    "  • Power out of range: <0.1 W or >100 W for handheld/manpack radios is suspicious",
+    "  • Frequency mismatch: VHF radios (30–300 MHz) being configured at UHF frequencies (>300 MHz) or vice versa",
+    "  • Receiver sensitivity too high (>-80 dBm) indicates poor sensitivity; too low (<-120 dBm) is unrealistic for most hardware",
+    "  • Antenna gain >15 dBi on a manpack system is physically implausible",
+    "  • Antenna height <0.5 m will be blocked by operator's body; >30 m without a mast/tower is unrealistic",
+    "  • System loss <1 dB or >20 dB is unusual — check cable/connector assumptions",
+    "  • Placing a radio on terrain that's clearly a valley floor when 'highest elevation' was requested",
+    "  • Running simulation radius >>50 km for a 5 W VHF handheld — signal won't reach that far",
+    "If the user requests a configuration that violates any of the above, respond with a warning in assistantMessage explaining why the configuration may not work as intended, and ask for confirmation. Include the actions anyway so the user can approve and proceed, but mark them clearly in your message.",
+    "",
+    "GENERAL RULES:",
+    "- ONLY use action type strings from the list above. 'radio', 'jammer', 'PRC-163' etc. are NOT action types — they are emitterType values inside add-asset.",
+    "- ALWAYS use the exact `id` field from the assets array for assetId — never use name as ID.",
+    "- For existing assets (in the assets[] list), use their id in run-simulation directly.",
+    "- For assets placed THIS batch, use placedIndex.",
+    "- For draw-shape circle: put center in coordinates[0], set radiusM.",
+    "- Do not reference unavailable tools or external URLs.",
+    "- If no action is needed, return an empty actions array.",
+    "SCENARIO SUMMARY:",
+    scenarioSummary,
+    contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
+    "USER REQUEST:",
+    prompt || "(see attached image)",
+  ].filter(Boolean).join("\n\n");
+
+  // Build multimodal content for Anthropic; text-only fallback for GenAI.mil
+  let messages;
+  if (state.ai.provider === "anthropic" && images.length > 0) {
+    const contentBlocks = [];
+    images.forEach(({ dataUrl, mediaType }) => {
+      const base64 = dataUrl.split(",")[1];
+      contentBlocks.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64 } });
+    });
+    contentBlocks.push({ type: "text", text: systemText });
+    messages = [{ role: "user", content: contentBlocks }];
+  } else {
+    const imageNote = images.length ? `\n[User attached ${images.length} image(s) — not supported by this provider, ignoring.]` : "";
+    messages = [{ role: "user", content: systemText + imageNote }];
+  }
+
+  onStatus?.("Contacting provider");
+  const raw = state.ai.provider === "anthropic"
+    ? await callAnthropic(messages, 4096, 0.2)
+    : await callGenAiMil(messages, 4096, 0.2);
+  onStatus?.("Parsing response");
+  const parsed = parseAiAssistantResponse(raw);
+  return {
+    assistantMessage: typeof parsed.assistantMessage === "string" && parsed.assistantMessage.trim()
+      ? parsed.assistantMessage.trim()
+      : "I reviewed the scenario.",
+    actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+  };
+}
+
+async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
+  const payload = {
+    model: GENAI_MIL_MODEL,
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+  };
+
+  let response;
+  try {
+    response = await callGenAiMilEndpoint(GENAI_MIL_ENDPOINT, state.ai.apiKey, payload);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      try {
+        response = await callGenAiMilEndpoint(GENAI_MIL_PROXY_ENDPOINT, state.ai.apiKey, payload);
+        state.ai.statusMessage = "GenAI.mil connected through the local proxy on 127.0.0.1:8787.";
+        syncAiUi();
+      } catch (proxyError) {
+        if (proxyError instanceof TypeError) {
+          throw new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
+        }
+        throw proxyError;
+      }
+    }
+    throw error;
+  }
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    if (bodyText.startsWith("<!doctype") || bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`GenAI.mil authentication failed (HTTP ${response.status}). Check your STARK API key and network access.`);
+      }
+      throw new Error(`GenAI.mil may only be reachable from approved networks. HTTP ${response.status}.`);
+    }
+    try {
+      const parsedError = JSON.parse(bodyText);
+      const message = parsedError?.error?.message || parsedError?.message;
+      if (message) {
+        throw new Error(`GenAI.mil (${response.status}): ${message}`);
+      }
+    } catch (parseError) {
+      if (parseError.message.startsWith("GenAI.mil")) {
+        throw parseError;
+      }
+    }
+    throw new Error(`GenAI.mil request failed (HTTP ${response.status}).`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    throw new Error("GenAI.mil returned a non-JSON response.");
+  }
+  const content = parsed?.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("GenAI.mil returned an empty completion.");
+  }
+  return content;
+}
+
+async function callGenAiMilEndpoint(url, apiKey, payload) {
+  return await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+      "X-Api-Key": apiKey,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
+  const ANTHROPIC_MODEL = "claude-sonnet-4-6";
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": state.ai.apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: maxTokens,
+      temperature,
+      messages,
+    }),
+  });
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    try {
+      const err = JSON.parse(bodyText);
+      const msg = err?.error?.message || err?.message;
+      if (msg) throw new Error(`Anthropic (${response.status}): ${msg}`);
+    } catch (e) {
+      if (e.message.startsWith("Anthropic")) throw e;
+    }
+    throw new Error(`Anthropic request failed (HTTP ${response.status}).`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    throw new Error("Anthropic returned a non-JSON response.");
+  }
+  const content = parsed?.content?.[0]?.text;
+  if (!content) throw new Error("Anthropic returned an empty completion.");
+  return content;
+}
+
+function parseAiAssistantResponse(text) {
+  const normalized = typeof text === "string" ? text.trim() : "";
+  if (!normalized) {
+    return { assistantMessage: "", actions: [] };
+  }
+
+  try {
+    return normalizeAiAssistantPayload(JSON.parse(normalized), normalized);
+  } catch {
+    const match = normalized.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return { assistantMessage: normalized, actions: [] };
+    }
+    try {
+      return normalizeAiAssistantPayload(JSON.parse(match[0]), normalized);
+    } catch {
+      return { assistantMessage: normalized, actions: [] };
+    }
+  }
+}
+
+function normalizeAiAssistantPayload(payload, rawText = "") {
+  if (typeof payload === "string") {
+    return { assistantMessage: payload, actions: [] };
+  }
+  if (!payload || typeof payload !== "object") {
+    return { assistantMessage: rawText, actions: [] };
+  }
+
+  const assistantMessage = typeof payload.assistantMessage === "string"
+    ? payload.assistantMessage
+    : typeof payload.message === "string"
+      ? payload.message
+      : rawText;
+
+  return {
+    assistantMessage,
+    actions: Array.isArray(payload.actions) ? payload.actions : [],
+  };
+}
+
+// ─── Terrain-aware LOS check ────────────────────────────────────────────────
+
+// Sample terrain elevation along a geodesic path between two points.
+// Returns the minimum clearance (meters) between the LOS line and terrain,
+// the index and coordinates of the worst obstruction, and a compact profile.
+// Uses ~60 samples — fast enough to run synchronously for up to ~15 pairs.
+function computeTerrainLos(lat1, lon1, h1m, lat2, lon2, h2m, terrain) {
+  const SAMPLES = 60;
+  const EARTH_R = 6371000;
+  // k-factor for effective Earth radius (standard atmosphere)
+  const K = 4 / 3;
+  const Re = K * EARTH_R;
+
+  if (!terrain) {
+    return { hasTerrain: false };
+  }
+
+  const distM = state.map.distance({ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 });
+  if (distM < 10) {
+    return { hasTerrain: true, blocked: false, minClearanceM: 9999, distanceM: distM };
+  }
+
+  const el1 = sampleTerrainElevationForTerrain(lat1, lon1, terrain) ?? 0;
+  const el2 = sampleTerrainElevationForTerrain(lat2, lon2, terrain) ?? 0;
+
+  // Heights above MSL at each end
+  const msl1 = el1 + h1m;
+  const msl2 = el2 + h2m;
+
+  let minClearanceM = Infinity;
+  let worstFrac = 0;
+  let worstLat = lat1;
+  let worstLon = lon1;
+  let blocked = false;
+
+  for (let i = 1; i < SAMPLES; i++) {
+    const frac = i / SAMPLES;
+    // Interpolate lat/lon linearly (close enough for <200 km paths)
+    const lat = lat1 + (lat2 - lat1) * frac;
+    const lon = lon1 + (lon2 - lon1) * frac;
+
+    const terrainElM = sampleTerrainElevationForTerrain(lat, lon, terrain);
+    if (terrainElM === null) continue;
+
+    // LOS height at this fraction (straight line in MSL)
+    const losHeightM = msl1 + (msl2 - msl1) * frac;
+
+    // Earth bulge correction: depresses the effective LOS by d1*d2/(2*Re)
+    const d = frac * distM;
+    const d1 = d;
+    const d2 = distM - d;
+    const bulgeCorrectionM = (d1 * d2) / (2 * Re);
+
+    // Effective clearance: how far the LOS line clears the terrain at this point
+    const clearanceM = (losHeightM - bulgeCorrectionM) - terrainElM;
+
+    if (clearanceM < minClearanceM) {
+      minClearanceM = clearanceM;
+      worstFrac = frac;
+      worstLat = lat;
+      worstLon = lon;
+    }
+    if (clearanceM < 0) {
+      blocked = true;
+    }
+  }
+
+  return {
+    hasTerrain: true,
+    blocked,
+    minClearanceM: Math.round(minClearanceM),
+    distanceM: Math.round(distM),
+    obstructionFrac: blocked ? Math.round(worstFrac * 100) / 100 : null,
+    obstructionLat: blocked ? Math.round(worstLat * 10000) / 10000 : null,
+    obstructionLon: blocked ? Math.round(worstLon * 10000) / 10000 : null,
+  };
+}
+
+// Build a compact LOS matrix for all asset pairs (capped at 10 assets = 45 pairs).
+// Returns an array of link summaries the AI can use for placement decisions.
+function buildLosMatrix(assetsToCheck) {
+  const terrain = getActiveTerrain();
+  const links = [];
+  const cap = Math.min(assetsToCheck.length, 10);
+  for (let i = 0; i < cap; i++) {
+    for (let j = i + 1; j < cap; j++) {
+      const a = assetsToCheck[i];
+      const b = assetsToCheck[j];
+      const h1 = Number.isFinite(a.antennaHeightM) ? a.antennaHeightM : 2;
+      const h2 = Number.isFinite(b.antennaHeightM) ? b.antennaHeightM : 2;
+      const result = computeTerrainLos(a.lat, a.lon, h1, b.lat, b.lon, h2, terrain);
+      links.push({
+        from: a.name ?? a.id,
+        to: b.name ?? b.id,
+        distanceKm: result.distanceM ? Math.round(result.distanceM / 100) / 10 : null,
+        losBlocked: result.blocked ?? null,
+        minClearanceM: result.hasTerrain ? result.minClearanceM : null,
+        obstructionFrac: result.obstructionFrac ?? null,
+        obstructionLat: result.obstructionLat ?? null,
+        obstructionLon: result.obstructionLon ?? null,
+        terrainAvailable: result.hasTerrain,
+      });
+    }
+  }
+  return links;
+}
+
+// ─── End LOS check ──────────────────────────────────────────────────────────
+
+function buildAiScenarioSummary() {
+  const center = state.map.getCenter();
+  const terrain = getActiveTerrain();
+  const mapContents = getMapContentEntries().map((entry) => ({
+    ...entry,
+    hidden: state.hiddenContentIds.has(entry.id),
+    folderId: getMapContentFolderId(entry.id),
+    detail: serializeMapContentForAi(entry.id),
+  }));
+  const assets = state.assets.map((asset) => serializeAssetForAi(asset));
+  const viewsheds = state.viewsheds.map((viewshed) => serializeViewshedForAi(viewshed));
+  const planning = state.planning.recommendations.map((recommendation, index) => ({
+    index: index + 1,
+    tx: recommendation.tx?.name ?? recommendation.tx?.id,
+    rx: recommendation.rx?.name ?? recommendation.rx?.id,
+    score: roundAiNumber(recommendation.score, 4),
+  }));
+  const importedItems = state.importedItems.map((item) => serializeImportedItemForAi(item));
+  const activeAiContext = serializeMapContentForAi(state.ai.activeContextId);
+
+  return JSON.stringify({
+    map: {
+      center: { lat: Number(center.lat.toFixed(6)), lon: Number(center.lng.toFixed(6)) },
+      zoom: state.map.getZoom(),
+      view3dEnabled: state.view3dEnabled,
+      basemap: dom.basemapSelect.value,
+      terrainSource: dom.terrainSourceSelect.value,
+      imagerySource: dom.imagerySourceSelect.value,
+      radiusKm: Number(dom.radiusKm.value),
+    },
+    settings: state.settings,
+    weather: state.weather,
+    gps: {
+      mode: state.gps.mode,
+      centerMode: dom.gpsCenterMode.value,
+      location: state.gps.location,
+    },
+    terrain: terrain
+      ? serializeTerrainForAi(terrain)
+      : null,
+    terrainCatalog: state.terrains.map((entry) => serializeTerrainForAi(entry)),
+    emitterDraft: getEmitterFormData(),
+    simulationDraft: {
+      assetId: dom.assetSelect.value,
+      propagationModel: dom.propagationModel.value,
+      gridMeters: Number(dom.gridMeters.value),
+      receiverHeight: Number(dom.receiverHeight.value),
+      opacity: Number(dom.viewshedOpacity.value),
+    },
+    planningDraft: {
+      txAssetId: dom.planningTxAsset.value,
+      rxAssetId: dom.planningRxAsset.value,
+      gridMeters: Number(dom.planningGridMeters.value),
+      minSeparation: Number(dom.planningMinSeparation.value),
+      enemyWeight: Number(dom.planningEnemyWeight.value),
+      separationWeight: Number(dom.planningSeparationWeight.value),
+      floorM: Number(dom.planningFloorM.value),
+      ceilingM: Number(dom.planningCeilingM.value),
+      hasRegion: Boolean(state.planning.regionLayer),
+    },
+    assets,
+    viewsheds,
+    importedItems,
+    planning,
+    planningRegion: serializePlanningRegionForAi(),
+    planningResults: serializePlanningResultsForAi(),
+    mapContents,
+    activeAiContextId: state.ai.activeContextId,
+    activeAiContext,
+    explicitAiContextIds: [...state.ai.contextItemIds],
+    drawnShapes: importedItems.filter((item) => item?.drawn),
+    // Pre-computed terrain LOS matrix for all current asset pairs
+    terrainLosMatrix: buildLosMatrix(state.assets),
+    terrainLosSamplesPerLink: 60,
+  }, null, 2);
+}
+
+async function executeAiActions(actions) {
+  const results = [];
+  // Track asset IDs placed this batch so run-simulation can target them by index
+  const placedAssetIds = [];
+  for (const action of actions) {
+    const result = await executeAiAction(action, { placedAssetIds });
+    if (result) {
+      results.push(result);
+    }
+  }
+
+  // After all placements, run a LOS check on newly placed assets and append warnings
+  if (placedAssetIds.length >= 2) {
+    const newAssets = placedAssetIds.map((id) => state.assets.find((a) => a.id === id)).filter(Boolean);
+    const losLinks = buildLosMatrix(newAssets);
+    const blockedLinks = losLinks.filter((l) => l.losBlocked === true);
+    const marginalLinks = losLinks.filter((l) => l.losBlocked === false && l.minClearanceM !== null && l.minClearanceM < 10);
+    if (blockedLinks.length > 0) {
+      const warnings = blockedLinks.map((l) =>
+        `⚠ LOS BLOCKED: ${l.from} ↔ ${l.to} (${l.distanceKm} km) — terrain obstruction at ~${Math.round((l.obstructionFrac ?? 0.5) * 100)}% along path`
+      );
+      results.push(...warnings);
+    }
+    if (marginalLinks.length > 0) {
+      const warnings = marginalLinks.map((l) =>
+        `⚠ LOS MARGINAL: ${l.from} ↔ ${l.to} — only ${l.minClearanceM} m clearance above terrain`
+      );
+      results.push(...warnings);
+    }
+    if (blockedLinks.length === 0 && marginalLinks.length === 0 && losLinks.some((l) => l.terrainAvailable)) {
+      results.push(`✓ LOS clear on all ${losLinks.length} link(s) between placed assets.`);
+    }
+  }
+
+  return results;
+}
+
+async function executeAiAction(action, { placedAssetIds = [] } = {}) {
+  if (!action || typeof action.type !== "string") {
+    return "Skipped malformed action.";
+  }
+
+  if (action.type === "set-map-view") {
+    const lat = Number(action.lat ?? action.center?.lat);
+    const lon = Number(action.lon ?? action.center?.lon);
+    const zoom = Number.isFinite(Number(action.zoom)) ? Number(action.zoom) : state.map.getZoom();
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return "Skipped map view update with invalid coordinates.";
+    }
+    state.map.setView([lat, lon], clamp(zoom, 2, 18));
+    return `Moved map to ${lat.toFixed(4)}, ${lon.toFixed(4)}.`;
+  }
+
+  if (action.type === "focus-map-content") {
+    const contentId = resolveMapContentId(action.contentId ?? action.name);
+    if (!contentId) {
+      return "Skipped focus request because the map content was not found.";
+    }
+    focusMapContent(contentId);
+    return `Focused ${contentId}.`;
+  }
+
+  if (action.type === "set-settings") {
+    if (["metric", "standard"].includes(action.measurementUnits)) {
+      state.settings.measurementUnits = action.measurementUnits;
+    }
+    if (["dark", "light"].includes(action.theme)) {
+      state.settings.theme = action.theme;
+    }
+    if (["mgrs", "latlon", "dms"].includes(action.coordinateSystem)) {
+      state.settings.coordinateSystem = action.coordinateSystem;
+    }
+    if (typeof action.gridLinesEnabled === "boolean") {
+      state.settings.gridLinesEnabled = action.gridLinesEnabled;
+    }
+    if (typeof action.gridColor === "string") {
+      state.settings.gridColor = action.gridColor;
+    }
+    persistSettings();
+    applySettings();
+    return "Updated map settings.";
+  }
+
+  if (action.type === "set-weather") {
+    if (Number.isFinite(Number(action.temperatureC))) {
+      state.weather.temperatureC = Number(action.temperatureC);
+    }
+    if (Number.isFinite(Number(action.humidity))) {
+      state.weather.humidity = clamp(Number(action.humidity), 0, 100);
+    }
+    if (Number.isFinite(Number(action.pressureHpa))) {
+      state.weather.pressureHpa = Number(action.pressureHpa);
+    }
+    if (Number.isFinite(Number(action.windSpeedMps))) {
+      state.weather.windSpeedMps = Math.max(0, Number(action.windSpeedMps));
+    }
+    state.weather.source = "manual";
+    syncWeatherInputsFromState();
+    dom.weatherSummary.textContent = "Manual weather profile active.";
+    updateWeatherMenuValue();
+    return "Updated weather inputs.";
+  }
+
+  if (action.type === "set-imagery") {
+    if (typeof action.basemap === "string") {
+      dom.basemapSelect.value = action.basemap;
+      applyBasemap(dom.basemapSelect.value);
+    }
+    if (typeof action.customTileUrl === "string") {
+      dom.customTileUrl.value = action.customTileUrl;
+    }
+    if (Number.isFinite(Number(action.radiusKm))) {
+      dom.radiusKm.value = String(clamp(Number(action.radiusKm), 1, 300));
+    }
+    if (typeof action.terrainSource === "string") {
+      dom.terrainSourceSelect.value = action.terrainSource;
+    }
+    if (typeof action.imagerySource === "string") {
+      dom.imagerySourceSelect.value = action.imagerySource;
+    }
+    if (typeof action.customTerrainUrl === "string") {
+      dom.customTerrainUrl.value = action.customTerrainUrl;
+    }
+    updateImageryMenuValue();
+    syncCesiumScene();
+    return "Updated imagery and terrain source settings.";
+  }
+
+  if (action.type === "set-emitter-form") {
+    applyEmitterFormData(normalizeAiEmitterData(action));
+    return "Updated the emitter form draft.";
+  }
+
+  if (action.type === "add-asset") {
+    const assetLat = Number(action.lat);
+    const assetLon = Number(action.lon);
+    if (!Number.isFinite(assetLat) || !Number.isFinite(assetLon)) {
+      return "Skipped asset placement because coordinates were invalid.";
+    }
+    const emitterData = normalizeAiEmitterData(action.asset ?? action);
+    // Build asset directly — do NOT route through the shared emitter form so we
+    // don't accidentally inherit stale form state or overwrite it for subsequent placements.
+    const newAsset = {
+      id: crypto.randomUUID(),
+      type: emitterData.type ?? "radio",
+      force: emitterData.force ?? "friendly",
+      name: emitterData.name ?? "Asset",
+      unit: emitterData.unit ?? "",
+      frequencyMHz: Number.isFinite(emitterData.frequencyMHz) ? emitterData.frequencyMHz : 150,
+      powerW: Number.isFinite(emitterData.powerW) ? emitterData.powerW : 5,
+      antennaHeightM: Number.isFinite(emitterData.antennaHeightM) ? emitterData.antennaHeightM : 2,
+      antennaGainDbi: Number.isFinite(emitterData.antennaGainDbi) ? emitterData.antennaGainDbi : 2.15,
+      receiverSensitivityDbm: Number.isFinite(emitterData.receiverSensitivityDbm) ? emitterData.receiverSensitivityDbm : -107,
+      systemLossDb: Number.isFinite(emitterData.systemLossDb) ? emitterData.systemLossDb : 3,
+      icon: emitterData.icon ?? "",
+      color: emitterData.color ?? FORCE_COLORS["friendly"],
+      notes: emitterData.notes ?? "",
+      lat: assetLat,
+      lon: assetLon,
+      groundElevationM: sampleTerrainElevation(assetLat, assetLon),
+    };
+    const latlng = { lat: assetLat, lng: assetLon };
+    const marker = L.marker(latlng, {
+      icon: createEmitterIcon(newAsset),
+      pane: getMapContentPaneName(`asset:${newAsset.id}`),
+    }).addTo(state.map);
+    marker.bindPopup(renderAssetPopup(newAsset));
+    state.assetMarkers.set(newAsset.id, marker);
+    state.assets.push(newAsset);
+    renderAssets();
+    syncCesiumEntities();
+    renderMapContents();
+    saveMapState();
+    if (!Number.isFinite(newAsset.groundElevationM) && usesConfiguredCesiumTerrain()) {
+      refreshAssetGroundElevation(newAsset).catch(() => {});
+    }
+    // Track so subsequent run-simulation actions in this batch can target it
+    placedAssetIds.push(newAsset.id);
+    return `Placed ${newAsset.name} (${newAsset.frequencyMHz} MHz, ${newAsset.powerW} W) at ${assetLat.toFixed(5)}, ${assetLon.toFixed(5)}. assetId=${newAsset.id}`;
+  }
+
+  if (action.type === "update-asset") {
+    const asset = findAssetByReference(action.assetId ?? action.name);
+    if (!asset) {
+      return "Skipped asset update because the asset was not found.";
+    }
+    Object.assign(asset, normalizeAiEmitterData(action.changes ?? action));
+    if (Number.isFinite(Number(action.lat))) {
+      asset.lat = Number(action.lat);
+    }
+    if (Number.isFinite(Number(action.lon))) {
+      asset.lon = Number(action.lon);
+    }
+    asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+    const marker = state.assetMarkers.get(asset.id);
+    if (marker) {
+      marker.setLatLng([asset.lat, asset.lon]);
+    }
+    updateAssetMarker(asset);
+    renderAssets();
+    renderMapContents();
+    syncCesiumEntities();
+    if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
+      refreshAssetGroundElevation(asset).catch(() => {});
+    }
+    return `Updated ${asset.name}.`;
+  }
+
+  if (action.type === "remove-asset") {
+    const asset = findAssetByReference(action.assetId ?? action.name);
+    if (!asset) {
+      return "Skipped asset removal because the asset was not found.";
+    }
+    removeAsset(asset.id);
+    return `Removed ${asset.name}.`;
+  }
+
+  if (action.type === "set-planning-parameters") {
+    const txAsset = findAssetByReference(action.txAssetId ?? action.txAssetName);
+    const rxAsset = findAssetByReference(action.rxAssetId ?? action.rxAssetName);
+    if (txAsset) {
+      dom.planningTxAsset.value = txAsset.id;
+    }
+    if (rxAsset) {
+      dom.planningRxAsset.value = rxAsset.id;
+    }
+    if (Number.isFinite(Number(action.gridMeters))) {
+      dom.planningGridMeters.value = String(Number(action.gridMeters));
+    }
+    if (Number.isFinite(Number(action.minSeparation))) {
+      dom.planningMinSeparation.value = String(Number(action.minSeparation));
+    }
+    if (Number.isFinite(Number(action.enemyWeight))) {
+      dom.planningEnemyWeight.value = String(Number(action.enemyWeight));
+    }
+    if (Number.isFinite(Number(action.separationWeight))) {
+      dom.planningSeparationWeight.value = String(Number(action.separationWeight));
+    }
+    if (Number.isFinite(Number(action.floorM))) {
+      dom.planningFloorM.value = String(Number(action.floorM));
+    }
+    if (Number.isFinite(Number(action.ceilingM))) {
+      dom.planningCeilingM.value = String(Number(action.ceilingM));
+    }
+    return "Updated planning inputs.";
+  }
+
+  if (action.type === "set-planning-region") {
+    const polygon = Array.isArray(action.polygon) ? action.polygon : [];
+    if (polygon.length < 3) {
+      return "Skipped planning region update because the polygon was invalid.";
+    }
+    if (state.planning.regionLayer) {
+      state.map.removeLayer(state.planning.regionLayer);
+    }
+    state.planning.regionLayer = L.polygon(polygon.map((point) => [point.lat, point.lon]), {
+      color: "#f7b955",
+      weight: 2,
+      fillOpacity: 0.08,
+      pane: getMapContentPaneName("planning-region"),
+    }).addTo(state.map);
+    if (typeof action.name === "string" && action.name.trim()) {
+      state.planning.regionName = action.name.trim();
+    }
+    renderMapContents();
+    return "Updated the planning region.";
+  }
+
+  if (action.type === "run-simulation") {
+    // Resolve target asset: explicit assetId > placedIndex (into this batch's placed list) > name search > current select
+    let simAsset = null;
+    if (action.assetId) {
+      // Could be a literal ID or one returned as "assetId=<uuid>" from a prior add-asset result
+      simAsset = findAssetByReference(action.assetId);
+    }
+    if (!simAsset && Number.isFinite(Number(action.placedIndex)) && placedAssetIds[Number(action.placedIndex)]) {
+      simAsset = state.assets.find((a) => a.id === placedAssetIds[Number(action.placedIndex)]);
+    }
+    if (!simAsset && action.assetName) {
+      simAsset = findAssetByReference(action.assetName);
+    }
+    if (simAsset) {
+      dom.assetSelect.value = simAsset.id;
+    }
+    // Ensure the select has the asset we want — if not found, abort to avoid running on wrong asset
+    const targetId = simAsset?.id ?? dom.assetSelect.value;
+    const targetAsset = state.assets.find((a) => a.id === targetId);
+    if (!targetAsset) {
+      return "Skipped run-simulation: no valid asset selected.";
+    }
+    dom.assetSelect.value = targetAsset.id;
+    if (typeof action.propagationModel === "string") {
+      dom.propagationModel.value = action.propagationModel;
+    }
+    if (Number.isFinite(Number(action.receiverHeight))) {
+      dom.receiverHeight.value = String(Number(action.receiverHeight));
+    }
+    if (Number.isFinite(Number(action.gridMeters))) {
+      dom.gridMeters.value = String(Number(action.gridMeters));
+    }
+    if (Number.isFinite(Number(action.radiusKm))) {
+      dom.radiusKm.value = String(Number(action.radiusKm));
+    }
+    if (Number.isFinite(Number(action.opacity))) {
+      dom.viewshedOpacity.value = String(Number(action.opacity));
+    }
+    await runSimulation();
+    return `Started coverage generation for ${targetAsset.name}.`;
+  }
+
+  if (action.type === "run-planning") {
+    await runPlanning();
+    return "Started terrain-aware site planning.";
+  }
+
+  if (action.type === "toggle-3d") {
+    const nextEnabled = typeof action.enabled === "boolean" ? action.enabled : !state.view3dEnabled;
+    if (nextEnabled !== state.view3dEnabled) {
+      await toggle3dView();
+    }
+    return nextEnabled ? "Switched to 3D view." : "Switched to 2D view.";
+  }
+
+  if (action.type === "draw-shape") {
+    const rawCoords = Array.isArray(action.coordinates) ? action.coordinates : [];
+    if (rawCoords.length === 0) return "Skipped draw-shape: no coordinates provided.";
+    const toLatLng = (c) => ({ lat: Number(c.lat ?? c[0]), lng: Number(c.lon ?? c.lng ?? c[1]) });
+    const shapeStyle = {
+      color: typeof action.color === "string" ? action.color : DRAW_DEFAULTS.color,
+      lineStyle: ["solid", "dashed", "dotted"].includes(action.lineStyle) ? action.lineStyle : DRAW_DEFAULTS.lineStyle,
+      fillOpacity: Number.isFinite(Number(action.fillOpacity)) ? Number(action.fillOpacity) : DRAW_DEFAULTS.fillOpacity,
+      weight: Number.isFinite(Number(action.weight)) ? Number(action.weight) : DRAW_DEFAULTS.weight,
+    };
+    const shapeType = (action.shapeType ?? "polygon").toLowerCase();
+    let geometryType, coords, labelPrefix;
+
+    if (shapeType === "circle") {
+      const center = toLatLng(rawCoords[0]);
+      const radiusM = Number(action.radiusM) || 1000;
+      coords = circleToPolygonLatLngs(center, radiusM).map((p) => [p[0], p[1]]);
+      geometryType = "Polygon";
+      labelPrefix = action.name ?? "Circle";
+    } else if (shapeType === "rectangle") {
+      const pts = rawCoords.map(toLatLng);
+      const a = pts[0], b = pts[pts.length > 1 ? 1 : 0];
+      coords = [[a.lat, a.lng], [a.lat, b.lng], [b.lat, b.lng], [b.lat, a.lng]];
+      geometryType = "Polygon";
+      labelPrefix = action.name ?? "Rectangle";
+    } else if (shapeType === "polyline" || (shapeType === "line")) {
+      coords = rawCoords.map((c) => { const p = toLatLng(c); return [p.lat, p.lng]; });
+      geometryType = "LineString";
+      labelPrefix = action.name ?? "Line";
+    } else {
+      coords = rawCoords.map((c) => { const p = toLatLng(c); return [p.lat, p.lng]; });
+      geometryType = "Polygon";
+      labelPrefix = action.name ?? "Shape";
+    }
+
+    const index = state.importedItems.filter((i) => i.drawn).length;
+    addDrawnFeature({
+      name: `${labelPrefix} ${index + 1}`,
+      geometryType,
+      coordinates: coords,
+      properties: {},
+      shapeStyle,
+    });
+    return `Drew ${geometryType.toLowerCase()} shape "${labelPrefix}".`;
+  }
+
+  if (action.type === "update-shape") {
+    const ref = action.shapeId ?? action.name;
+    const item = state.importedItems.find((i) => i.drawn && (i.id === ref || i.name === ref));
+    if (!item) return `Skipped update-shape: shape "${ref}" not found.`;
+    if (typeof action.color === "string") item.shapeStyle.color = action.color;
+    if (["solid", "dashed", "dotted"].includes(action.lineStyle)) item.shapeStyle.lineStyle = action.lineStyle;
+    if (Number.isFinite(Number(action.fillOpacity))) item.shapeStyle.fillOpacity = Number(action.fillOpacity);
+    if (Number.isFinite(Number(action.weight))) item.shapeStyle.weight = Number(action.weight);
+    applyShapeStyleToLayer(item);
+    if (Array.isArray(action.coordinates) && action.coordinates.length >= 2) {
+      const pts = action.coordinates.map((c) => [Number(c.lat ?? c[0]), Number(c.lon ?? c.lng ?? c[1])]);
+      item.layer.setLatLngs(pts);
+    }
+    saveMapState();
+    syncCesiumEntities();
+    return `Updated shape "${item.name}".`;
+  }
+
+  if (action.type === "remove-shape") {
+    const ref = action.shapeId ?? action.name;
+    const item = state.importedItems.find((i) => i.drawn && (i.id === ref || i.name === ref));
+    if (!item) return `Skipped remove-shape: shape "${ref}" not found.`;
+    removeImportedItem(item.id);
+    return `Removed shape "${ref}".`;
+  }
+
+  // Check LOS between a set of candidate coordinates before committing to placement.
+  // action.candidates: [{lat, lon, name, antennaHeightM?}]
+  if (action.type === "check-los") {
+    const terrain = getActiveTerrain();
+    if (!terrain) {
+      return "LOS check skipped: no DTED terrain loaded. Cannot verify line-of-sight.";
+    }
+    const candidates = Array.isArray(action.candidates) ? action.candidates : [];
+    if (candidates.length < 2) {
+      return "LOS check skipped: need at least 2 candidate positions.";
+    }
+    const links = buildLosMatrix(candidates.map((c) => ({
+      lat: Number(c.lat),
+      lon: Number(c.lon ?? c.lng),
+      name: c.name ?? `Point ${candidates.indexOf(c) + 1}`,
+      antennaHeightM: Number(c.antennaHeightM) || 2,
+    })));
+    const lines = links.map((l) =>
+      l.losBlocked
+        ? `BLOCKED: ${l.from} ↔ ${l.to} (${l.distanceKm} km) — obstruction at ${Math.round((l.obstructionFrac ?? 0.5) * 100)}% along path`
+        : `CLEAR: ${l.from} ↔ ${l.to} (${l.distanceKm} km, ${l.minClearanceM} m clearance)`
+    );
+    return `LOS check results:\n${lines.join("\n")}`;
+  }
+
+  return `Skipped unsupported action type ${action.type}.`;
+}
+
+function normalizeAiEmitterData(source) {
+  if (!source || typeof source !== "object") {
+    return {};
+  }
+  const normalized = {};
+  // Accept emitterType as the unambiguous alias; also accept type but only when it
+  // doesn't look like an action discriminator (action types are hyphenated).
+  const rawType = source.emitterType ?? source.type;
+  if (typeof rawType === "string" && !rawType.includes("-")) {
+    normalized.type = rawType;
+  }
+  ["force", "name", "unit", "icon", "color", "notes"].forEach((key) => {
+    if (typeof source[key] !== "undefined") {
+      normalized[key] = source[key];
+    }
+  });
+  if (Number.isFinite(Number(source.frequencyMHz))) {
+    normalized.frequencyMHz = Number(source.frequencyMHz);
+  }
+  if (Number.isFinite(Number(source.powerW))) {
+    normalized.powerW = Number(source.powerW);
+  }
+  if (Number.isFinite(Number(source.antennaHeightM))) {
+    normalized.antennaHeightM = Number(source.antennaHeightM);
+  }
+  if (Number.isFinite(Number(source.antennaGainDbi))) {
+    normalized.antennaGainDbi = Number(source.antennaGainDbi);
+  }
+  if (Number.isFinite(Number(source.receiverSensitivityDbm))) {
+    normalized.receiverSensitivityDbm = Number(source.receiverSensitivityDbm);
+  }
+  if (Number.isFinite(Number(source.systemLossDb))) {
+    normalized.systemLossDb = Number(source.systemLossDb);
+  }
+  return normalized;
+}
+
+function findAssetByReference(reference) {
+  if (!reference) return null;
+  const ref = String(reference).trim();
+  // 1. Exact ID match
+  const byId = state.assets.find((a) => a.id === ref);
+  if (byId) return byId;
+  // 2. Exact name match (case-insensitive)
+  const refLow = ref.toLowerCase();
+  const byName = state.assets.find((a) => a.name.toLowerCase() === refLow);
+  if (byName) return byName;
+  // 3. The model sometimes sends "name (label)" or just the label part — try contains
+  const byContains = state.assets.find((a) => a.name.toLowerCase().includes(refLow) || refLow.includes(a.name.toLowerCase()));
+  if (byContains) return byContains;
+  // 4. Strip parens content and retry ("PRC-163 (Peak 3)" → "PRC-163")
+  const stripped = refLow.replace(/\s*\(.*?\)\s*/g, "").trim();
+  if (stripped && stripped !== refLow) {
+    const byStripped = state.assets.find((a) => a.name.toLowerCase().includes(stripped) || stripped.includes(a.name.toLowerCase().replace(/\s*\(.*?\)\s*/g, "").trim()));
+    if (byStripped) return byStripped;
+  }
+  // 5. Unit field match
+  const byUnit = state.assets.find((a) => a.unit && a.unit.toLowerCase() === refLow);
+  if (byUnit) return byUnit;
+  return null;
+}
+
+function resolveMapContentId(reference) {
+  if (!reference) {
+    return null;
+  }
+  const entries = getMapContentEntries();
+  const direct = entries.find((entry) => entry.id === reference);
+  if (direct) {
+    return direct.id;
+  }
+  const byName = entries.find((entry) => entry.name.toLowerCase() === String(reference).toLowerCase());
+  return byName?.id ?? null;
 }
 
 function updateClock() {
@@ -802,6 +4151,10 @@ function updateImageryMenuValue(labelOverride = null) {
 }
 
 function onMapClick(event) {
+  if (state.draw.mode) {
+    onDrawClick(event.latlng);
+    return;
+  }
   if (state.placingAsset) {
     addAsset(event.latlng);
     state.placingAsset = false;
@@ -812,6 +4165,10 @@ function onMapClick(event) {
   if (state.activeInspectionViewshedId) {
     inspectSignalPoint(event.latlng);
   }
+}
+
+function onMapContextMenu(event) {
+  showPointTerrainPopup(event.latlng);
 }
 
 function getEmitterFormData() {
@@ -868,6 +4225,11 @@ function addAsset(latlng) {
   renderAssets();
   marker.openPopup();
   syncCesiumEntities();
+
+  saveMapState();
+  if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
+    refreshAssetGroundElevation(asset).catch(() => {});
+  }
 }
 
 function createEmitterIcon(asset) {
@@ -913,6 +4275,10 @@ function saveAssetEdits() {
   renderAssets();
   renderMapContents();
   syncCesiumEntities();
+  if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
+    refreshAssetGroundElevation(asset).catch(() => {});
+  }
+  saveMapState();
   setStatus(`Updated ${asset.name}.`);
   state.editingAssetId = null;
   refreshActionButtons();
@@ -1019,7 +4385,8 @@ function renderTerrains() {
 
 function updateTerrainMenuValue() {
   if (!state.terrains.length) {
-    dom.terrainMenuValue.textContent = "No DTED";
+    const hasCesiumToken = dom.cesiumIonToken.value.trim().length > 0;
+    dom.terrainMenuValue.textContent = hasCesiumToken ? "Cesium Terrain" : "No DTED";
     return;
   }
 
@@ -1053,6 +4420,7 @@ function renderViewsheds() {
         <span>${viewshed.asset.frequencyMHz} MHz</span>
         <span>${viewshed.asset.powerW} W</span>
         <span>${viewshed.cellCount} cells</span>
+        ${formatCoverageArea(viewshed) ? `<span>${formatCoverageArea(viewshed)}</span>` : ""}
         <span>Radius ${formatDistance(viewshed.radiusMeters)}</span>
       </div>
       <div class="terrain-actions">
@@ -1135,6 +4503,7 @@ function onViewshedAction(event) {
     viewshed.opacity = opacity;
     viewshed.layer.setOpacity(opacity);
     renderViewsheds();
+    syncCesiumEntities();
   }
 }
 
@@ -1160,6 +4529,7 @@ function removeViewshed(viewshedId) {
 
   renderViewsheds();
   renderMapContents();
+  syncCesiumEntities();
   setStatus(`Removed ${viewshed.asset.name} coverage layer.`);
 }
 
@@ -1173,6 +4543,7 @@ function clearViewsheds() {
   renderViewsheds();
   renderMapContents();
   refreshActionButtons();
+  syncCesiumEntities();
   setStatus("All coverage layers cleared.");
 }
 
@@ -1216,14 +4587,15 @@ function showTerrainCoverage(terrain) {
       pane: getMapContentPaneName(`terrain:${terrain.id}`),
       color: "#8fb7ff",
       weight: 2,
-      fillColor: "#8fb7ff",
-      fillOpacity: 0.08,
+      fill: false,
       dashArray: "8 4",
+      interactive: false,
     },
   ).addTo(state.map);
   layer.bindTooltip(`${terrain.name} terrain coverage`, { sticky: true });
   state.terrainCoverageLayers.set(terrain.id, layer);
   renderMapContents();
+  syncCesiumEntities();
 }
 
 function hideTerrainCoverage(terrainId) {
@@ -1238,6 +4610,7 @@ function hideTerrainCoverage(terrainId) {
     terrain.extentVisible = false;
   }
   renderMapContents();
+  syncCesiumEntities();
 }
 
 function updateTerrainSummary() {
@@ -1267,6 +4640,7 @@ function clearAssets() {
   renderMapContents();
   refreshActionButtons();
   syncCesiumEntities();
+  saveMapState();
   setStatus("All emitters removed.");
 }
 
@@ -1427,8 +4801,6 @@ function consumeSimulationResult(payload) {
   const latitudes = new Float64Array(payload.latitudes);
   const longitudes = new Float64Array(payload.longitudes);
   const rssi = new Float32Array(payload.rssi);
-  const pathLoss = new Float32Array(payload.pathLoss);
-  const obstruction = new Float32Array(payload.obstruction);
   const lineOfSight = new Uint8Array(payload.lineOfSight);
   const existingViewshed = state.viewsheds.find((entry) => entry.id === payload.requestId);
   const layer = new CanvasViewshedLayer({
@@ -1455,11 +4827,11 @@ function consumeSimulationResult(payload) {
     propagationModel: payload.propagationModel,
     propagationModelLabel: propagationModelLabel(payload.propagationModel),
     cellCount: latitudes.length,
+    gridLatStepDeg: payload.gridLatStepDeg,
+    gridLonStepDeg: payload.gridLonStepDeg,
     latitudes,
     longitudes,
     rssi,
-    pathLoss,
-    obstruction,
     lineOfSight,
     bounds: leafletBoundsFromData(payload.asset, payload.radiusMeters),
   };
@@ -1483,6 +4855,7 @@ function consumeSimulationResult(payload) {
   updateMetrics(rssi);
   renderViewsheds();
   renderMapContents();
+  syncCesiumEntities();
   setStatus(`Coverage complete for ${payload.asset.name}.`);
 }
 
@@ -1739,6 +5112,28 @@ async function exportAssetsKml(asKmz) {
   const blob = await zip.generateAsync({ type: "blob" });
   downloadBlob(blob, `emitters-${timestampSlug()}.kmz`);
   setStatus("KMZ exported.");
+}
+
+async function exportAssetsZip() {
+  if (!state.assets.length) {
+    setStatus("No emitters to export.", true);
+    return;
+  }
+  const slug = timestampSlug();
+  const featureCollection = {
+    type: "FeatureCollection",
+    features: state.assets.map((asset) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [asset.lon, asset.lat] },
+      properties: { ...asset, exportedAt: new Date().toISOString() },
+    })),
+  };
+  const zip = new window.JSZip();
+  zip.file(`emitters-${slug}.geojson`, JSON.stringify(featureCollection, null, 2));
+  zip.file(`emitters-${slug}.kml`, buildKmlDocument());
+  const blob = await zip.generateAsync({ type: "blob" });
+  downloadBlob(blob, `emitters-${slug}.zip`);
+  setStatus("ZIP exported.");
 }
 
 function buildKmlDocument() {
@@ -2090,12 +5485,24 @@ async function toggle3dView() {
   dom.cesiumContainer.classList.toggle("hidden", !state.view3dEnabled);
   dom.cesiumCompassBtn.classList.toggle("hidden", !state.view3dEnabled);
   dom.map.style.visibility = state.view3dEnabled ? "hidden" : "visible";
+  if (!state.view3dEnabled) removeCesium3dTerrainPopup();
 
   if (state.view3dEnabled) {
     await initCesiumIfNeeded();
     await syncCesiumScene();
     syncCesiumEntities();
     updateCesiumCompass();
+  } else if (state.cesiumViewer) {
+    // Sync camera back to Leaflet when returning to 2D
+    const carto = window.Cesium.Cartographic.fromCartesian(
+      state.cesiumViewer.camera.positionWC,
+    );
+    if (carto) {
+      const lat = window.Cesium.Math.toDegrees(carto.latitude);
+      const lng = window.Cesium.Math.toDegrees(carto.longitude);
+      const zoom = Math.round(Math.log2(40000000 / Math.max(carto.height, 100)));
+      state.map.setView([lat, lng], Math.min(Math.max(zoom, 2), 18), { animate: false });
+    }
   }
 }
 
@@ -2121,6 +5528,93 @@ async function initCesiumIfNeeded() {
 
   state.cesiumViewer.camera.percentageChanged = 0.001;
   state.cesiumViewer.camera.changed.addEventListener(updateCesiumCompass);
+
+  const handler = new window.Cesium.ScreenSpaceEventHandler(state.cesiumViewer.scene.canvas);
+  handler.setInputAction((click) => {
+    removeCesium3dTerrainPopup();
+    if (!state.placingAsset) return;
+    const ray = state.cesiumViewer.camera.getPickRay(click.position);
+    const cartesian = state.cesiumViewer.scene.globe.pick(ray, state.cesiumViewer.scene);
+    if (!cartesian) return;
+    const carto = window.Cesium.Cartographic.fromCartesian(cartesian);
+    const lat = window.Cesium.Math.toDegrees(carto.latitude);
+    const lon = window.Cesium.Math.toDegrees(carto.longitude);
+    addAsset({ lat, lng: lon });
+    state.placingAsset = false;
+    setStatus("Emitter placed.");
+  }, window.Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  handler.setInputAction((click) => {
+    const ray = state.cesiumViewer.camera.getPickRay(click.position);
+    const cartesian = state.cesiumViewer.scene.globe.pick(ray, state.cesiumViewer.scene);
+    if (!cartesian) return;
+    const carto = window.Cesium.Cartographic.fromCartesian(cartesian);
+    const lat = window.Cesium.Math.toDegrees(carto.latitude);
+    const lon = window.Cesium.Math.toDegrees(carto.longitude);
+    showCesium3dTerrainPopup(lat, lon, click.position);
+  }, window.Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+}
+
+function showCesium3dTerrainPopup(lat, lon, screenPos) {
+  removeCesium3dTerrainPopup();
+
+  const canvas = state.cesiumViewer.scene.canvas;
+  const canvasRect = canvas.getBoundingClientRect();
+
+  const overlay = document.createElement("div");
+  overlay.id = "cesium-terrain-popup";
+  overlay.style.cssText = `
+    position: fixed;
+    left: ${canvasRect.left + screenPos.x}px;
+    top: ${canvasRect.top + screenPos.y}px;
+    transform: translate(-50%, -110%);
+    background: rgba(30,30,30,0.92);
+    color: #f0f0f0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.6;
+    pointer-events: auto;
+    z-index: 9999;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.15);
+  `;
+  overlay.innerHTML = buildPointTerrainPopup(lat, lon, null).replace("No terrain", "Loading terrain...");
+
+  const closeBtn = document.createElement("span");
+  closeBtn.textContent = " ×";
+  closeBtn.style.cssText = "cursor:pointer;opacity:0.6;margin-left:8px;font-size:15px;";
+  closeBtn.onclick = removeCesium3dTerrainPopup;
+  overlay.appendChild(closeBtn);
+
+  document.body.appendChild(overlay);
+
+  const cachedElevation = sampleTerrainElevation(lat, lon);
+  if (cachedElevation !== null) {
+    overlay.innerHTML = buildPointTerrainPopup(lat, lon, cachedElevation);
+    overlay.appendChild(closeBtn);
+    return;
+  }
+
+  sampleTerrainElevationAsync(lat, lon)
+    .then((elevationM) => {
+      const el = document.getElementById("cesium-terrain-popup");
+      if (!el) return;
+      el.innerHTML = buildPointTerrainPopup(lat, lon, elevationM);
+      el.appendChild(closeBtn);
+    })
+    .catch(() => {
+      const el = document.getElementById("cesium-terrain-popup");
+      if (!el) return;
+      el.innerHTML = buildPointTerrainPopup(lat, lon, null);
+      el.appendChild(closeBtn);
+    });
+}
+
+function removeCesium3dTerrainPopup() {
+  const el = document.getElementById("cesium-terrain-popup");
+  if (el) el.remove();
 }
 
 async function syncCesiumScene() {
@@ -2133,20 +5627,29 @@ async function syncCesiumScene() {
     viewer.imageryLayers.removeAll();
     viewer.imageryLayers.addImageryProvider(buildImageryProvider());
     viewer.terrainProvider = await buildTerrainProvider();
-    const center = state.gps.location
-      ? { lat: state.gps.location.lat, lon: state.gps.location.lon }
-      : state.assets[0]
-        ? { lat: state.assets[0].lat, lon: state.assets[0].lon }
-        : { lat: 34.744, lon: -116.151 };
+
+    const mapCenter = state.map.getCenter();
+    const zoom = state.map.getZoom();
+    const altitudeMeters = zoomToAltitude(zoom);
 
     viewer.camera.flyTo({
-      destination: window.Cesium.Cartesian3.fromDegrees(center.lon, center.lat, 18000),
-      duration: 0.8,
+      destination: window.Cesium.Cartesian3.fromDegrees(mapCenter.lng, mapCenter.lat, altitudeMeters),
+      orientation: {
+        heading: 0,
+        pitch: window.Cesium.Math.toRadians(-90),
+        roll: 0,
+      },
+      duration: 0,
     });
     updateCesiumCompass();
   } catch (error) {
     setStatus(`3D scene error: ${error.message}`, true);
   }
+}
+
+function zoomToAltitude(zoom) {
+  // Approximate altitude in meters for a given Leaflet zoom level (top-down view)
+  return 40000000 / Math.pow(2, zoom);
 }
 
 function updateCesiumCompass() {
@@ -2231,7 +5734,7 @@ async function resolveTerrainIdForSimulation(asset) {
     return state.activeTerrainId;
   }
 
-  if (dom.terrainSourceSelect.value !== "cesium-world") {
+  if (!usesConfiguredCesiumTerrain()) {
     return null;
   }
 
@@ -2246,7 +5749,7 @@ async function resolveTerrainIdForPlanning(polygon, gridMeters) {
     return state.activeTerrainId;
   }
 
-  if (dom.terrainSourceSelect.value !== "cesium-world") {
+  if (!usesConfiguredCesiumTerrain()) {
     return null;
   }
 
@@ -2271,7 +5774,7 @@ async function ensureIonTerrainGrid(bounds, gridMeters, cacheKey) {
     return cached.id;
   }
 
-  setStatus("Sampling Cesium World Terrain for propagation...");
+  setStatus("Sampling Cesium terrain for propagation...");
   const terrain = await sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey);
   state.ionTerrainCache.set(cacheKey, terrain);
   await cacheTerrainInWorker(terrain);
@@ -2279,7 +5782,7 @@ async function ensureIonTerrainGrid(bounds, gridMeters, cacheKey) {
 }
 
 async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
-  const provider = await getCesiumWorldTerrainProvider();
+  const provider = await getConfiguredCesiumTerrainProvider();
   const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
   const latStepDeg = metersToLatitudeDegrees(gridMeters);
   const lonStepDeg = metersToLongitudeDegrees(gridMeters, centerLat);
@@ -2303,7 +5806,7 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
 
   return {
     id: `ion:${cacheKey}`,
-    name: "Cesium World Terrain",
+    name: dom.terrainSourceSelect.value === "custom" ? "Custom Cesium Terrain" : "Cesium World Terrain",
     origin: { lat: bounds.sw.lat, lon: bounds.sw.lon },
     bounds,
     rows,
@@ -2312,6 +5815,27 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
     lonStepDeg,
     elevations,
   };
+}
+
+async function getConfiguredCesiumTerrainProvider() {
+  if (!usesConfiguredCesiumTerrain()) {
+    return null;
+  }
+
+  if (dom.terrainSourceSelect.value === "custom") {
+    const url = dom.customTerrainUrl.value.trim();
+    if (!url) {
+      throw new Error("Enter a custom terrain URL first.");
+    }
+    const providerKey = buildCesiumTerrainProviderKey();
+    if (!state.cesiumTerrainProvider || state.cesiumTerrainProviderKey !== providerKey) {
+      state.cesiumTerrainProvider = await window.Cesium.CesiumTerrainProvider.fromUrl(url);
+      state.cesiumTerrainProviderKey = providerKey;
+    }
+    return state.cesiumTerrainProvider;
+  }
+
+  return await getCesiumWorldTerrainProvider();
 }
 
 function boundsFromCenter(lat, lon, radiusMeters) {
@@ -2350,6 +5874,47 @@ function leafletBoundsFromData(asset, radiusMeters) {
   );
 }
 
+function buildPointTerrainPopup(lat, lon, elevationM) {
+  const mgrsLabel = formatCoordinate(lat, lon, "mgrs");
+  const activeLabel = state.settings.coordinateSystem === "mgrs"
+    ? ""
+    : `<br>Position: ${escapeHtml(formatCoordinate(lat, lon, state.settings.coordinateSystem))}`;
+  const elevationLabel = elevationM === null ? "No terrain" : formatElevation(elevationM);
+  return `
+    Grid: ${escapeHtml(mgrsLabel)}${activeLabel}<br>
+    Elevation: ${escapeHtml(elevationLabel)}
+  `;
+}
+
+function showPointTerrainPopup(latlng) {
+  const lat = latlng.lat;
+  const lon = latlng.lng;
+  const cachedElevationM = sampleTerrainElevation(lat, lon);
+  const popup = L.popup()
+    .setLatLng([lat, lon])
+    .setContent(buildPointTerrainPopup(lat, lon, cachedElevationM))
+    .openOn(state.map);
+
+  if (cachedElevationM !== null || !usesConfiguredCesiumTerrain()) {
+    return;
+  }
+
+  popup.setContent(buildPointTerrainPopup(lat, lon, null).replace("No terrain", "Loading terrain..."));
+  sampleTerrainElevationAsync(lat, lon)
+    .then((elevationM) => {
+      if (state.map?._popup !== popup) {
+        return;
+      }
+      popup.setContent(buildPointTerrainPopup(lat, lon, elevationM));
+    })
+    .catch(() => {
+      if (state.map?._popup !== popup) {
+        return;
+      }
+      popup.setContent(buildPointTerrainPopup(lat, lon, null));
+    });
+}
+
 function refreshActionButtons() {
   dom.placeAssetBtn.textContent = state.editingAssetId ? "Save Changes" : "Place On Map";
   dom.runSimulationBtn.textContent = state.editingViewshedId ? "Update Coverage" : "Generate Coverage";
@@ -2360,7 +5925,11 @@ function getMapContentPaneName(contentId) {
   const paneName = `content-${safeId}`;
   if (!state.map.getPane(paneName)) {
     const pane = state.map.createPane(paneName);
-    pane.style.zIndex = "410";
+    // Asset markers need pointer events for popups/drag; everything else
+    // (viewsheds, terrain coverage, planning overlays) must not absorb clicks.
+    const isAsset = contentId.startsWith("asset:");
+    pane.style.zIndex = isAsset ? "620" : "410";
+    if (!isAsset) pane.style.pointerEvents = "none";
   }
   return paneName;
 }
@@ -2466,9 +6035,16 @@ function buildMapContentRow(entry, isChild = false) {
   row.className = "asset-item map-content-item";
   row.draggable = true;
   row.dataset.contentId = entry.id;
+  const canFocus = entry.kind !== "folder";
   if (isChild) {
     row.dataset.child = "true";
   }
+  const isHidden = state.hiddenContentIds.has(entry.id);
+  if (isHidden) row.dataset.hidden = "true";
+
+  const eyeOpen = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+  const eyeOff = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
   row.innerHTML = `
     <div class="map-content-row">
       <div class="map-content-grip">::</div>
@@ -2476,11 +6052,27 @@ function buildMapContentRow(entry, isChild = false) {
         <strong>${escapeHtml(entry.name)}</strong>
         <span>${escapeHtml(entry.subtitle)}</span>
       </div>
+      ${canFocus ? `<button class="ghost-button small map-content-focus-button" type="button" aria-label="Center map on ${escapeHtml(entry.name)}">
+        <span class="map-content-focus-icon" aria-hidden="true">
+          <span class="map-content-focus-ring outer"></span>
+          <span class="map-content-focus-ring inner"></span>
+          <span class="map-content-focus-dot"></span>
+        </span>
+      </button>` : ""}
+      ${canFocus ? `<button class="map-content-visibility-btn${isHidden ? " hidden-layer" : ""}" type="button" aria-label="${isHidden ? "Show" : "Hide"}" title="${isHidden ? "Show" : "Hide"}">${isHidden ? eyeOff : eyeOpen}</button>` : ""}
       <span class="map-content-kind">${escapeHtml(entry.kind.replace(/-/g, " "))}</span>
     </div>
   `;
 
   row.addEventListener("click", () => focusMapContent(entry.id));
+  row.querySelector(".map-content-focus-button")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    focusMapContent(entry.id);
+  });
+  row.querySelector(".map-content-visibility-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleContentVisibility(entry.id);
+  });
   row.addEventListener("contextmenu", (event) => openMapContentsMenu(event, entry.id));
   row.addEventListener("dragstart", onMapContentDragStart);
   row.addEventListener("dragover", onMapContentDragOver);
@@ -2494,9 +6086,9 @@ function renderMapContents() {
   const entries = getMapContentEntries();
   syncMapContentOrder(entries);
   dom.mapContentsList.innerHTML = "";
-  dom.mapContentsCard.classList.toggle("hidden", !entries.length);
 
   if (!entries.length) {
+    dom.mapContentsList.innerHTML = '<div class="asset-item">No map contents yet. Place emitters, import files, or generate results to populate this panel.</div>';
     return;
   }
 
@@ -2583,6 +6175,7 @@ function onMapContentDrop(event) {
   nextOrder.splice(targetIndex, 0, draggedId);
   state.mapContentOrder = nextOrder;
   renderMapContents();
+  saveMapState();
 }
 
 function onMapContentDragEnd(event) {
@@ -2604,6 +6197,8 @@ function focusMapContent(contentId) {
   if (contentId.startsWith("folder:")) {
     return;
   }
+
+  state.ai.activeContextId = contentId;
 
   if (contentId.startsWith("asset:")) {
     const assetId = contentId.slice("asset:".length);
@@ -2758,6 +6353,7 @@ function commitRenameMapContent() {
 
   renderMapContents();
   syncCesiumEntities();
+  saveMapState();
 }
 
 function editMapContent(contentId) {
@@ -2821,10 +6417,13 @@ function editMapContent(contentId) {
 
   if (contentId.startsWith("imported:")) {
     const item = state.importedItems.find((entry) => `imported:${entry.id}` === contentId);
-    if (!item) {
-      return;
+    if (!item) return;
+    if (item.drawn) {
+      const menuEl = dom.mapContentsMenu;
+      openShapeStylePanel(item, menuEl);
+    } else {
+      toggleImportedItemEditing(item);
     }
-    toggleImportedItemEditing(item);
   }
 }
 
@@ -2836,6 +6435,7 @@ function addMapContentFolder() {
   state.mapContentFolders.unshift(folder);
   state.mapContentOrder.unshift(`folder:${folder.id}`);
   renderMapContents();
+  saveMapState();
 }
 
 function deleteMapContent(contentId) {
@@ -2848,6 +6448,7 @@ function deleteMapContent(contentId) {
     });
     state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== contentId);
     renderMapContents();
+    saveMapState();
     return;
   }
 
@@ -2906,16 +6507,420 @@ function removeAsset(assetId) {
   renderAssets();
   renderMapContents();
   syncCesiumEntities();
+  saveMapState();
   if (asset) {
     setStatus(`Removed ${asset.name}.`);
   }
 }
 
 function renderImportedItemPopup(item) {
+  const detailLines = buildImportedItemDetailLines(item);
   return `
     <strong>${escapeHtml(item.name)}</strong><br>
     ${escapeHtml(item.subtitle)}
+    ${detailLines.length ? `<br>${detailLines.map((line) => escapeHtml(line)).join("<br>")}` : ""}
   `;
+}
+
+function buildImportedItemDetailLines(item) {
+  if (!item?.layer) {
+    return [];
+  }
+
+  const lines = [];
+  const isCircle = Boolean(item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM)));
+  if (isCircle) {
+    lines.push(`Radius: ${formatDistance(Number(item.properties.radiusM))}`);
+  }
+
+  if (item.geometryType === "LineString") {
+    const lengthMeters = measureLatLngPath(item.layer.getLatLngs());
+    if (lengthMeters > 0) {
+      lines.push(`Length: ${formatDistance(lengthMeters)}`);
+    }
+    return lines;
+  }
+
+  if (item.geometryType === "Polygon") {
+    const rings = item.layer.getLatLngs();
+    const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+    const perimeterMeters = measureLatLngPath(outer, true);
+    const areaSqMeters = measurePolygonAreaSqMeters(outer);
+    if (areaSqMeters > 0) {
+      lines.push(`Area: ${formatShapeArea(areaSqMeters)}`);
+    }
+    if (perimeterMeters > 0) {
+      lines.push(`Perimeter: ${formatDistance(perimeterMeters)}`);
+    }
+  }
+
+  return lines;
+}
+
+function measureLatLngPath(latLngs, closeRing = false) {
+  if (!Array.isArray(latLngs) || latLngs.length < 2) {
+    return 0;
+  }
+
+  let total = 0;
+  for (let index = 1; index < latLngs.length; index += 1) {
+    total += state.map.distance(latLngs[index - 1], latLngs[index]);
+  }
+  if (closeRing) {
+    total += state.map.distance(latLngs[latLngs.length - 1], latLngs[0]);
+  }
+  return total;
+}
+
+function measurePolygonAreaSqMeters(latLngs) {
+  if (!Array.isArray(latLngs) || latLngs.length < 3) {
+    return 0;
+  }
+
+  const centerLat = latLngs.reduce((sum, point) => sum + point.lat, 0) / latLngs.length;
+  const centerLon = latLngs.reduce((sum, point) => sum + point.lng, 0) / latLngs.length;
+  const metersPerDegLat = 111320;
+  const metersPerDegLon = 111320 * Math.cos((centerLat * Math.PI) / 180);
+
+  let area = 0;
+  for (let index = 0; index < latLngs.length; index += 1) {
+    const current = latLngs[index];
+    const next = latLngs[(index + 1) % latLngs.length];
+    const currentX = (current.lng - centerLon) * metersPerDegLon;
+    const currentY = (current.lat - centerLat) * metersPerDegLat;
+    const nextX = (next.lng - centerLon) * metersPerDegLon;
+    const nextY = (next.lat - centerLat) * metersPerDegLat;
+    area += (currentX * nextY) - (nextX * currentY);
+  }
+  return Math.abs(area) / 2;
+}
+
+function formatShapeArea(areaSqMeters) {
+  if (state.settings.measurementUnits === "standard") {
+    return `${(areaSqMeters / 2589988.110336).toFixed(2)} mi²`;
+  }
+  return `${(areaSqMeters / 1000000).toFixed(2)} km²`;
+}
+
+// ── Draw toolbar ──────────────────────────────────────────────────────────────
+
+function toggleDrawDropdown() {
+  const hidden = dom.drawDropdown.classList.toggle("hidden");
+  if (!hidden) closeShapeStylePanel();
+}
+
+function closeDrawDropdown() {
+  dom.drawDropdown.classList.add("hidden");
+}
+
+const DRAW_DEFAULTS = { color: "#3b82f6", fillOpacity: 0.25, weight: 2, lineStyle: "solid" };
+
+function startDrawing(mode) {
+  closeDrawDropdown();
+  cancelDrawing();
+  state.draw.mode = mode;
+  dom.map.classList.add("leaflet-drawing-active");
+  const hints = { circle: "Click to set center, click again to set radius.", rectangle: "Click two corners to draw a rectangle.", polyline: "Click to add points. Double-click or click near start to finish." };
+  setStatus(hints[mode]);
+}
+
+function cancelDrawing() {
+  if (state.draw.previewLayer) {
+    state.draw.previewLayer.remove();
+    state.draw.previewLayer = null;
+  }
+  state.draw.mode = null;
+  state.draw.points = [];
+  dom.map.classList.remove("leaflet-drawing-active");
+}
+
+function onDrawClick(latlng) {
+  const { mode, points } = state.draw;
+
+  if (mode === "circle") {
+    if (points.length === 0) {
+      state.draw.points = [latlng];
+      setStatus("Circle center set. Click to set radius.");
+    } else {
+      const center = points[0];
+      const radiusM = state.map.distance(center, latlng);
+      cancelDrawing();
+      commitDrawnShape("Circle", "Polygon", circleToPolygonLatLngs(center, radiusM), { isCircle: true, center, radiusM });
+    }
+    return;
+  }
+
+  if (mode === "rectangle") {
+    if (points.length === 0) {
+      state.draw.points = [latlng];
+      setStatus("First corner set. Click to place opposite corner.");
+    } else {
+      const [a] = points;
+      const b = latlng;
+      const corners = [[a.lat, a.lng], [a.lat, b.lng], [b.lat, b.lng], [b.lat, a.lng]];
+      cancelDrawing();
+      commitDrawnShape("Rectangle", "Polygon", corners);
+    }
+    return;
+  }
+
+  if (mode === "polyline") {
+    // Close if clicking within 15px of first point and >=3 points
+    if (points.length >= 3) {
+      const firstPx = state.map.latLngToContainerPoint(points[0]);
+      const clickPx = state.map.latLngToContainerPoint(latlng);
+      const dist = Math.hypot(firstPx.x - clickPx.x, firstPx.y - clickPx.y);
+      if (dist < 15) {
+        const coords = points.map((p) => [p.lat, p.lng]);
+        cancelDrawing();
+        commitDrawnShape("Polygon", "Polygon", coords);
+        return;
+      }
+    }
+    state.draw.points.push(latlng);
+    updateDrawPreview(latlng);
+    setStatus(`${state.draw.points.length} point(s). Double-click or click near start to close as polygon.`);
+  }
+}
+
+function onMapMouseMove(event) {
+  if (!state.draw.mode || state.draw.points.length === 0) return;
+  updateDrawPreview(event.latlng);
+}
+
+function onMapDblClick(event) {
+  if (state.draw.mode !== "polyline" || state.draw.points.length < 2) return;
+  // Leaflet fires click then dblclick — the last click already added a point, so we just commit
+  const points = state.draw.points;
+  const coords = points.map((p) => [p.lat, p.lng]);
+  cancelDrawing();
+  if (coords.length >= 3) {
+    commitDrawnShape("Polygon", "Polygon", coords);
+  } else {
+    commitDrawnShape("Line", "LineString", coords);
+  }
+}
+
+function updateDrawPreview(cursor) {
+  if (state.draw.previewLayer) {
+    state.draw.previewLayer.remove();
+    state.draw.previewLayer = null;
+  }
+  const { mode, points } = state.draw;
+  const opts = { color: DRAW_DEFAULTS.color, weight: DRAW_DEFAULTS.weight, dashArray: "6 4", fillOpacity: 0.12, interactive: false };
+
+  if (mode === "circle" && points.length === 1) {
+    const radiusM = state.map.distance(points[0], cursor);
+    state.draw.previewLayer = L.circle(points[0], { ...opts, radius: radiusM }).addTo(state.map);
+  } else if (mode === "rectangle" && points.length === 1) {
+    state.draw.previewLayer = L.rectangle([points[0], cursor], opts).addTo(state.map);
+  } else if (mode === "polyline" && points.length >= 1) {
+    state.draw.previewLayer = L.polyline([...points, cursor], opts).addTo(state.map);
+  }
+}
+
+function circleToPolygonLatLngs(center, radiusM, steps = 64) {
+  const latlngs = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const dLat = (radiusM * Math.cos(angle)) / 111320;
+    const dLng = (radiusM * Math.sin(angle)) / (111320 * Math.cos((center.lat * Math.PI) / 180));
+    latlngs.push([center.lat + dLat, center.lng + dLng]);
+  }
+  return latlngs;
+}
+
+function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
+  const index = state.importedItems.filter((i) => i.drawn).length;
+  const feature = {
+    name: `${labelPrefix} ${index + 1}`,
+    geometryType,
+    coordinates,
+    properties: {
+      ...(extra.isCircle ? {
+        isCircle: true,
+        radiusM: extra.radiusM,
+        center: extra.center ? { lat: extra.center.lat, lng: extra.center.lng } : null,
+      } : {}),
+    },
+    sourceLabel: "Drawn",
+    drawn: true,
+    shapeStyle: { color: DRAW_DEFAULTS.color, fillOpacity: DRAW_DEFAULTS.fillOpacity, weight: DRAW_DEFAULTS.weight, lineStyle: DRAW_DEFAULTS.lineStyle },
+    ...extra,
+  };
+  addDrawnFeature(feature);
+  setStatus(`${feature.name} added. Right-click it in Map Contents to edit style or vertices.`);
+}
+
+function addDrawnFeature(feature, folderId = null) {
+  const item = {
+    id: crypto.randomUUID(),
+    name: feature.name,
+    subtitle: `Drawn | ${feature.geometryType}`,
+    kind: `imported-${feature.geometryType.toLowerCase()}`,
+    geometryType: feature.geometryType,
+    properties: feature.properties ?? {},
+    drawn: true,
+    shapeStyle: feature.shapeStyle ?? { ...DRAW_DEFAULTS },
+    layer: null,
+  };
+
+  const contentId = `imported:${item.id}`;
+  const pane = getMapContentPaneName(contentId);
+  const s = item.shapeStyle;
+  const dashArray = getLeafletDashArray(s.lineStyle);
+
+  if (feature.geometryType === "Polygon") {
+    item.layer = L.polygon(feature.coordinates, { pane, color: s.color, weight: s.weight, fillOpacity: s.fillOpacity, fillColor: s.color, dashArray });
+  } else {
+    item.layer = L.polyline(feature.coordinates, { pane, color: s.color, weight: s.weight, dashArray });
+  }
+
+  item.layer.addTo(state.map);
+  item.layer.bindPopup(renderImportedItemPopup(item));
+  item.layer.on("click", () => focusMapContent(contentId));
+  item.layer.on("dragend edit", () => {
+    item.layer.setPopupContent(renderImportedItemPopup(item));
+    renderMapContents();
+    saveMapState();
+    syncShapeVertexEditUi(item);
+  });
+  state.importedItems.push(item);
+  setMapContentFolderId(contentId, folderId ?? null);
+  state.mapContentOrder.unshift(contentId);
+  renderMapContents();
+  syncCesiumEntities();
+  saveMapState();
+}
+
+// ── Shape style panel ─────────────────────────────────────────────────────────
+
+function openShapeStylePanel(item, anchorEl) {
+  state.draw.editingItemId = item.id;
+  const s = item.shapeStyle ?? { ...DRAW_DEFAULTS };
+  dom.shapeColorInput.value = s.color;
+  dom.shapeLineStyleSelect.value = s.lineStyle ?? "solid";
+  dom.shapeOpacityInput.value = s.fillOpacity;
+  dom.shapeWeightInput.value = s.weight;
+  dom.shapeOpacityValue.textContent = `${Math.round(s.fillOpacity * 100)}%`;
+  dom.shapeWeightValue.textContent = s.weight;
+
+  // Hide vertex button for pure polylines
+  dom.shapeStyleEditVerticesBtn.style.display = item.geometryType === "LineString" || item.layer?.editing ? "" : "";
+
+  // Position near the context menu anchor
+  const rect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 120, top: 120 };
+  dom.shapeStylePanel.style.left = `${rect.left}px`;
+  dom.shapeStylePanel.style.top = `${rect.bottom + 4}px`;
+  dom.shapeStylePanel.classList.remove("hidden");
+  syncShapeVertexEditUi(item);
+}
+
+function isShapeVertexEditingActive(itemId = state.draw.editingItemId) {
+  const item = state.importedItems.find((entry) => entry.id === itemId);
+  return Boolean(item?.layer?.editing?.enabled?.());
+}
+
+function syncShapeVertexEditUi(item) {
+  if (!item) {
+    return;
+  }
+
+  const isEditing = Boolean(item.layer?.editing?.enabled?.());
+  item.layer.getElement?.()?.classList.toggle("drawn-shape-editing", isEditing);
+  item.layer._path?.classList.toggle("drawn-shape-editing", isEditing);
+
+  if (item.id === state.draw.editingItemId) {
+    dom.shapeStyleEditVerticesBtn.textContent = isEditing ? "Stop Editing" : "Edit Vertices";
+  }
+}
+
+function closeShapeStylePanel({ stopEditing = true } = {}) {
+  dom.shapeStylePanel.classList.add("hidden");
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (item && stopEditing) {
+    stopShapeVertexEdit(item);
+  }
+  state.draw.editingItemId = null;
+}
+
+function onShapeStyleChanged() {
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (!item) return;
+  const color = dom.shapeColorInput.value;
+  const lineStyle = dom.shapeLineStyleSelect.value;
+  const fillOpacity = parseFloat(dom.shapeOpacityInput.value);
+  const weight = parseInt(dom.shapeWeightInput.value, 10);
+  dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}%`;
+  dom.shapeWeightValue.textContent = weight;
+  item.shapeStyle = { color, lineStyle, fillOpacity, weight };
+  applyShapeStyleToLayer(item);
+  item.layer.setPopupContent(renderImportedItemPopup(item));
+  saveMapState();
+  syncCesiumEntities();
+}
+
+function getLeafletDashArray(lineStyle) {
+  if (lineStyle === "dashed") {
+    return "10 8";
+  }
+  if (lineStyle === "dotted") {
+    return "2 8";
+  }
+  return null;
+}
+
+function applyShapeStyleToLayer(item) {
+  if (!item?.layer || !item.shapeStyle) {
+    return;
+  }
+
+  const { color, fillOpacity, weight, lineStyle } = item.shapeStyle;
+  const dashArray = getLeafletDashArray(lineStyle);
+  if (item.geometryType === "Polygon" || item.geometryType === "MultiPolygon") {
+    item.layer.setStyle({ color, fillColor: color, fillOpacity, weight, dashArray });
+  } else {
+    item.layer.setStyle({ color, weight, dashArray });
+  }
+}
+
+function getCesiumStrokeMaterial(C, color, lineStyle) {
+  const baseColor = C.Color.fromCssColorString(color);
+  if (lineStyle === "dashed") {
+    return new C.PolylineDashMaterialProperty({
+      color: baseColor,
+      dashLength: 18,
+      dashPattern: 0b1111000011110000,
+    });
+  }
+  if (lineStyle === "dotted") {
+    return new C.PolylineDashMaterialProperty({
+      color: baseColor,
+      dashLength: 10,
+      dashPattern: 0b1010101010101010,
+    });
+  }
+  return baseColor;
+}
+
+function onShapeStyleEditVertices() {
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (!item) return;
+  if (item.layer.editing?.enabled()) {
+    stopShapeVertexEdit(item);
+  } else {
+    item.layer.editing?.enable();
+    syncShapeVertexEditUi(item);
+    setStatus("Drag vertices to reshape. Click 'Stop Editing' or Done when finished.");
+  }
+}
+
+function stopShapeVertexEdit(item) {
+  if (item?.layer?.editing?.enabled()) {
+    item.layer.editing.disable();
+  }
+  syncShapeVertexEditUi(item);
+  saveMapState();
 }
 
 function toggleImportedItemEditing(item) {
@@ -2951,6 +6956,8 @@ function removeImportedItem(itemId) {
   state.mapContentAssignments.delete(`imported:${itemId}`);
   state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== `imported:${itemId}`);
   renderMapContents();
+  syncCesiumEntities();
+  saveMapState();
   setStatus(`Removed ${item.name}.`);
 }
 
@@ -3063,13 +7070,19 @@ function addImportedFeature(feature, folderId, index) {
   item.layer.addTo(state.map);
   item.layer.bindPopup(renderImportedItemPopup(item));
   if (item.layer.on) {
-    item.layer.on("dragend edit", () => renderMapContents());
+    item.layer.on("dragend edit", () => {
+      item.layer.setPopupContent(renderImportedItemPopup(item));
+      renderMapContents();
+      syncShapeVertexEditUi(item);
+    });
   }
 
   item.layer.on?.("click", () => focusMapContent(contentId));
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId);
   state.mapContentOrder.unshift(contentId);
+  syncCesiumEntities();
+  saveMapState();
 }
 
 function parseGeoJsonFeatures(text, fileName) {
@@ -3241,7 +7254,10 @@ function syncCesiumEntities() {
   }
 
   const viewer = state.cesiumViewer;
+  const C = window.Cesium;
   const entities = viewer.entities;
+
+  // Clear all managed entities
   const managedIds = [];
   entities.values.forEach((entity) => {
     if (entity.id && String(entity.id).startsWith("managed:")) {
@@ -3250,148 +7266,363 @@ function syncCesiumEntities() {
   });
   managedIds.forEach((id) => entities.removeById(id));
 
-  state.assets.forEach((asset) => {
+  // Clear managed primitives
+  if (!viewer._managedPrimitives) viewer._managedPrimitives = [];
+  viewer._managedPrimitives.forEach((p) => { try { viewer.scene.primitives.remove(p); } catch (_) {} });
+  viewer._managedPrimitives = [];
+
+  const isVisible = (contentId) => !state.hiddenContentIds.has(contentId);
+
+  const addClampedPolygon = (id, latLngs, options = {}) => {
+    const coords = latLngs.map((p) => Array.isArray(p)
+      ? { lat: Number(p[0]), lng: Number(p[1]) }
+      : { lat: Number(p.lat), lng: Number(p.lng) });
+    if (coords.length < 3) {
+      return;
+    }
+
+    const hierarchyPositions = coords.map((p) => C.Cartesian3.fromDegrees(p.lng, p.lat));
+    const outlinePositions = [];
+    coords.forEach((p) => {
+      outlinePositions.push(p.lng, p.lat);
+    });
+    const first = coords[0];
+    const last = coords[coords.length - 1];
+    if (first.lat !== last.lat || first.lng !== last.lng) {
+      outlinePositions.push(first.lng, first.lat);
+    }
+
+    const fillColor = C.Color.fromCssColorString(options.fillColor ?? options.color ?? "#34d399").withAlpha(options.fillOpacity ?? 0.12);
+    const outlineColorValue = options.outlineColor ?? options.color ?? "#34d399";
+    const outlineWidth = options.outlineWidth ?? options.weight ?? 2;
+
+    entities.add({
+      id,
+      polygon: {
+        hierarchy: new C.PolygonHierarchy(hierarchyPositions),
+        material: fillColor,
+        heightReference: C.HeightReference.CLAMP_TO_GROUND,
+        classificationType: C.ClassificationType.BOTH,
+        perPositionHeight: false,
+        arcType: C.ArcType.GEODESIC,
+        zIndex: options.zIndex ?? 10,
+      },
+    });
+
+    entities.add({
+      id: `${id}:outline`,
+      polyline: {
+        positions: C.Cartesian3.fromDegreesArray(outlinePositions),
+        width: outlineWidth,
+        material: getCesiumStrokeMaterial(C, outlineColorValue, options.lineStyle),
+        clampToGround: true,
+        arcType: C.ArcType.GEODESIC,
+        zIndex: (options.zIndex ?? 10) + 1,
+      },
+    });
+  };
+
+  // --- ASSETS ---
+  state.assets.filter((asset) => isVisible(`asset:${asset.id}`)).forEach((asset) => {
     const assetHeight = resolveAbsoluteHeight(asset);
+    const heightRef = assetHeight.useRelativeToGround ? C.HeightReference.RELATIVE_TO_GROUND : C.HeightReference.NONE;
     entities.add({
       id: `managed:asset:${asset.id}`,
-      position: window.Cesium.Cartesian3.fromDegrees(asset.lon, asset.lat, assetHeight.absoluteHeightM),
+      position: C.Cartesian3.fromDegrees(asset.lon, asset.lat, assetHeight.absoluteHeightM),
       point: {
         pixelSize: 10,
-        color: window.Cesium.Color.fromCssColorString(asset.color || FORCE_COLORS[asset.force]),
-        outlineColor: window.Cesium.Color.WHITE,
+        color: C.Color.fromCssColorString(asset.color || FORCE_COLORS[asset.force]),
+        outlineColor: C.Color.WHITE,
         outlineWidth: 1.5,
-        heightReference: assetHeight.useRelativeToGround
-          ? window.Cesium.HeightReference.RELATIVE_TO_GROUND
-          : window.Cesium.HeightReference.NONE,
+        heightReference: heightRef,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
         text: asset.name,
-        fillColor: window.Cesium.Color.WHITE,
+        fillColor: C.Color.WHITE,
         font: "14px Bahnschrift",
-        pixelOffset: new window.Cesium.Cartesian2(0, -18),
-        heightReference: assetHeight.useRelativeToGround
-          ? window.Cesium.HeightReference.RELATIVE_TO_GROUND
-          : window.Cesium.HeightReference.NONE,
+        pixelOffset: new C.Cartesian2(0, -18),
+        heightReference: heightRef,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        style: C.LabelStyle.FILL_AND_OUTLINE,
+        outlineWidth: 2,
+        outlineColor: C.Color.BLACK,
       },
     });
   });
 
+  // --- GPS LOCATION ---
   if (state.gps.location) {
     entities.add({
       id: "managed:gps:user",
-      position: window.Cesium.Cartesian3.fromDegrees(state.gps.location.lon, state.gps.location.lat, 0),
+      position: C.Cartesian3.fromDegrees(state.gps.location.lon, state.gps.location.lat, 0),
       point: {
         pixelSize: 12,
-        color: window.Cesium.Color.fromCssColorString("#34d399"),
-        outlineColor: window.Cesium.Color.WHITE,
+        color: C.Color.fromCssColorString("#34d399"),
+        outlineColor: C.Color.WHITE,
         outlineWidth: 2,
+        heightReference: C.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
         text: "User",
         font: "14px Bahnschrift",
-        fillColor: window.Cesium.Color.WHITE,
+        fillColor: C.Color.WHITE,
+        pixelOffset: new C.Cartesian2(0, -18),
+        heightReference: C.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        style: C.LabelStyle.FILL_AND_OUTLINE,
+        outlineWidth: 2,
+        outlineColor: C.Color.BLACK,
       },
     });
+    // GPS accuracy circle
+    if (state.gps.location.accuracyM) {
+      entities.add({
+        id: "managed:gps:accuracy",
+        position: C.Cartesian3.fromDegrees(state.gps.location.lon, state.gps.location.lat, 0),
+        ellipse: {
+          semiMajorAxis: state.gps.location.accuracyM,
+          semiMinorAxis: state.gps.location.accuracyM,
+          material: C.Color.fromCssColorString("#34d399").withAlpha(0.08),
+          outline: true,
+          outlineColor: C.Color.fromCssColorString("#34d399"),
+          outlineWidth: 1,
+          heightReference: C.HeightReference.CLAMP_TO_GROUND,
+        },
+      });
+    }
   }
 
-  if (state.planning.regionLayer) {
-    const positions = state.planning.regionLayer.getLatLngs()[0].map((point) =>
-      window.Cesium.Cartesian3.fromDegrees(point.lng, point.lat, 0),
-    );
+  // --- TERRAIN COVERAGE ---
+  state.terrains.forEach((terrain) => {
+    if (!terrain.extentVisible) return;
     entities.add({
-      id: "managed:planning:region",
-      polygon: {
-        hierarchy: positions,
-        material: window.Cesium.Color.fromCssColorString("#d9e4ff").withAlpha(0.12),
+      id: `managed:terrain-coverage:${terrain.id}`,
+      rectangle: {
+        coordinates: C.Rectangle.fromDegrees(
+          terrain.bounds.sw.lon, terrain.bounds.sw.lat,
+          terrain.bounds.ne.lon, terrain.bounds.ne.lat,
+        ),
+        material: C.Color.fromCssColorString("#8fb7ff").withAlpha(0),
         outline: true,
-        outlineColor: window.Cesium.Color.fromCssColorString("#d9e4ff"),
+        outlineColor: C.Color.fromCssColorString("#8fb7ff"),
+        outlineWidth: 2,
+        height: 0,
       },
+    });
+  });
+
+  // --- VIEWSHEDS ---
+  state.viewsheds.filter((v) => isVisible(`viewshed:${v.id}`)).forEach((viewshed) => {
+    const { latitudes, longitudes, rssi, lineOfSight, layer } = viewshed;
+    if (!layer || !latitudes) return;
+    const opacity = viewshed.opacity ?? 0.7;
+    const gridLatStep = viewshed.layer?.options?.gridLatStepDeg ?? (latitudes[1] - latitudes[0]);
+    const gridLonStep = viewshed.layer?.options?.gridLonStepDeg ?? (longitudes[1] - longitudes[0]);
+    const halfLat = (gridLatStep || 0.001) / 2;
+    const halfLon = (gridLonStep || 0.001) / 2;
+
+    const instances = [];
+    for (let i = 0; i < latitudes.length; i++) {
+      const cssColor = rssiColor(rssi[i], Boolean(lineOfSight[i]), opacity);
+      const color = C.Color.fromCssColorString(cssColor);
+      instances.push(new C.GeometryInstance({
+        id: `viewshed:${viewshed.id}:${i}`,
+        geometry: new C.RectangleGeometry({
+          rectangle: C.Rectangle.fromDegrees(
+            longitudes[i] - halfLon, latitudes[i] - halfLat,
+            longitudes[i] + halfLon, latitudes[i] + halfLat,
+          ),
+          height: 0,
+        }),
+        attributes: {
+          color: C.ColorGeometryInstanceAttribute.fromColor(color),
+        },
+      }));
+    }
+
+    if (instances.length > 0) {
+      const primitive = new C.Primitive({
+        geometryInstances: instances,
+        appearance: new C.PerInstanceColorAppearance({
+          flat: true,
+          translucent: true,
+        }),
+        asynchronous: false,
+      });
+      viewer.scene.primitives.add(primitive);
+      viewer._managedPrimitives.push(primitive);
+    }
+  });
+
+  // --- IMPORTED FEATURES ---
+  state.importedItems.filter((item) => isVisible(`imported:${item.id}`)).forEach((item) => {
+    if (!item.layer) return;
+    const id = `managed:imported:${item.id}`;
+    if (item.geometryType === "Point") {
+      const latlng = item.layer.getLatLng();
+      entities.add({
+        id,
+        position: C.Cartesian3.fromDegrees(latlng.lng, latlng.lat, 0),
+        point: {
+          pixelSize: 9,
+          color: C.Color.fromCssColorString("#f7b955"),
+          outlineColor: C.Color.WHITE,
+          outlineWidth: 1.5,
+          heightReference: C.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: item.name,
+          font: "13px Bahnschrift",
+          fillColor: C.Color.WHITE,
+          pixelOffset: new C.Cartesian2(0, -16),
+          heightReference: C.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          style: C.LabelStyle.FILL_AND_OUTLINE,
+          outlineWidth: 2,
+          outlineColor: C.Color.BLACK,
+        },
+      });
+    } else if (item.geometryType === "LineString") {
+      const shapeColor = item.shapeStyle?.color ?? "#f7b955";
+      const weight = item.shapeStyle?.weight ?? 3;
+      const lineStyle = item.shapeStyle?.lineStyle ?? "solid";
+      const positions = item.layer.getLatLngs().map((p) => C.Cartesian3.fromDegrees(p.lng, p.lat, 0));
+      entities.add({
+        id,
+        polyline: {
+          positions,
+          width: weight,
+          material: getCesiumStrokeMaterial(C, shapeColor, lineStyle),
+          clampToGround: true,
+        },
+      });
+    } else {
+      const rings = item.layer.getLatLngs();
+      const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+      const shapeColor = item.drawn
+        ? (item.shapeStyle?.color ?? DRAW_DEFAULTS.color)
+        : "#34d399";
+      const fillOpacity = item.drawn
+        ? (item.shapeStyle?.fillOpacity ?? DRAW_DEFAULTS.fillOpacity)
+        : 0.12;
+      const weight = item.drawn
+        ? (item.shapeStyle?.weight ?? DRAW_DEFAULTS.weight)
+        : 2;
+      const lineStyle = item.shapeStyle?.lineStyle ?? DRAW_DEFAULTS.lineStyle;
+      addClampedPolygon(id, outer, {
+        color: shapeColor,
+        fillColor: shapeColor,
+        fillOpacity,
+        outlineColor: shapeColor,
+        outlineWidth: weight,
+        lineStyle,
+        zIndex: 12,
+      });
+    }
+  });
+
+  // --- PLANNING REGION ---
+  if (state.planning.regionLayer) {
+    addClampedPolygon("managed:planning:region", state.planning.regionLayer.getLatLngs()[0], {
+      color: "#d9e4ff",
+      fillColor: "#d9e4ff",
+      fillOpacity: 0.12,
+      outlineColor: "#d9e4ff",
+      outlineWidth: 2,
+      zIndex: 8,
     });
   }
 
+  // --- PLANNING RECOMMENDATIONS ---
   state.planning.recommendations.forEach((recommendation, index) => {
     const txHeight = resolveAbsoluteHeight(recommendation.tx, state.planning.terrainId);
     const rxHeight = resolveAbsoluteHeight(recommendation.rx, state.planning.terrainId);
-    const linkColor = window.Cesium.Color.fromCssColorString(
-      recommendation.friendlyLineOfSight ? "#d9e4ff" : "#f97316",
-    );
+    const linkColor = C.Color.fromCssColorString(recommendation.friendlyLineOfSight ? "#d9e4ff" : "#f97316");
     const linkDashLength = recommendation.friendlyLineOfSight ? 32 : 14;
-    const linkPositions = window.Cesium.Cartesian3.fromDegreesArrayHeights([
-      recommendation.tx.lon,
-      recommendation.tx.lat,
-      txHeight.absoluteHeightM,
-      recommendation.rx.lon,
-      recommendation.rx.lat,
-      rxHeight.absoluteHeightM,
-    ]);
+    const txRef = txHeight.useRelativeToGround ? C.HeightReference.RELATIVE_TO_GROUND : C.HeightReference.NONE;
+    const rxRef = rxHeight.useRelativeToGround ? C.HeightReference.RELATIVE_TO_GROUND : C.HeightReference.NONE;
 
     entities.add({
       id: `managed:planning:tx:${index}`,
-      position: window.Cesium.Cartesian3.fromDegrees(recommendation.tx.lon, recommendation.tx.lat, txHeight.absoluteHeightM),
+      position: C.Cartesian3.fromDegrees(recommendation.tx.lon, recommendation.tx.lat, txHeight.absoluteHeightM),
       point: {
         pixelSize: 10,
-        color: window.Cesium.Color.fromCssColorString("#4ade80"),
-        outlineColor: window.Cesium.Color.WHITE,
+        color: C.Color.fromCssColorString("#4ade80"),
+        outlineColor: C.Color.WHITE,
         outlineWidth: 2,
-        heightReference: txHeight.useRelativeToGround
-          ? window.Cesium.HeightReference.RELATIVE_TO_GROUND
-          : window.Cesium.HeightReference.NONE,
+        heightReference: txRef,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
         text: `Tx ${index + 1}`,
         font: "14px Bahnschrift",
-        fillColor: window.Cesium.Color.WHITE,
-        pixelOffset: new window.Cesium.Cartesian2(0, -18),
-        heightReference: txHeight.useRelativeToGround
-          ? window.Cesium.HeightReference.RELATIVE_TO_GROUND
-          : window.Cesium.HeightReference.NONE,
+        fillColor: C.Color.WHITE,
+        pixelOffset: new C.Cartesian2(0, -18),
+        heightReference: txRef,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        style: C.LabelStyle.FILL_AND_OUTLINE,
+        outlineWidth: 2,
+        outlineColor: C.Color.BLACK,
       },
     });
     entities.add({
       id: `managed:planning:rx:${index}`,
-      position: window.Cesium.Cartesian3.fromDegrees(recommendation.rx.lon, recommendation.rx.lat, rxHeight.absoluteHeightM),
+      position: C.Cartesian3.fromDegrees(recommendation.rx.lon, recommendation.rx.lat, rxHeight.absoluteHeightM),
       point: {
         pixelSize: 10,
-        color: window.Cesium.Color.fromCssColorString("#facc15"),
-        outlineColor: window.Cesium.Color.WHITE,
+        color: C.Color.fromCssColorString("#facc15"),
+        outlineColor: C.Color.WHITE,
         outlineWidth: 2,
-        heightReference: rxHeight.useRelativeToGround
-          ? window.Cesium.HeightReference.RELATIVE_TO_GROUND
-          : window.Cesium.HeightReference.NONE,
+        heightReference: rxRef,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
         text: `Rx ${index + 1}`,
         font: "14px Bahnschrift",
-        fillColor: window.Cesium.Color.WHITE,
-        pixelOffset: new window.Cesium.Cartesian2(0, -18),
-        heightReference: rxHeight.useRelativeToGround
-          ? window.Cesium.HeightReference.RELATIVE_TO_GROUND
-          : window.Cesium.HeightReference.NONE,
+        fillColor: C.Color.WHITE,
+        pixelOffset: new C.Cartesian2(0, -18),
+        heightReference: rxRef,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        style: C.LabelStyle.FILL_AND_OUTLINE,
+        outlineWidth: 2,
+        outlineColor: C.Color.BLACK,
       },
     });
     entities.add({
       id: `managed:planning:link:${index}`,
       polyline: {
-        positions: linkPositions,
+        positions: C.Cartesian3.fromDegreesArrayHeights([
+          recommendation.tx.lon, recommendation.tx.lat, txHeight.absoluteHeightM,
+          recommendation.rx.lon, recommendation.rx.lat, rxHeight.absoluteHeightM,
+        ]),
         width: 2.5,
-        arcType: window.Cesium.ArcType.NONE,
-        material: new window.Cesium.PolylineDashMaterialProperty({
-          color: linkColor,
-          dashLength: linkDashLength,
-        }),
-        depthFailMaterial: new window.Cesium.PolylineDashMaterialProperty({
-          color: linkColor.withAlpha(0.95),
-          dashLength: linkDashLength,
-        }),
+        arcType: C.ArcType.NONE,
+        material: new C.PolylineDashMaterialProperty({ color: linkColor, dashLength: linkDashLength }),
+        depthFailMaterial: new C.PolylineDashMaterialProperty({ color: linkColor.withAlpha(0.95), dashLength: linkDashLength }),
       },
     });
   });
+
+  // --- GRIDLINES ---
+  if (state.settings?.gridLinesEnabled) {
+    const gridColor = C.Color.fromCssColorString(state.settings.gridColor || "#8fb7ff").withAlpha(0.4);
+    entities.add({
+      id: "managed:gridlines",
+      rectangle: {
+        coordinates: C.Rectangle.fromDegrees(-180, -90, 180, 90),
+        material: new C.GridMaterialProperty({
+          color: gridColor,
+          cellAlpha: 0,
+          lineCount: new C.Cartesian2(36, 18),
+          lineThickness: new C.Cartesian2(1.5, 1.5),
+        }),
+        height: 0,
+      },
+    });
+  }
 }
 
 function parseDted(buffer, fileName, overrideLat, overrideLon) {
@@ -3656,6 +7887,19 @@ function formatDistance(meters) {
     return `${(meters / 1609.344).toFixed(2)} mi`;
   }
   return `${(meters / 1000).toFixed(2)} km`;
+}
+
+function formatCoverageArea(viewshed) {
+  if (!viewshed.gridLatStepDeg || !viewshed.gridLonStepDeg || !viewshed.cellCount) return null;
+  const latRad = (viewshed.asset?.lat ?? 0) * Math.PI / 180;
+  const cellAreaKm2 =
+    (viewshed.gridLatStepDeg * 111.32) *
+    (viewshed.gridLonStepDeg * 111.32 * Math.cos(latRad));
+  const totalKm2 = cellAreaKm2 * viewshed.cellCount;
+  if (state.settings.measurementUnits === "standard") {
+    return `${(totalKm2 * 0.386102).toFixed(2)} mi²`;
+  }
+  return `${totalKm2.toFixed(2)} km²`;
 }
 
 function formatElevation(meters) {
@@ -3950,6 +8194,8 @@ const CanvasViewshedLayer = L.Layer.extend({
   initialize(options) {
     this.options = options;
     this._canvas = null;
+    this._frame = null;
+    this._colorCache = null;
   },
 
   onAdd(map) {
@@ -3957,12 +8203,18 @@ const CanvasViewshedLayer = L.Layer.extend({
     this._canvas = L.DomUtil.create("canvas", "leaflet-viewshed-canvas");
     const pane = map.getPane(this.options.pane || "overlayPane");
     pane.appendChild(this._canvas);
-    map.on("moveend zoomend resize", this._redraw, this);
-    this._redraw();
+    this._ensureColorCache();
+    this._canvas.style.opacity = String(this.options.opacity ?? 0.7);
+    map.on("moveend zoomend resize", this._scheduleRedraw, this);
+    this._scheduleRedraw();
   },
 
   onRemove(map) {
-    map.off("moveend zoomend resize", this._redraw, this);
+    map.off("moveend zoomend resize", this._scheduleRedraw, this);
+    if (this._frame !== null) {
+      window.cancelAnimationFrame(this._frame);
+      this._frame = null;
+    }
     if (this._canvas?.parentNode) {
       this._canvas.parentNode.removeChild(this._canvas);
     }
@@ -3971,13 +8223,41 @@ const CanvasViewshedLayer = L.Layer.extend({
 
   setOpacity(opacity) {
     this.options.opacity = opacity;
-    this._redraw();
+    if (this._canvas) {
+      this._canvas.style.opacity = String(opacity);
+    }
+  },
+
+  _ensureColorCache() {
+    if (this._colorCache?.length === this.options.rssi?.length) {
+      return;
+    }
+
+    const rssi = this.options.rssi ?? [];
+    const lineOfSight = this.options.lineOfSight ?? [];
+    this._colorCache = new Array(rssi.length);
+    for (let index = 0; index < rssi.length; index += 1) {
+      this._colorCache[index] = rssiColor(rssi[index], Boolean(lineOfSight[index]), 1);
+    }
+  },
+
+  _scheduleRedraw() {
+    if (this._frame !== null) {
+      return;
+    }
+
+    this._frame = window.requestAnimationFrame(() => {
+      this._frame = null;
+      this._redraw();
+    });
   },
 
   _redraw() {
     if (!this._map || !this._canvas) {
       return;
     }
+
+    this._ensureColorCache();
 
     const size = this._map.getSize();
     const bounds = this._map.getBounds();
@@ -3995,15 +8275,22 @@ const CanvasViewshedLayer = L.Layer.extend({
 
     const latitudes = this.options.latitudes;
     const longitudes = this.options.longitudes;
-    const rssi = this.options.rssi;
-    const lineOfSight = this.options.lineOfSight;
+    const colors = this._colorCache;
     const latHalf = this.options.gridLatStepDeg / 2;
     const lonHalf = this.options.gridLonStepDeg / 2;
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+    const wrapsDateLine = west > east;
 
     for (let index = 0; index < latitudes.length; index += 1) {
       const lat = latitudes[index];
       const lon = longitudes[index];
-      if (!bounds.contains([lat, lon])) {
+      const inLongitude = wrapsDateLine
+        ? lon >= west || lon <= east
+        : lon >= west && lon <= east;
+      if (lat < south || lat > north || !inLongitude) {
         continue;
       }
 
@@ -4012,7 +8299,7 @@ const CanvasViewshedLayer = L.Layer.extend({
       const width = Math.max(1, southEast.x - northWest.x);
       const height = Math.max(1, southEast.y - northWest.y);
 
-      context.fillStyle = rssiColor(rssi[index], Boolean(lineOfSight[index]), this.options.opacity);
+      context.fillStyle = colors[index];
       context.fillRect(northWest.x, northWest.y, width, height);
     }
   },

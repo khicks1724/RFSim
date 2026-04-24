@@ -18,7 +18,7 @@
     rel="stylesheet"
     href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
   >
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=20260424-5">
 </head>
 <body>
   <div class="app-shell">
@@ -35,8 +35,7 @@
         <div class="imagery-menu-shell">
           <button id="imageryMenuBtn" class="ghost-button imagery-menu-button" type="button" aria-label="Open imagery settings" aria-expanded="false">
             <span class="imagery-menu-caption">Imagery</span>
-            <strong id="imageryMenuValue">Satellite Imagery</strong>
-            <span class="imagery-menu-chevron">&#9662;</span>
+            <span class="imagery-menu-value-row"><strong id="imageryMenuValue">Satellite Imagery</strong><span class="imagery-menu-chevron">&#9662;</span></span>
           </button>
           <div id="imageryMenu" class="settings-menu imagery-menu hidden">
             <div class="menu-title-row">
@@ -93,8 +92,7 @@
         <div class="terrain-menu-shell">
           <button id="terrainMenuBtn" class="ghost-button imagery-menu-button" type="button" aria-label="Open terrain settings" aria-expanded="false">
             <span class="imagery-menu-caption">Terrain</span>
-            <strong id="terrainMenuValue">No DTED</strong>
-            <span class="imagery-menu-chevron">&#9662;</span>
+            <span class="imagery-menu-value-row"><strong id="terrainMenuValue">No DTED</strong><span class="imagery-menu-chevron">&#9662;</span></span>
           </button>
           <div id="terrainMenu" class="settings-menu terrain-menu hidden">
             <div class="menu-title-row">
@@ -129,8 +127,7 @@
         <div class="weather-menu-shell">
           <button id="weatherMenuBtn" class="ghost-button imagery-menu-button" type="button" aria-label="Open weather settings" aria-expanded="false">
             <span class="imagery-menu-caption">Weather</span>
-            <strong id="weatherMenuValue">Manual</strong>
-            <span class="imagery-menu-chevron">&#9662;</span>
+            <span class="imagery-menu-value-row"><strong id="weatherMenuValue">Manual</strong><span class="imagery-menu-chevron">&#9662;</span></span>
           </button>
           <div id="weatherMenu" class="settings-menu weather-menu hidden">
             <div class="menu-title-row">
@@ -191,20 +188,37 @@
             </p>
           </div>
         </div>
-        <div class="status-chip">
+        <div class="status-chip status-chip-mgrs">
           <span id="coordsLabel">MGRS</span>
           <strong id="mgrsValue">----------</strong>
         </div>
+        <button id="aiChatToggleBtn" class="status-chip status-chip-button ai-chat-toggle-btn" type="button" aria-label="Toggle AI chat panel">
+          <span>AI Chat</span>
+          <div class="status-chip-action-row">
+            <strong id="aiChatToggleValue">Offline</strong>
+            <span class="status-chip-chevron" id="aiChatToggleChevron">&#9654;</span>
+          </div>
+        </button>
         <div class="settings-menu-shell">
-          <button id="settingsMenuBtn" class="icon-button settings-button" type="button" aria-label="Open map settings" aria-expanded="false">
-            <span>&#9881;</span>
+          <button id="settingsMenuBtn" class="status-chip status-chip-button settings-chip-button settings-chip-icon-only" type="button" aria-label="Open map settings" aria-expanded="false">
+            <span class="settings-gear-icon">&#9881;</span>
           </button>
           <div id="settingsMenu" class="settings-menu hidden">
+            <div class="menu-title-row">
+              <strong>Map Settings</strong>
+            </div>
             <label>
               Measurement Units
               <select id="measurementUnitsSelect">
                 <option value="metric">Metric</option>
                 <option value="standard">Standard</option>
+              </select>
+            </label>
+            <label>
+              Theme
+              <select id="themeSelect">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
               </select>
             </label>
             <label>
@@ -223,6 +237,27 @@
               Gridlines Color
               <input id="gridlinesColor" type="color" value="#8fb7ff">
             </label>
+            <hr class="settings-divider">
+            <div class="menu-title-row">
+              <strong>AI Integration</strong>
+            </div>
+            <label>
+              Provider
+              <select id="aiProviderSelect">
+                <option value="">Disabled</option>
+                <option value="genai-mil">GenAI.mil (STARK)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+              </select>
+            </label>
+            <label id="aiApiKeyLabel">
+              <span id="aiApiKeyLabelText">API Key</span>
+              <input id="aiApiKeyInput" type="password" placeholder="Paste API key">
+            </label>
+            <div class="button-row compact-button-row">
+              <button id="testAiConnectionBtn" class="primary-button small" type="button">Test Connection</button>
+              <button id="clearAiProviderBtn" class="ghost-button small" type="button">Clear</button>
+            </div>
+            <div class="weather-summary ai-summary" id="aiProviderSummary">Add a provider and API key to enable the AI planning assistant.</div>
           </div>
         </div>
       </div>
@@ -230,128 +265,83 @@
 
     <div class="workspace-shell">
       <aside id="controlPanel" class="control-panel">
-        <section id="mapContentsCard" class="card hidden">
-          <div class="section-title-row">
-            <h2>Map Contents</h2>
-            <div class="button-row">
-              <span class="fine-print">Drag to reorder. Click to focus.</span>
-              <button id="addMapFolderBtn" class="ghost-button small" type="button">Add Folder</button>
-            </div>
-          </div>
-          <div id="mapContentsList" class="asset-list map-contents-list"></div>
-        </section>
-
-        <section class="card">
-          <div class="section-title-row">
-            <h2>Emitter Profiles</h2>
-            <div class="button-row">
-              <button id="saveProfileBtn" class="primary-button small" type="button">Save</button>
-              <button id="deleteProfileBtn" class="ghost-button small" type="button">Delete</button>
-            </div>
-          </div>
-          <div class="two-column">
-            <label class="span-2">
-              Saved Profile
-              <select id="profileSelect"></select>
-            </label>
-            <label class="span-2">
-              Profile Name
-              <input id="profileName" type="text" value="Standard VHF">
-            </label>
-          </div>
-        </section>
-
-        <section id="emittersSection" class="card">
-          <div class="section-title-row">
-            <h2>Emitters</h2>
-            <div class="button-row">
-              <button id="applyProfileBtn" class="ghost-button small" type="button">Apply Profile</button>
-              <button id="placeAssetBtn" class="primary-button small" type="button">Place On Map</button>
-            </div>
-          </div>
-          <div class="two-column">
-            <label>
-              Type
-              <select id="assetType">
-                <option value="radio">Radio</option>
-                <option value="jammer">Jammer</option>
-                <option value="relay">Relay</option>
-                <option value="receiver">Receiver</option>
-              </select>
-            </label>
-            <label>
-              Force
-              <select id="assetForce">
-                <option value="friendly">Friendly</option>
-                <option value="enemy">Enemy</option>
-                <option value="host-nation">Host Nation</option>
-                <option value="civilian">Civilian</option>
-              </select>
-            </label>
-            <label>
-              Emitter Name
-              <input id="assetName" type="text" value="RF-01">
-            </label>
-            <label>
-              Unit Name
-              <input id="unitName" type="text" value="Alpha">
-            </label>
-            <label>
-              Frequency MHz
-              <input id="frequencyMHz" type="number" min="0.1" step="0.1" value="350">
-            </label>
-            <label>
-              Power W
-              <input id="powerW" type="number" min="0.001" step="0.1" value="50">
-            </label>
-            <label>
-              Antenna Height m
-              <input id="antennaHeight" type="number" min="0" step="0.5" value="10">
-            </label>
-            <label>
-              Antenna Gain dBi
-              <input id="antennaGain" type="number" step="0.1" value="2.1">
-            </label>
-            <label>
-              Receiver Sensitivity dBm
-              <input id="receiverSensitivity" type="number" step="0.1" value="-95">
-            </label>
-            <label>
-              System Loss dB
-              <input id="systemLoss" type="number" step="0.1" value="1.5">
-            </label>
-            <label>
-              Icon
-              <select id="assetIcon">
-                <option value="radio">Radio</option>
-                <option value="tower">Tower</option>
-                <option value="jammer">Jammer</option>
-                <option value="receiver">Receiver</option>
-                <option value="sensor">Sensor</option>
-              </select>
-            </label>
-            <label>
-              Color
-              <input id="assetColor" type="color" value="#38bdf8">
-            </label>
-            <label class="span-2">
-              Notes
-              <input id="assetNotes" type="text" placeholder="Mission notes">
-            </label>
-          </div>
-          <div class="list-shell">
-            <div class="list-header">
-              <span>Placed Systems</span>
+        <div class="control-panel-top">
+          <section id="mapContentsCard" class="card map-contents-card">
+            <div class="section-title-row">
+              <h2>Map Contents</h2>
               <div class="button-row">
-                <button id="exportGeoJsonBtn" class="ghost-button small" type="button">GeoJSON</button>
-                <button id="exportKmlBtn" class="ghost-button small" type="button">KML</button>
-                <button id="exportKmzBtn" class="ghost-button small" type="button">KMZ</button>
-                <button id="clearAssetsBtn" class="ghost-button small" type="button">Remove All</button>
+                <button id="addEmitterBtn" class="ghost-button small icon-button add-emitter-btn" type="button" title="Add Emitter" aria-label="Add Emitter">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/>
+                    <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
+                  </svg>
+                  <span class="add-emitter-plus">+</span>
+                </button>
+                <button id="addMapFolderBtn" class="ghost-button small map-folder-icon-button" type="button" aria-label="Add Folder" data-tooltip="Add Folder">
+                  <span class="map-folder-icon" aria-hidden="true">
+                    <span class="map-folder-icon-tab"></span>
+                    <span class="map-folder-icon-body"></span>
+                    <span class="map-folder-icon-plus">+</span>
+                  </span>
+                </button>
+                <div class="draw-dropdown-wrapper">
+                  <button id="drawShapeBtn" class="ghost-button small icon-button" type="button" title="Draw Shape">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="12 2 2 19 22 19"/>
+                    </svg>
+                  </button>
+                  <div id="drawDropdown" class="export-dropdown hidden">
+                    <button id="drawCircleBtn" class="export-dropdown-item" type="button">Circle</button>
+                    <button id="drawRectangleBtn" class="export-dropdown-item" type="button">Rectangle</button>
+                    <button id="drawPolylineBtn" class="export-dropdown-item" type="button">Polyline / Polygon</button>
+                  </div>
+                </div>
+                <div class="export-dropdown-wrapper">
+                  <button id="exportMenuBtn" class="ghost-button small icon-button" type="button" title="Export">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                      <polyline points="16 6 12 2 8 6"/>
+                      <line x1="12" y1="2" x2="12" y2="15"/>
+                    </svg>
+                  </button>
+                  <div id="exportDropdown" class="export-dropdown hidden">
+                    <button id="exportGeoJsonBtn" class="export-dropdown-item" type="button">GeoJSON</button>
+                    <button id="exportKmlBtn" class="export-dropdown-item" type="button">KML</button>
+                    <button id="exportKmzBtn" class="export-dropdown-item" type="button">KMZ</button>
+                    <button id="exportZipBtn" class="export-dropdown-item" type="button">ZIP</button>
+                  </div>
+                </div>
               </div>
             </div>
-            <div id="assetList" class="asset-list"></div>
+            <div id="mapContentsList" class="asset-list map-contents-list"></div>
+          </section>
+        </div>
+
+        <div id="controlPanelSectionDivider" class="control-panel-section-divider" role="separator" aria-orientation="horizontal" aria-label="Resize map contents panel"></div>
+
+        <div class="control-panel-bottom">
+          <!-- Hidden form fields kept for legacy app.js compatibility — not rendered -->
+          <div class="hidden-form-fields" aria-hidden="true">
+            <select id="profileSelect"></select>
+            <input id="profileName" type="text" value="Standard VHF">
+            <button id="saveProfileBtn" type="button"></button>
+            <button id="deleteProfileBtn" type="button"></button>
+            <button id="applyProfileBtn" type="button"></button>
+            <button id="placeAssetBtn" type="button"></button>
+            <select id="assetType"><option value="radio">Radio</option><option value="jammer">Jammer</option><option value="relay">Relay</option><option value="receiver">Receiver</option></select>
+            <select id="assetForce"><option value="friendly">Friendly</option><option value="enemy">Enemy</option><option value="host-nation">Host Nation</option><option value="civilian">Civilian</option><option value="other">Other</option></select>
+            <input id="assetName" type="text" value="RF-01">
+            <input id="unitName" type="text" value="Alpha">
+            <input id="frequencyMHz" type="number" min="0.1" step="0.1" value="350">
+            <input id="powerW" type="number" min="0.001" step="0.1" value="50">
+            <input id="antennaHeight" type="number" min="0" step="0.5" value="10">
+            <input id="antennaGain" type="number" step="0.1" value="2.1">
+            <input id="receiverSensitivity" type="number" step="0.1" value="-95">
+            <input id="systemLoss" type="number" step="0.1" value="1.5">
+            <select id="assetIcon"><option value="radio">Radio</option><option value="tower">Tower</option><option value="jammer">Jammer</option><option value="receiver">Receiver</option><option value="sensor">Sensor</option></select>
+            <input id="assetColor" type="color" value="#7ec8e3">
+            <input id="assetNotes" type="text">
           </div>
-        </section>
 
         <section id="simulationSection" class="card">
           <div class="section-title-row">
@@ -394,6 +384,8 @@
           <div class="metrics-grid">
             <div>
               <span class="metric-label">Coverage</span>
+
+          <div id="topBarDropdownLayer" class="top-bar-dropdown-layer"></div>
               <strong id="coverageMetric">0 cells</strong>
             </div>
             <div>
@@ -461,7 +453,8 @@
             </div>
             <div id="planningList" class="asset-list"></div>
           </div>
-        </section>
+          </section>
+        </div>
       </aside>
 
       <div id="panelDivider" class="panel-divider" role="separator" aria-orientation="vertical" aria-label="Resize control panel"></div>
@@ -504,6 +497,60 @@
           </div>
         </div>
       </main>
+
+      <div id="aiPanelDivider" class="panel-divider panel-divider-right" role="separator" aria-orientation="vertical" aria-label="Resize AI chat panel"></div>
+
+      <aside id="aiPanel" class="ai-panel" aria-label="AI planning assistant panel">
+        <div class="ai-panel-header">
+          <div class="ai-panel-title-group">
+            <strong>AI Agent</strong>
+            <span class="eyebrow" id="aiPanelStatus">Provider offline</span>
+          </div>
+          <div class="button-row">
+            <button id="collapseAiPanelBtn" class="icon-button" type="button" aria-label="Collapse AI panel">
+              <span id="collapseAiPanelIcon">&#9654;</span>
+            </button>
+          </div>
+        </div>
+        <div id="aiChatMessages" class="ai-chat-messages">
+          <article class="ai-chat-message ai-chat-message-system">
+            <strong>Assistant</strong>
+            <p>Add a working GenAI.mil provider in the top bar to enable chat-assisted planning.</p>
+          </article>
+        </div>
+        <form id="aiChatForm" class="ai-chat-form">
+          <div id="aiAttachmentBar" class="ai-attachment-bar hidden">
+            <div id="aiImagePreviews" class="ai-image-previews"></div>
+            <div id="aiContextChips" class="ai-context-chips"></div>
+          </div>
+          <label>
+            Chat Prompt
+            <textarea id="aiChatInput" rows="4" placeholder="Ask the agent to assess the map state, adjust scenario settings, draw shapes, or plan a communications setup. Paste images directly." disabled></textarea>
+          </label>
+          <div id="aiMentionDropdown" class="ai-mention-dropdown hidden"></div>
+          <div class="button-row ai-chat-actions">
+            <div class="ai-attach-group">
+              <button id="aiAttachImageBtn" class="ghost-button small icon-button" type="button" title="Attach image" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              </button>
+              <input id="aiImageFileInput" type="file" accept="image/*" multiple style="display:none">
+              <div class="ai-context-picker-wrapper">
+                <button id="aiAddContextBtn" class="ghost-button small icon-button" type="button" title="Add map context" disabled>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
+                <div id="aiContextPicker" class="ai-context-picker hidden"></div>
+              </div>
+              <button id="aiVoiceBtn" class="ghost-button small icon-button" type="button" title="Voice to text" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+              </button>
+            </div>
+            <div class="button-row">
+              <button id="aiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
+              <button id="aiClearChatBtn" class="ghost-button small" type="button">Clear Chat</button>
+            </div>
+          </div>
+        </form>
+      </aside>
     </div>
   </div>
 
@@ -511,6 +558,37 @@
     <button type="button" class="ghost-button small" data-map-content-action="edit">Edit</button>
     <button type="button" class="ghost-button small" data-map-content-action="rename">Rename</button>
     <button type="button" class="ghost-button small" data-map-content-action="delete">Delete</button>
+  </div>
+
+  <div id="shapeStylePanel" class="map-contents-menu shape-style-panel hidden" aria-label="Shape style editor">
+    <div class="shape-style-panel-title">Edit Shape Style</div>
+    <label class="shape-style-row">
+      Color
+      <input id="shapeColorInput" type="color" value="#3b82f6">
+    </label>
+    <label class="shape-style-row">
+      Line Style
+      <select id="shapeLineStyleSelect">
+        <option value="solid">Solid</option>
+        <option value="dashed">Dashed</option>
+        <option value="dotted">Dotted</option>
+      </select>
+    </label>
+    <label class="shape-style-row">
+      Opacity
+      <input id="shapeOpacityInput" type="range" min="0" max="1" step="0.05" value="0.35">
+    </label>
+    <label class="shape-style-row">
+      Line Width
+      <input id="shapeWeightInput" type="range" min="1" max="10" step="1" value="2">
+    </label>
+    <div class="shape-style-row shape-style-hint">
+      <span id="shapeOpacityValue">35%</span> opacity &nbsp;·&nbsp; <span id="shapeWeightValue">2</span>px line
+    </div>
+    <div class="button-row shape-style-actions">
+      <button id="shapeStyleEditVerticesBtn" type="button" class="ghost-button small">Edit Vertices</button>
+      <button id="shapeStyleDoneBtn" type="button" class="primary-button small">Done</button>
+    </div>
   </div>
 
   <div id="mapContentsRename" class="map-contents-menu hidden" aria-label="Rename map content">
@@ -524,6 +602,443 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- ADD EMITTER MODAL                                          -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div id="emitterModal" class="emitter-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="emitterModalTitle">
+    <div class="emitter-modal">
+
+      <!-- Header -->
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/>
+          </svg>
+          <h2 id="emitterModalTitle">Add Emitter</h2>
+        </div>
+        <button id="emitterModalCloseBtn" class="icon-button ghost-button" type="button" aria-label="Close">&#10005;</button>
+      </div>
+
+      <!-- Body: two-column layout — profile selector left, params right -->
+      <div class="emitter-modal-body">
+
+        <!-- LEFT COLUMN: Radio Library -->
+        <div class="emitter-modal-library">
+          <div class="emitter-library-header">
+            <span class="emitter-section-label">Radio Library</span>
+            <button id="emitterSaveCustomBtn" class="ghost-button small" type="button">Save as Custom</button>
+          </div>
+
+          <label class="emitter-lib-label">
+            <span>Radio Type</span>
+            <select id="emitterRadioType">
+              <option value="">— Manual / Custom —</option>
+              <optgroup label="Military — Harris/L3Harris">
+                <option value="prc-163">AN/PRC-163 Falcon IV</option>
+                <option value="prc-152a">AN/PRC-152A Falcon III</option>
+                <option value="prc-117g">AN/PRC-117G Falcon III</option>
+                <option value="prc-160">AN/PRC-160</option>
+                <option value="prc-77">AN/PRC-77</option>
+                <option value="vrc-90">AN/VRC-90 SINCGARS</option>
+                <option value="prc-119">AN/PRC-119 SINCGARS</option>
+              </optgroup>
+              <optgroup label="Military — Thales / Other">
+                <option value="mbitr">AN/PRC-148 MBITR</option>
+                <option value="prc-154">AN/PRC-154 Rifleman Radio</option>
+              </optgroup>
+              <optgroup label="Commercial P25">
+                <option value="p25-portable">P25 Portable (generic)</option>
+                <option value="p25-mobile">P25 Mobile (generic)</option>
+                <option value="p25-repeater">P25 Repeater</option>
+              </optgroup>
+              <optgroup label="Commercial DMR">
+                <option value="dmr-portable">DMR Portable (Tier II)</option>
+                <option value="dmr-mobile">DMR Mobile (Tier II)</option>
+                <option value="dmr-repeater">DMR Repeater (Tier III)</option>
+              </optgroup>
+              <optgroup label="Commercial — Other">
+                <option value="mototrbo-r7">Motorola MOTOTRBO R7</option>
+                <option value="harris-xg100p">Harris XG-100P (P25/LTE)</option>
+                <option value="broadband-lte">Broadband LTE (FirstNet)</option>
+              </optgroup>
+            </select>
+          </label>
+
+          <label class="emitter-lib-label">
+            <span>Program / Waveform</span>
+            <select id="emitterProgramSelect" disabled>
+              <option value="">Select a radio type first</option>
+            </select>
+          </label>
+
+          <div class="emitter-lib-summary" id="emitterLibSummary">
+            <p>Select a radio type and program to auto-fill parameters, or configure manually below.</p>
+          </div>
+
+          <!-- Identity fields -->
+          <div class="emitter-section-label" style="margin-top:16px">Identity</div>
+          <div class="emitter-field-group">
+            <label>
+              <span>Emitter Name</span>
+              <input id="emName" type="text" placeholder="e.g. PRC-163 Alpha">
+            </label>
+            <label>
+              <span>Unit / Callsign</span>
+              <input id="emUnit" type="text" placeholder="e.g. 1-68 AR, K 1">
+            </label>
+            <label>
+              <span>Force Affiliation</span>
+              <select id="emForce">
+                <option value="friendly">Friendly</option>
+                <option value="enemy">Enemy</option>
+                <option value="host-nation">Host Nation</option>
+                <option value="civilian">Civilian</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              <span>Icon</span>
+              <select id="emIcon">
+                <option value="radio">Radio</option>
+                <option value="tower">Tower / Fixed</option>
+                <option value="relay">Relay</option>
+                <option value="jammer">Jammer</option>
+                <option value="receiver">Receiver</option>
+                <option value="sensor">Sensor</option>
+              </select>
+            </label>
+            <label>
+              <span>Marker Color</span>
+              <input id="emColor" type="color" value="#38bdf8">
+            </label>
+            <label class="emitter-span-2">
+              <span>Notes</span>
+              <input id="emNotes" type="text" placeholder="Mission notes, frequency plan…">
+            </label>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: RF Parameters (tabbed) -->
+        <div class="emitter-modal-params">
+          <div class="emitter-tabs" role="tablist">
+            <button class="emitter-tab active" role="tab" data-tab="rf" type="button">RF</button>
+            <button class="emitter-tab" role="tab" data-tab="tx" type="button">Transmitter</button>
+            <button class="emitter-tab" role="tab" data-tab="rx" type="button">Receiver</button>
+            <button class="emitter-tab" role="tab" data-tab="antenna" type="button">Antenna</button>
+            <button class="emitter-tab" role="tab" data-tab="prop" type="button">Propagation</button>
+            <button class="emitter-tab" role="tab" data-tab="link" type="button">Link Budget</button>
+            <button class="emitter-tab" role="tab" data-tab="net" type="button">Network</button>
+          </div>
+
+          <!-- RF Tab -->
+          <div class="emitter-tab-panel active" data-panel="rf">
+            <div class="emitter-param-grid">
+              <label>
+                <span>Frequency (MHz)</span>
+                <input id="emFreqMHz" type="number" min="0.1" max="6000" step="0.001">
+              </label>
+              <label>
+                <span>Bandwidth (kHz)</span>
+                <input id="emBandwidthKHz" type="number" min="0.1" step="0.1">
+              </label>
+              <label>
+                <span>Modulation</span>
+                <select id="emModulation">
+                  <option value="FM">FM</option>
+                  <option value="AM">AM</option>
+                  <option value="USB">USB (SSB)</option>
+                  <option value="PSK">PSK</option>
+                  <option value="QPSK">QPSK</option>
+                  <option value="OFDM">OFDM</option>
+                  <option value="FHSS">FHSS</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                <span>Waveform</span>
+                <select id="emWaveform">
+                  <option value="analog">Analog Voice</option>
+                  <option value="SINCGARS">SINCGARS</option>
+                  <option value="SRW">Soldier Radio Waveform (SRW)</option>
+                  <option value="MUOS">MUOS (WCDMA)</option>
+                  <option value="HAVEQUICK">HAVE QUICK II</option>
+                  <option value="ANW2">ANW2</option>
+                  <option value="ALE">ALE (HF)</option>
+                  <option value="P25-C4FM">P25 Phase 1 (C4FM)</option>
+                  <option value="P25-CQPSK">P25 Phase 1 (CQPSK)</option>
+                  <option value="P25-TDMA">P25 Phase 2 (TDMA)</option>
+                  <option value="DMR">DMR (ETSI TS 102 361)</option>
+                  <option value="TETRA">TETRA</option>
+                  <option value="LTE">LTE / FirstNet</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                <span>Duplex Mode</span>
+                <select id="emDuplex">
+                  <option value="simplex">Simplex</option>
+                  <option value="half-duplex">Half-Duplex</option>
+                  <option value="full-duplex">Full-Duplex</option>
+                </select>
+              </label>
+              <label>
+                <span>Channel Spacing (kHz)</span>
+                <input id="emChannelSpacingKHz" type="number" min="1" step="0.5">
+              </label>
+            </div>
+          </div>
+
+          <!-- TX Tab -->
+          <div class="emitter-tab-panel" data-panel="tx">
+            <div class="emitter-param-grid">
+              <label>
+                <span>TX Power (W)</span>
+                <input id="emPowerW" type="number" min="0.001" step="0.1">
+              </label>
+              <label>
+                <span>TX Power (dBm) <em class="emitter-derived">derived</em></span>
+                <input id="emPowerDbm" type="text" readonly tabindex="-1">
+              </label>
+              <label>
+                <span>Duty Cycle (0–1)</span>
+                <input id="emDutyCycle" type="number" min="0" max="1" step="0.01" value="1">
+              </label>
+              <label>
+                <span>Peak-to-Avg Power Ratio (dB)</span>
+                <input id="emPapr" type="number" min="0" step="0.1" value="0">
+              </label>
+              <label>
+                <span>Spectral Efficiency (bps/Hz)</span>
+                <input id="emSpectralEff" type="number" min="0" step="0.1">
+              </label>
+              <label>
+                <span>EIRP (dBm) <em class="emitter-derived">derived</em></span>
+                <input id="emEirpDbm" type="text" readonly tabindex="-1">
+              </label>
+            </div>
+          </div>
+
+          <!-- RX Tab -->
+          <div class="emitter-tab-panel" data-panel="rx">
+            <div class="emitter-param-grid">
+              <label>
+                <span>Receiver Sensitivity (dBm)</span>
+                <input id="emRxSensDbm" type="number" step="0.1">
+              </label>
+              <label>
+                <span>Noise Figure (dB)</span>
+                <input id="emNoiseFigDb" type="number" min="0" step="0.1">
+              </label>
+              <label>
+                <span>Required SNR (dB)</span>
+                <input id="emReqSnrDb" type="number" step="0.1">
+              </label>
+              <label>
+                <span>Adjacent Channel Rejection (dB)</span>
+                <input id="emAcrDb" type="number" min="0" step="0.1">
+              </label>
+              <label>
+                <span>Blocking Dynamic Range (dB)</span>
+                <input id="emBdrDb" type="number" min="0" step="1">
+              </label>
+            </div>
+          </div>
+
+          <!-- Antenna Tab -->
+          <div class="emitter-tab-panel" data-panel="antenna">
+            <div class="emitter-param-grid">
+              <label>
+                <span>Antenna Type</span>
+                <select id="emAntennaType">
+                  <option value="whip">Whip / Monopole</option>
+                  <option value="dipole">Dipole</option>
+                  <option value="blade">Blade</option>
+                  <option value="yagi">Yagi (directional)</option>
+                  <option value="panel">Panel / Sector</option>
+                  <option value="satcom_patch">SATCOM Patch</option>
+                  <option value="parabolic">Parabolic Dish</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                <span>Gain (dBi)</span>
+                <input id="emAntennaGainDbi" type="number" step="0.1">
+              </label>
+              <label>
+                <span>Radiation Pattern</span>
+                <select id="emRadPattern">
+                  <option value="omnidirectional">Omnidirectional</option>
+                  <option value="directional">Directional</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label>
+                <span>Polarization</span>
+                <select id="emPolarization">
+                  <option value="vertical">Vertical</option>
+                  <option value="horizontal">Horizontal</option>
+                  <option value="circular">Circular (RHCP)</option>
+                </select>
+              </label>
+              <label>
+                <span>Antenna Height (m AGL)</span>
+                <input id="emAntennaHeightM" type="number" min="0" step="0.5">
+              </label>
+              <label>
+                <span>Cable / Feeder Loss (dB)</span>
+                <input id="emCableLossDb" type="number" min="0" step="0.1">
+              </label>
+              <label>
+                <span>System Loss Total (dB)</span>
+                <input id="emSystemLossDb" type="number" min="0" step="0.1">
+              </label>
+            </div>
+          </div>
+
+          <!-- Propagation Tab -->
+          <div class="emitter-tab-panel" data-panel="prop">
+            <div class="emitter-param-grid">
+              <label>
+                <span>Propagation Model</span>
+                <select id="emPropModel">
+                  <option value="itu-p525">ITU-R P.525 Free Space</option>
+                  <option value="itu-p526">ITU-R P.526 Terrain Diffraction</option>
+                  <option value="itu-hybrid">ITU Hybrid Terrain + Atmosphere</option>
+                  <option value="longley-rice">Longley–Rice (Irregular Terrain)</option>
+                  <option value="itu-p528">ITU-R P.528 (Air/Ground)</option>
+                  <option value="hf-skywave">HF Skywave / NVIS</option>
+                </select>
+              </label>
+              <label>
+                <span>Clutter / Environment</span>
+                <select id="emClutterType">
+                  <option value="open">Open / Desert</option>
+                  <option value="suburban">Suburban</option>
+                  <option value="urban">Urban / Dense</option>
+                  <option value="forest">Forest / Jungle</option>
+                  <option value="maritime">Maritime</option>
+                  <option value="mountainous">Mountainous</option>
+                </select>
+              </label>
+              <label class="emitter-checkbox-label">
+                <input id="emTerrainEnabled" type="checkbox" checked>
+                <span>Terrain-aware (DTED)</span>
+              </label>
+              <label class="emitter-checkbox-label">
+                <input id="emDiffractionEnabled" type="checkbox" checked>
+                <span>Diffraction modeling</span>
+              </label>
+              <!-- HF / NVIS specific -->
+              <div class="emitter-subsection-label">HF / NVIS (PRC-160 / ALE)</div>
+              <label class="emitter-checkbox-label">
+                <input id="emNvisEnabled" type="checkbox">
+                <span>NVIS mode enabled</span>
+              </label>
+              <label>
+                <span>Ionospheric Model</span>
+                <select id="emIonoModel">
+                  <option value="simple">Simple (fixed skip)</option>
+                  <option value="itu-r">ITU-R (time/solar aware)</option>
+                </select>
+              </label>
+              <label class="emitter-checkbox-label">
+                <input id="emTimeDayEffects" type="checkbox">
+                <span>Time-of-day ionospheric effects</span>
+              </label>
+              <label>
+                <span>Solar Activity Index (0–250)</span>
+                <input id="emSolarIndex" type="number" min="0" max="250" step="1" value="80">
+              </label>
+            </div>
+          </div>
+
+          <!-- Link Budget Tab -->
+          <div class="emitter-tab-panel" data-panel="link">
+            <div class="emitter-link-budget" id="emitterLinkBudget">
+              <div class="emitter-lb-note">Values computed from current parameters. Edit TX, RX, and Antenna tabs to adjust.</div>
+              <table class="emitter-lb-table">
+                <tbody>
+                  <tr><td>TX Power</td><td id="lb_txPower">—</td></tr>
+                  <tr><td>Antenna Gain</td><td id="lb_antennaGain">—</td></tr>
+                  <tr><td>Cable Loss</td><td id="lb_cableLoss">—</td></tr>
+                  <tr><td>EIRP</td><td id="lb_eirp" class="emitter-lb-key">—</td></tr>
+                  <tr class="emitter-lb-divider"><td colspan="2"></td></tr>
+                  <tr><td>Free-Space Path Loss @ 10 km</td><td id="lb_fspl10">—</td></tr>
+                  <tr><td>Received Power @ 10 km</td><td id="lb_rxPower10">—</td></tr>
+                  <tr><td>Receiver Sensitivity</td><td id="lb_rxSens">—</td></tr>
+                  <tr><td>Link Margin @ 10 km</td><td id="lb_margin10" class="emitter-lb-key">—</td></tr>
+                  <tr class="emitter-lb-divider"><td colspan="2"></td></tr>
+                  <tr><td>Est. Max Range (LOS, flat)</td><td id="lb_maxRange" class="emitter-lb-key">—</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Network Tab -->
+          <div class="emitter-tab-panel" data-panel="net">
+            <div class="emitter-param-grid">
+              <label class="emitter-checkbox-label">
+                <input id="emIsManet" type="checkbox">
+                <span>MANET node</span>
+              </label>
+              <label class="emitter-checkbox-label">
+                <input id="emRelayCapable" type="checkbox">
+                <span>Relay capable</span>
+              </label>
+              <label>
+                <span>Max Hops</span>
+                <input id="emMaxHops" type="number" min="1" max="32" step="1" value="1">
+              </label>
+              <label>
+                <span>Typical Latency (ms)</span>
+                <input id="emLatencyMs" type="number" min="0" step="1">
+              </label>
+              <label class="emitter-checkbox-label">
+                <input id="emAdaptiveDataRate" type="checkbox">
+                <span>Adaptive data rate</span>
+              </label>
+              <!-- SATCOM -->
+              <div class="emitter-subsection-label">SATCOM</div>
+              <label class="emitter-checkbox-label">
+                <input id="emSatcomEnabled" type="checkbox">
+                <span>SATCOM capable</span>
+              </label>
+              <label>
+                <span>Satellite Type</span>
+                <select id="emSatType">
+                  <option value="GEO">GEO</option>
+                  <option value="LEO">LEO</option>
+                  <option value="MEO">MEO</option>
+                </select>
+              </label>
+              <label>
+                <span>Uplink Freq (MHz)</span>
+                <input id="emSatUplinkMHz" type="number" min="0" step="0.1">
+              </label>
+              <label>
+                <span>Downlink Freq (MHz)</span>
+                <input id="emSatDownlinkMHz" type="number" min="0" step="0.1">
+              </label>
+              <label>
+                <span>SATCOM Antenna Gain (dBi)</span>
+                <input id="emSatGainDbi" type="number" step="0.1">
+              </label>
+            </div>
+          </div>
+
+          <!-- Footer: validation + actions -->
+          <div class="emitter-modal-footer">
+            <div id="emitterValidation" class="emitter-validation"></div>
+            <div class="emitter-footer-actions">
+              <button id="emitterCancelBtn" class="ghost-button" type="button">Cancel</button>
+              <button id="emitterPlaceBtn" class="primary-button" type="button">Place on Map</button>
+            </div>
+          </div>
+        </div><!-- /emitter-modal-params -->
+      </div><!-- /emitter-modal-body -->
+    </div><!-- /emitter-modal -->
+  </div><!-- /emitter-modal-backdrop -->
+
   <script>
     window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/";
   </script>
@@ -536,6 +1051,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=20260424-2"></script>
 </body>
 </html>

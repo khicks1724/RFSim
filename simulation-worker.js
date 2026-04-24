@@ -32,8 +32,6 @@ self.addEventListener("message", (event) => {
           result.latitudes.buffer,
           result.longitudes.buffer,
           result.rssi.buffer,
-          result.pathLoss.buffer,
-          result.obstruction.buffer,
           result.lineOfSight.buffer,
         ],
       );
@@ -85,8 +83,6 @@ function runSimulation(payload) {
   const latitudes = new Float64Array(estimatedCells);
   const longitudes = new Float64Array(estimatedCells);
   const rssi = new Float32Array(estimatedCells);
-  const pathLoss = new Float32Array(estimatedCells);
-  const obstruction = new Float32Array(estimatedCells);
   const lineOfSight = new Uint8Array(estimatedCells);
 
   let count = 0;
@@ -116,8 +112,6 @@ function runSimulation(payload) {
       latitudes[count] = lat;
       longitudes[count] = lon;
       rssi[count] = result.rssiDbm;
-      pathLoss[count] = result.pathLossDb;
-      obstruction[count] = result.maxObstructionM;
       lineOfSight[count] = result.lineOfSight ? 1 : 0;
       count += 1;
     }
@@ -136,8 +130,6 @@ function runSimulation(payload) {
     latitudes: latitudes.slice(0, count),
     longitudes: longitudes.slice(0, count),
     rssi: rssi.slice(0, count),
-    pathLoss: pathLoss.slice(0, count),
-    obstruction: obstruction.slice(0, count),
     lineOfSight: lineOfSight.slice(0, count),
   };
 }

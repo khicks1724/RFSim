@@ -1,0 +1,17 @@
+personality = "pragmatic"
+model = "gpt-5.4-2"
+model_reasoning_effort = "medium"
+model_provider = "azure"
+
+[windows]
+sandbox = "elevated"
+
+[model_providers.azure]
+name = "Azure OpenAI"
+base_url = "https://ai-jasavatt8102ai495392122451.openai.azure.com/openai/v1"
+env_key = "AZURE_OPENAI_API_KEY"
+wire_api = "responses"
+preferred_auth_method = "apikey"
+
+[projects."/home/kyle"]
+trust_level = "trusted"
