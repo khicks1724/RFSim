@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EW / RF Propagation Simulator</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+  >
+  <link
+    rel="stylesheet"
+    href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
+  >
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="top-bar">
+      <div class="top-bar-left">
+        <button id="collapsePanelBtn" class="icon-button" type="button" aria-label="Collapse control panel">
+          <span id="collapsePanelIcon">&#9664;</span>
+        </button>
+        <div class="title-block">
+          <strong>RF Propagation Simulator</strong>
+        </div>
+      </div>
+      <div class="top-bar-actions">
+        <div class="imagery-menu-shell">
+          <button id="imageryMenuBtn" class="ghost-button imagery-menu-button" type="button" aria-label="Open imagery settings" aria-expanded="false">
+            <span class="imagery-menu-caption">Imagery</span>
+            <strong id="imageryMenuValue">Satellite Imagery</strong>
+            <span class="imagery-menu-chevron">&#9662;</span>
+          </button>
+          <div id="imageryMenu" class="settings-menu imagery-menu hidden">
+            <div class="menu-title-row">
+              <strong>Imagery</strong>
+              <button id="view3dToggleBtn" class="ghost-button small" type="button">3D View</button>
+            </div>
+            <div class="menu-grid two-column compact-grid">
+              <label>
+                Basemap
+                <select id="basemapSelect">
+                  <option value="esri">Satellite Imagery</option>
+                  <option value="carto-dark">Dark Streets</option>
+                  <option value="osm">OpenStreetMap</option>
+                  <option value="custom">Custom XYZ</option>
+                </select>
+              </label>
+              <label>
+                Radius (km)
+                <input id="radiusKm" type="number" min="1" max="300" step="1" value="30">
+              </label>
+              <label class="span-2">
+                Custom Tile URL
+                <input id="customTileUrl" type="text" placeholder="https://{s}.example.com/tiles/{z}/{x}/{y}.png">
+              </label>
+              <label>
+                3D Terrain Source
+                <select id="terrainSourceSelect">
+                  <option value="ellipsoid">Ellipsoid Only</option>
+                  <option value="cesium-world">Cesium World Terrain</option>
+                  <option value="custom">Custom Cesium Terrain URL</option>
+                </select>
+              </label>
+              <label>
+                3D Imagery
+                <select id="imagerySourceSelect">
+                  <option value="selected-basemap">Use Selected Basemap</option>
+                  <option value="osm">OpenStreetMap</option>
+                  <option value="esri">Esri World Imagery</option>
+                </select>
+              </label>
+              <label class="span-2">
+                Custom Terrain URL
+                <input id="customTerrainUrl" type="text" placeholder="https://example.com/terrain/">
+              </label>
+              <label class="span-2">
+                Cesium Ion Token
+                <input id="cesiumIonToken" type="password" placeholder="Paste Cesium Ion access token">
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="settings-menu-shell">
+          <button id="settingsMenuBtn" class="icon-button settings-button" type="button" aria-label="Open map settings" aria-expanded="false">
+            <span>&#9881;</span>
+          </button>
+          <div id="settingsMenu" class="settings-menu hidden">
+            <label>
+              Measurement Units
+              <select id="measurementUnitsSelect">
+                <option value="metric">Metric</option>
+                <option value="standard">Standard</option>
+              </select>
+            </label>
+            <label>
+              Coordinate System
+              <select id="coordinateSystemSelect">
+                <option value="mgrs">MGRS</option>
+                <option value="latlon">Lat / Long</option>
+                <option value="dms">Deg Min Sec</option>
+              </select>
+            </label>
+            <label class="settings-check-row">
+              <input id="gridlinesToggle" type="checkbox">
+              <span>Show Gridlines</span>
+            </label>
+            <label>
+              Gridlines Color
+              <input id="gridlinesColor" type="color" value="#8fb7ff">
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="status-strip">
+        <div class="status-chip status-chip-clock">
+          <span>DATE/TIME</span>
+          <strong id="clockValue">--</strong>
+        </div>
+        <div class="status-chip">
+          <span>GPS</span>
+          <strong id="gpsStatusValue">Disconnected</strong>
+        </div>
+        <div class="status-chip">
+          <span id="coordsLabel">MGRS</span>
+          <strong id="mgrsValue">----------</strong>
+        </div>
+        <div class="status-chip status-message">
+          <span>STATUS</span>
+          <strong id="statusBadge">Ready</strong>
+        </div>
+      </div>
+    </header>
+
+    <div class="workspace-shell">
+      <aside id="controlPanel" class="control-panel">
+        <section id="terrainSection" class="card">
+          <div class="section-title-row">
+            <h2>Terrain</h2>
+            <button id="clearTerrainBtn" class="ghost-button small" type="button">Clear Terrain</button>
+          </div>
+          <div class="two-column">
+            <label class="span-2">
+              DTED File
+              <input id="dtedInput" type="file" accept=".dt0,.dt1,.dt2,.dted">
+            </label>
+          </div>
+          <div class="terrain-summary" id="terrainSummary">
+            No terrain loaded. Propagation uses free-space or terrain diffraction only.
+          </div>
+          <div class="list-shell">
+            <div class="list-header">
+              <span>Loaded Terrain</span>
+            </div>
+            <div id="terrainList" class="asset-list"></div>
+          </div>
+          <div class="list-shell">
+            <div class="list-header">
+              <span>Terrain Streaming Notes</span>
+            </div>
+            <div class="asset-list">
+              <article class="asset-item compact-note">
+                DTED Level 2 streaming options:
+                quantized-mesh terrain services, Cesium terrain servers, WMTS/XYZ hillshade overlays, COG GeoTIFF DEM services, or pre-tiled local terrain packages behind a local web server.
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="mapContentsCard" class="card hidden">
+          <div class="section-title-row">
+            <h2>Map Contents</h2>
+            <div class="button-row">
+              <span class="fine-print">Drag to reorder. Click to focus.</span>
+              <button id="addMapFolderBtn" class="ghost-button small" type="button">Add Folder</button>
+            </div>
+          </div>
+          <div id="mapContentsList" class="asset-list map-contents-list"></div>
+        </section>
+
+        <section class="card">
+          <div class="section-title-row">
+            <h2>Weather</h2>
+            <button id="fetchWeatherBtn" class="primary-button small" type="button">Fetch Local Weather</button>
+          </div>
+          <div class="two-column">
+            <label>
+              <span id="tempLabel">Temperature C</span>
+              <input id="tempC" type="number" step="0.1" value="20">
+            </label>
+            <label>
+              Humidity %
+              <input id="humidity" type="number" min="0" max="100" step="1" value="50">
+            </label>
+            <label>
+              <span id="pressureLabel">Pressure hPa</span>
+              <input id="pressure" type="number" min="800" max="1100" step="0.1" value="1013.2">
+            </label>
+            <label>
+              <span id="windLabel">Wind m/s</span>
+              <input id="windSpeed" type="number" min="0" step="0.1" value="3">
+            </label>
+          </div>
+          <div class="weather-summary" id="weatherSummary">Manual weather profile active.</div>
+        </section>
+
+        <section class="card">
+          <div class="section-title-row">
+            <h2>Emitter Profiles</h2>
+            <div class="button-row">
+              <button id="saveProfileBtn" class="primary-button small" type="button">Save</button>
+              <button id="deleteProfileBtn" class="ghost-button small" type="button">Delete</button>
+            </div>
+          </div>
+          <div class="two-column">
+            <label class="span-2">
+              Saved Profile
+              <select id="profileSelect"></select>
+            </label>
+            <label class="span-2">
+              Profile Name
+              <input id="profileName" type="text" value="Standard VHF">
+            </label>
+          </div>
+        </section>
+
+        <section id="emittersSection" class="card">
+          <div class="section-title-row">
+            <h2>Emitters</h2>
+            <div class="button-row">
+              <button id="applyProfileBtn" class="ghost-button small" type="button">Apply Profile</button>
+              <button id="placeAssetBtn" class="primary-button small" type="button">Place On Map</button>
+            </div>
+          </div>
+          <div class="two-column">
+            <label>
+              Type
+              <select id="assetType">
+                <option value="radio">Radio</option>
+                <option value="jammer">Jammer</option>
+                <option value="relay">Relay</option>
+                <option value="receiver">Receiver</option>
+              </select>
+            </label>
+            <label>
+              Force
+              <select id="assetForce">
+                <option value="friendly">Friendly</option>
+                <option value="enemy">Enemy</option>
+                <option value="host-nation">Host Nation</option>
+                <option value="civilian">Civilian</option>
+              </select>
+            </label>
+            <label>
+              Emitter Name
+              <input id="assetName" type="text" value="RF-01">
+            </label>
+            <label>
+              Unit Name
+              <input id="unitName" type="text" value="Alpha">
+            </label>
+            <label>
+              Frequency MHz
+              <input id="frequencyMHz" type="number" min="0.1" step="0.1" value="350">
+            </label>
+            <label>
+              Power W
+              <input id="powerW" type="number" min="0.001" step="0.1" value="50">
+            </label>
+            <label>
+              Antenna Height m
+              <input id="antennaHeight" type="number" min="0" step="0.5" value="10">
+            </label>
+            <label>
+              Antenna Gain dBi
+              <input id="antennaGain" type="number" step="0.1" value="2.1">
+            </label>
+            <label>
+              Receiver Sensitivity dBm
+              <input id="receiverSensitivity" type="number" step="0.1" value="-95">
+            </label>
+            <label>
+              System Loss dB
+              <input id="systemLoss" type="number" step="0.1" value="1.5">
+            </label>
+            <label>
+              Icon
+              <select id="assetIcon">
+                <option value="radio">Radio</option>
+                <option value="tower">Tower</option>
+                <option value="jammer">Jammer</option>
+                <option value="receiver">Receiver</option>
+                <option value="sensor">Sensor</option>
+              </select>
+            </label>
+            <label>
+              Color
+              <input id="assetColor" type="color" value="#38bdf8">
+            </label>
+            <label class="span-2">
+              Notes
+              <input id="assetNotes" type="text" placeholder="Mission notes">
+            </label>
+          </div>
+          <div class="list-shell">
+            <div class="list-header">
+              <span>Placed Systems</span>
+              <div class="button-row">
+                <button id="exportGeoJsonBtn" class="ghost-button small" type="button">GeoJSON</button>
+                <button id="exportKmlBtn" class="ghost-button small" type="button">KML</button>
+                <button id="exportKmzBtn" class="ghost-button small" type="button">KMZ</button>
+                <button id="clearAssetsBtn" class="ghost-button small" type="button">Remove All</button>
+              </div>
+            </div>
+            <div id="assetList" class="asset-list"></div>
+          </div>
+        </section>
+
+        <section id="simulationSection" class="card">
+          <div class="section-title-row">
+            <h2>Simulation</h2>
+            <button id="runSimulationBtn" class="primary-button small" type="button">Generate Coverage</button>
+          </div>
+          <div class="two-column">
+            <label class="span-2">
+              Selected Asset
+              <select id="assetSelect"></select>
+            </label>
+            <label>
+              Propagation Model
+              <select id="propagationModel">
+                <option value="itu-p525">ITU-R P.525 Free Space</option>
+                <option value="itu-p526">ITU-R P.526 Terrain Diffraction</option>
+                <option value="itu-hybrid">ITU Hybrid Terrain + Atmosphere</option>
+              </select>
+            </label>
+            <label>
+              Receiver Height m
+              <input id="receiverHeight" type="number" min="0" step="0.5" value="2">
+            </label>
+            <label>
+              Grid Step m
+              <input id="gridMeters" type="number" min="50" max="5000" step="50" value="500">
+            </label>
+            <label>
+              Viewshed Opacity
+              <input id="viewshedOpacity" type="range" min="0.15" max="1" step="0.05" value="0.7">
+            </label>
+          </div>
+          <div class="list-shell">
+            <div class="list-header">
+              <span>Rendered Coverage Layers</span>
+              <button id="clearViewshedsBtn" class="ghost-button small" type="button">Clear Viewsheds</button>
+            </div>
+            <div id="viewshedList" class="asset-list"></div>
+          </div>
+          <div class="metrics-grid">
+            <div>
+              <span class="metric-label">Coverage</span>
+              <strong id="coverageMetric">0 cells</strong>
+            </div>
+            <div>
+              <span class="metric-label">Min RSSI</span>
+              <strong id="minRssiMetric">n/a</strong>
+            </div>
+            <div>
+              <span class="metric-label">Max RSSI</span>
+              <strong id="maxRssiMetric">n/a</strong>
+            </div>
+          </div>
+          <p class="fine-print">
+            Click the map while a coverage layer is in inspection mode to sample the predicted link budget at that point.
+          </p>
+        </section>
+
+        <section id="planningSection" class="card">
+          <div class="section-title-row">
+            <h2>GPS</h2>
+            <div class="button-row">
+              <button id="connectGeolocationBtn" class="ghost-button small" type="button">Browser GPS</button>
+              <button id="connectUsbGpsBtn" class="primary-button small" type="button">USB GPS</button>
+            </div>
+          </div>
+          <div class="two-column">
+            <label class="span-2">
+              GPS Centering
+              <select id="gpsCenterMode">
+                <option value="follow">Follow User</option>
+                <option value="once">Center Once</option>
+                <option value="off">Do Not Center</option>
+              </select>
+            </label>
+          </div>
+          <p class="fine-print">
+            Browser mode uses the Geolocation API. USB mode reads NMEA over Web Serial when supported. Direct gpsd access requires a local bridge service outside the browser sandbox.
+          </p>
+        </section>
+
+        <section class="card">
+          <div class="section-title-row">
+            <h2>Site Planning</h2>
+            <div class="button-row">
+              <button id="drawPlanningRegionBtn" class="ghost-button small" type="button">Draw Region</button>
+              <button id="runPlanningBtn" class="primary-button small" type="button">Recommend</button>
+            </div>
+          </div>
+          <div class="two-column">
+            <label class="span-2">
+              Tx Asset
+              <select id="planningTxAsset"></select>
+            </label>
+            <label class="span-2">
+              Rx Asset
+              <select id="planningRxAsset"></select>
+            </label>
+            <label>
+              Candidate Step m
+              <input id="planningGridMeters" type="number" min="50" max="5000" step="50" value="500">
+            </label>
+            <label>
+              Min Separation m
+              <input id="planningMinSeparation" type="number" min="0" max="50000" step="50" value="1500">
+            </label>
+            <label>
+              Detection Weight
+              <input id="planningEnemyWeight" type="number" min="0" step="0.1" value="1.2">
+            </label>
+            <label>
+              Separation Weight
+              <input id="planningSeparationWeight" type="number" min="0" step="0.1" value="0.6">
+            </label>
+            <label>
+              Volume Floor m
+              <input id="planningFloorM" type="number" step="1" value="0">
+            </label>
+            <label>
+              Volume Ceiling m
+              <input id="planningCeilingM" type="number" step="1" value="150">
+            </label>
+          </div>
+          <div id="planningSummary" class="terrain-summary">
+            Draw a planning region, then recommend terrain-aware Tx/Rx placements that maximize friendly connectivity while minimizing enemy intercept probability.
+          </div>
+          <div class="list-shell">
+            <div class="list-header">
+              <span>Recommendations</span>
+            </div>
+            <div id="planningList" class="asset-list"></div>
+          </div>
+        </section>
+      </aside>
+
+      <div id="panelDivider" class="panel-divider" role="separator" aria-orientation="vertical" aria-label="Resize control panel"></div>
+
+      <main class="map-stage">
+        <div id="map"></div>
+        <div id="cesiumContainer" class="viewer3d hidden"></div>
+        <button id="cesiumCompassBtn" class="cesium-compass hidden" type="button" aria-label="Reset 3D view to north up">
+          <span id="cesiumCompassRose" class="cesium-compass-rose">
+            <span class="cesium-compass-ring"></span>
+            <span class="cesium-compass-arrow"></span>
+            <span class="cesium-compass-north">N</span>
+          </span>
+        </button>
+        <div class="map-overlay bottom-left">
+          <div class="overlay-card view-metrics-card">
+            <div class="overlay-metric-row">
+              <div class="overlay-metric-block">
+                <span id="centerCoordinateLabel">Center Grid</span>
+                <strong id="centerCoordinateValue">----------</strong>
+              </div>
+              <div class="overlay-metric-block">
+                <span>View Elev</span>
+                <strong id="centerElevationValue">No terrain</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="map-overlay bottom-right">
+          <div class="legend-card">
+            <strong>RSSI Legend</strong>
+            <div class="spectrum-bar"></div>
+            <div class="legend-scale">
+              <span>-120 dBm</span>
+              <span>-90 dBm</span>
+              <span>-60 dBm</span>
+              <span>-40 dBm</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="mapContentsMenu" class="map-contents-menu hidden" aria-label="Map contents actions">
+    <button type="button" class="ghost-button small" data-map-content-action="edit">Edit</button>
+    <button type="button" class="ghost-button small" data-map-content-action="rename">Rename</button>
+    <button type="button" class="ghost-button small" data-map-content-action="delete">Delete</button>
+  </div>
+
+  <div id="mapContentsRename" class="map-contents-menu hidden" aria-label="Rename map content">
+    <label>
+      Rename Item
+      <input id="mapContentsRenameInput" type="text">
+    </label>
+    <div class="button-row">
+      <button id="mapContentsRenameSave" type="button" class="primary-button small">Save</button>
+      <button id="mapContentsRenameCancel" type="button" class="ghost-button small">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/";
+  </script>
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
