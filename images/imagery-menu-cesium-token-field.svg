@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="431" viewBox="0 0 360 431" role="img" aria-labelledby="title desc">
+  <title id="title">Imagery menu with Cesium Ion Token field</title>
+  <desc id="desc">Illustration of the app imagery dropdown showing the Cesium Ion Token field at the bottom with a Create token link.</desc>
+  <rect width="360" height="431" fill="#17191d"/>
+  <rect x="0" y="51" width="360" height="380" fill="#181b20"/>
+  <rect x="131" y="3" width="229" height="42" fill="#262a31" stroke="#596171"/>
+  <text x="147" y="28" font-family="Segoe UI, Arial, sans-serif" font-size="12" letter-spacing="1" fill="#97a0ae">IMAGERY</text>
+  <text x="206" y="28" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#ffffff">Esri World Imagery</text>
+  <text x="336" y="28" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#c0c7d4">▼</text>
+
+  <rect x="0" y="50" width="360" height="1" fill="#4b5160" opacity="0.7"/>
+  <text x="13" y="76" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#f5f7fb">Imagery</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#9ea7b4">
+    <text x="13" y="112" font-size="12" font-weight="600">Basemap</text>
+    <text x="216" y="112" font-size="12" font-weight="600">Radius (km)</text>
+  </g>
+  <rect x="13" y="124" width="161" height="32" fill="#17191d" stroke="#5a6170"/>
+  <rect x="186" y="124" width="160" height="32" fill="#17191d" stroke="#5a6170"/>
+  <text x="25" y="145" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Satellite Imagery</text>
+  <text x="196" y="145" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">30</text>
+
+  <text x="13" y="180" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#9ea7b4">Custom Tile URL</text>
+  <rect x="13" y="191" width="333" height="34" fill="#17191d" stroke="#5a6170"/>
+  <text x="24" y="213" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#646d7a">https://{s}.example.com/tiles/{z}/{x}/{y}.png</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#9ea7b4">
+    <text x="13" y="251" font-size="12" font-weight="600">3D Terrain Source</text>
+    <text x="216" y="251" font-size="12" font-weight="600">3D Imagery</text>
+  </g>
+  <rect x="13" y="259" width="161" height="32" fill="#17191d" stroke="#5a6170"/>
+  <rect x="186" y="259" width="160" height="32" fill="#17191d" stroke="#5a6170"/>
+  <text x="24" y="280" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Cesium World Terrain</text>
+  <text x="194" y="280" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">Use Selected Basemap</text>
+
+  <text x="13" y="312" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#9ea7b4">Custom Terrain URL</text>
+  <rect x="13" y="323" width="333" height="34" fill="#17191d" stroke="#5a6170"/>
+  <text x="24" y="345" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#646d7a">https://example.com/terrain/</text>
+
+  <text x="13" y="377" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#9ea7b4">Cesium Ion Token</text>
+  <text x="275" y="377" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#dbe6ff">Create token</text>
+  <rect x="13" y="390" width="333" height="34" fill="#17191d" stroke="#5a6170"/>
+  <text x="24" y="412" font-family="Consolas, 'Courier New', monospace" font-size="11" fill="#ffffff">****************************************************************</text>
+</svg>

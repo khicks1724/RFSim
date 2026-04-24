@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="435" height="199" viewBox="0 0 435 199" role="img" aria-labelledby="title desc">
+  <title id="title">Cesium Ion access tokens page</title>
+  <desc id="desc">Illustration of the Cesium Ion Access Tokens page showing the Create token button.</desc>
+  <rect width="435" height="199" fill="#d8dde3"/>
+  <rect x="0" y="0" width="435" height="51" fill="#e9edf1"/>
+  <circle cx="18" cy="25" r="14" fill="#79b7ff"/>
+  <path d="M8 28c5-8 15-12 24-9-3 5-8 10-16 13-3 1-6 0-8-4z" fill="#78bf52"/>
+  <path d="M17 18c3 2 6 5 9 9-4 2-8 3-12 3-4 0-7-2-8-5 3-5 7-8 11-7z" fill="#ffffff" opacity="0.95"/>
+  <text x="43" y="38" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#22262c">CESIUM</text>
+  <text x="190" y="38" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="400" fill="#6ba7e8">ion</text>
+  <rect x="0" y="51" width="435" height="39" fill="#2f87c7"/>
+  <rect x="272" y="51" width="103" height="39" fill="#ffffff"/>
+  <text x="4" y="75" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#ffffff">Stories</text>
+  <text x="62" y="75" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#ffffff">My Assets</text>
+  <text x="143" y="75" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#ffffff">Asset Depot</text>
+  <text x="235" y="75" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#ffffff">Clips</text>
+  <text x="281" y="75" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#2f87c7">Access Tokens</text>
+  <text x="384" y="75" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#ffffff">Usage</text>
+  <text x="13" y="133" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="400" fill="#2d3947">Access Tokens</text>
+  <circle cx="231" cy="117" r="9" fill="#2d3947" opacity="0.95"/>
+  <text x="228" y="121" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">?</text>
+  <rect x="11" y="159" width="106" height="34" rx="4" fill="#2f7fb8"/>
+  <text x="24" y="181" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Create token</text>
+</svg>

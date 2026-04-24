@@ -62,16 +62,41 @@ Cesium World Terrain is not anonymous in this app. The 3D terrain streaming path
 
 ### How To Create A Cesium Ion Token
 
+The Cesium Ion page you need is the `Access Tokens` page. Use the `Create token` button shown below.
+
+![Cesium Ion Access Tokens page with the Create token button](./images/cesium-ion-access-tokens.svg)
+
 1. Open the app.
 2. Click the `Imagery` control in the top bar.
 3. In the imagery dropdown, find `Cesium Ion Token`.
 4. Click `Create token`.
 5. Sign up for or sign in to Cesium Ion.
 6. Create an access token in Cesium Ion.
-7. Copy that token.
-8. Paste it into the `Cesium Ion Token` field in the app.
+7. When Cesium shows the generated token value, use the copy button next to the token field.
+
+![Cesium Ion generated token value ready to copy](./images/cesium-ion-copy-token.svg)
+
+8. Paste the copied token into the `Cesium Ion Token` field at the bottom of the `Imagery` dropdown in the app.
+
+![Imagery dropdown showing the Cesium Ion Token field at the bottom](./images/imagery-menu-cesium-token-field.svg)
 
 The token is stored in browser local storage for later sessions on that machine/browser profile.
+
+### Recommended Token Settings
+
+When Cesium Ion shows the token configuration form, you can use a simple public-client setup like the one shown below.
+
+![Cesium Ion token settings form with the public-client configuration options](./images/cesium-ion-token-settings.svg)
+
+Recommended settings for this app:
+
+- Name the token something recognizable such as `RFSim`.
+- Enable the public scopes needed for browser use, especially `assets:read`.
+- Leave private account-management scopes disabled unless you explicitly need them for a separate private workflow.
+- Set `Allowed URLs` to `All Urls` for quick local testing, or use `Selected Urls` if you want to restrict the token to your deployed app URL later.
+- Leave `Resources` on `All assets` unless you are intentionally limiting the token to a smaller Cesium asset set.
+
+For browser-based use, keep the token scoped as narrowly as practical. If you deploy this app publicly, prefer a restricted token over a broad reusable account token.
 
 ### How To Use Cesium Imagery And Terrain In The App
 
@@ -101,10 +126,11 @@ When a token is present, the app defaults the terrain source to `Cesium World Te
 The top bar contains:
 
 - `Imagery`: Opens imagery and Cesium settings
+- `Terrain`: Opens DTED import, terrain clearing, and terrain source details
+- `Weather`: Opens manual weather inputs and live weather fetch controls
 - `Date/Time`
 - `GPS Status`: Opens browser GPS, USB GPS, and GPS centering settings
 - coordinate status display
-- `Status`: Shows the latest workflow or error message
 - the settings gear: Opens map settings such as units, coordinates, and gridlines
 
 ### Map Area
@@ -122,9 +148,7 @@ The map area contains:
 
 The left panel contains the main working controls:
 
-- Terrain
 - Map Contents
-- Weather
 - Emitter Profiles
 - Emitters
 - Simulation

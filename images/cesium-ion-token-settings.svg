@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="467" height="699" viewBox="0 0 467 699" role="img" aria-labelledby="title desc">
+  <title id="title">Cesium Ion token settings form</title>
+  <desc id="desc">Illustration of the Cesium Ion create token form showing the name field, public and private scope toggles, allowed URLs, resources, and the Create button.</desc>
+  <rect width="467" height="699" fill="#ffffff"/>
+  <text x="12" y="36" font-family="Segoe UI, Arial, sans-serif" font-size="24" fill="#1f2c3b">Create token</text>
+  <text x="12" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">Name</text>
+  <rect x="12" y="66" width="443" height="31" rx="4" fill="#ffffff" stroke="#b7c5d5"/>
+  <text x="25" y="87" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#29496a">RFSim</text>
+
+  <text x="12" y="126" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#1f2c3b">Public scopes</text>
+  <text x="12" y="147" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">assets:limited-list</text>
+  <text x="257" y="147" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">assets:read</text>
+  <text x="12" y="179" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">geocode</text>
+
+  <g transform="translate(134,132)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="29" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(339,132)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="29" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(133,164)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="29" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+
+  <text x="12" y="215" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#1f2c3b">Private scopes</text>
+  <rect x="12" y="228" width="444" height="109" rx="5" fill="#f8e2cc" stroke="#e8b780"/>
+  <polygon points="31,244 39,260 23,260" fill="#7a5016"/>
+  <rect x="30" y="254" width="2" height="6" fill="#f8e2cc"/>
+  <circle cx="31" cy="262" r="1.4" fill="#f8e2cc"/>
+  <text x="61" y="256" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#7a5016">The following scopes provide potentially sensitive</text>
+  <text x="61" y="276" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#7a5016">information or otherwise allow changes to be made to your</text>
+  <text x="61" y="296" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#7a5016">account. They should only be used in cases where the token</text>
+  <text x="61" y="316" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#7a5016">can be kept secret and unavailable to public clients.</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">
+    <text x="12" y="367">assets:list</text>
+    <text x="235" y="367">assets:source</text>
+    <text x="12" y="398">assets:write</text>
+    <text x="240" y="398">profile:read</text>
+    <text x="12" y="429">tokens:read</text>
+    <text x="241" y="429">tokens:write</text>
+    <text x="12" y="460">archives:read</text>
+    <text x="241" y="460">archives:write</text>
+    <text x="12" y="491">exports:read</text>
+    <text x="241" y="491">exports:write</text>
+  </g>
+  <g transform="translate(107,352)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(332,352)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="29" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(107,383)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(332,383)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(107,414)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(332,414)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(107,445)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(332,445)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(107,476)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+  <g transform="translate(332,476)"><rect width="40" height="21" rx="10.5" fill="#3892cf"/><circle cx="10.5" cy="10.5" r="10" fill="#ffffff" stroke="#2f6f9d"/></g>
+
+  <text x="12" y="529" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#1f2c3b">Allowed URLs</text>
+  <circle cx="23" cy="548" r="6" fill="#ffffff" stroke="#d85a5a" stroke-width="1.2"/>
+  <circle cx="23" cy="548" r="3.2" fill="#ff3737"/>
+  <text x="35" y="553" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">All Urls</text>
+  <circle cx="108" cy="548" r="6" fill="#ffffff" stroke="#8a9aab" stroke-width="1.2"/>
+  <text x="120" y="553" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">Selected Urls</text>
+
+  <text x="12" y="581" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#1f2c3b">Resources</text>
+  <text x="12" y="605" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#1f2c3b">Only for Public assets:* and assets:source scopes</text>
+  <circle cx="23" cy="623" r="6" fill="#ffffff" stroke="#d85a5a" stroke-width="1.2"/>
+  <circle cx="23" cy="623" r="3.2" fill="#ff3737"/>
+  <text x="35" y="628" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">All assets</text>
+  <circle cx="119" cy="623" r="6" fill="#ffffff" stroke="#8a9aab" stroke-width="1.2"/>
+  <text x="131" y="628" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">Selected assets</text>
+
+  <rect x="13" y="659" width="63" height="33" rx="3" fill="#2f85c6"/>
+  <text x="25" y="681" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#ffffff">Create</text>
+  <rect x="88" y="659" width="68" height="33" rx="3" fill="#ffffff" stroke="#8aa1b5"/>
+  <text x="104" y="681" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#1f2c3b">Cancel</text>
+</svg>
