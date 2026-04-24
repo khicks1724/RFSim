@@ -31,7 +31,7 @@
           <strong>RF Propagation Simulator</strong>
         </div>
       </div>
-      <div class="top-bar-actions">
+      <div class="status-strip">
         <div class="imagery-menu-shell">
           <button id="imageryMenuBtn" class="ghost-button imagery-menu-button" type="button" aria-label="Open imagery settings" aria-expanded="false">
             <span class="imagery-menu-caption">Imagery</span>
@@ -41,7 +41,6 @@
           <div id="imageryMenu" class="settings-menu imagery-menu hidden">
             <div class="menu-title-row">
               <strong>Imagery</strong>
-              <button id="view3dToggleBtn" class="ghost-button small" type="button">3D View</button>
             </div>
             <div class="menu-grid two-column compact-grid">
               <label>
@@ -82,11 +81,119 @@
                 <input id="customTerrainUrl" type="text" placeholder="https://example.com/terrain/">
               </label>
               <label class="span-2">
-                Cesium Ion Token
+                <span class="field-label-row">
+                  <span>Cesium Ion Token</span>
+                  <a class="inline-link" href="https://ion.cesium.com/signup/" target="_blank" rel="noreferrer noopener">Create token</a>
+                </span>
                 <input id="cesiumIonToken" type="password" placeholder="Paste Cesium Ion access token">
               </label>
             </div>
           </div>
+        </div>
+        <div class="terrain-menu-shell">
+          <button id="terrainMenuBtn" class="ghost-button imagery-menu-button" type="button" aria-label="Open terrain settings" aria-expanded="false">
+            <span class="imagery-menu-caption">Terrain</span>
+            <strong id="terrainMenuValue">No DTED</strong>
+            <span class="imagery-menu-chevron">&#9662;</span>
+          </button>
+          <div id="terrainMenu" class="settings-menu terrain-menu hidden">
+            <div class="menu-title-row">
+              <strong>Terrain</strong>
+              <button id="clearTerrainBtn" class="ghost-button small" type="button">Clear Terrain</button>
+            </div>
+            <label>
+              DTED File
+              <input id="dtedInput" type="file" accept=".dt0,.dt1,.dt2,.dted">
+            </label>
+            <div class="terrain-summary" id="terrainSummary">
+              No terrain loaded. Propagation uses free-space or terrain diffraction only.
+            </div>
+            <div class="list-shell compact-shell">
+              <div class="list-header">
+                <span>Loaded Terrain</span>
+              </div>
+              <div id="terrainList" class="asset-list compact-list"></div>
+            </div>
+            <div class="list-shell compact-shell">
+              <div class="list-header">
+                <span>Terrain Streaming Notes</span>
+              </div>
+              <div class="asset-list compact-list">
+                <article class="asset-item compact-note">
+                  DTED Level 2 streaming options: quantized-mesh terrain services, Cesium terrain servers, WMTS/XYZ hillshade overlays, COG GeoTIFF DEM services, or pre-tiled local terrain packages behind a local web server.
+                </article>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="weather-menu-shell">
+          <button id="weatherMenuBtn" class="ghost-button imagery-menu-button" type="button" aria-label="Open weather settings" aria-expanded="false">
+            <span class="imagery-menu-caption">Weather</span>
+            <strong id="weatherMenuValue">Manual</strong>
+            <span class="imagery-menu-chevron">&#9662;</span>
+          </button>
+          <div id="weatherMenu" class="settings-menu weather-menu hidden">
+            <div class="menu-title-row">
+              <strong>Weather</strong>
+              <button id="fetchWeatherBtn" class="primary-button small" type="button">Fetch Local Weather</button>
+            </div>
+            <div class="menu-grid two-column compact-grid">
+              <label>
+                <span id="tempLabel">Temperature C</span>
+                <input id="tempC" type="number" step="0.1" value="20">
+              </label>
+              <label>
+                Humidity %
+                <input id="humidity" type="number" min="0" max="100" step="1" value="50">
+              </label>
+              <label>
+                <span id="pressureLabel">Pressure hPa</span>
+                <input id="pressure" type="number" min="800" max="1100" step="0.1" value="1013.2">
+              </label>
+              <label>
+                <span id="windLabel">Wind m/s</span>
+                <input id="windSpeed" type="number" min="0" step="0.1" value="3">
+              </label>
+            </div>
+            <div class="weather-summary" id="weatherSummary">Manual weather profile active.</div>
+          </div>
+        </div>
+        <div class="status-chip status-chip-clock">
+          <span>DATE/TIME</span>
+          <strong id="clockValue">--</strong>
+        </div>
+        <div class="gps-menu-shell">
+          <button id="gpsMenuBtn" class="status-chip status-chip-button gps-status-button" type="button" aria-label="Open GPS settings" aria-expanded="false">
+            <span>GPS Status</span>
+            <div class="status-chip-action-row">
+              <strong id="gpsStatusValue">Disconnected</strong>
+              <span class="status-chip-chevron">&#9662;</span>
+            </div>
+          </button>
+          <div id="gpsMenu" class="settings-menu gps-menu hidden">
+            <div class="menu-title-row">
+              <strong>GPS Status</strong>
+            </div>
+            <div class="button-row">
+              <button id="connectGeolocationBtn" class="ghost-button small" type="button">Browser GPS</button>
+              <button id="connectUsbGpsBtn" class="primary-button small" type="button">USB GPS</button>
+            </div>
+            <label>
+              GPS Centering
+              <select id="gpsCenterMode">
+                <option value="follow">Follow User</option>
+                <option value="once">Center Once</option>
+                <option value="off">Do Not Center</option>
+              </select>
+            </label>
+            <p class="fine-print">
+              Browser mode uses the Geolocation API. USB mode reads NMEA over Web Serial when supported. Direct gpsd access requires a local bridge service outside the browser sandbox.
+            </p>
+          </div>
+        </div>
+        <div class="status-chip">
+          <span id="coordsLabel">MGRS</span>
+          <strong id="mgrsValue">----------</strong>
         </div>
         <div class="settings-menu-shell">
           <button id="settingsMenuBtn" class="icon-button settings-button" type="button" aria-label="Open map settings" aria-expanded="false">
@@ -119,61 +226,10 @@
           </div>
         </div>
       </div>
-      <div class="status-strip">
-        <div class="status-chip status-chip-clock">
-          <span>DATE/TIME</span>
-          <strong id="clockValue">--</strong>
-        </div>
-        <div class="status-chip">
-          <span>GPS</span>
-          <strong id="gpsStatusValue">Disconnected</strong>
-        </div>
-        <div class="status-chip">
-          <span id="coordsLabel">MGRS</span>
-          <strong id="mgrsValue">----------</strong>
-        </div>
-        <div class="status-chip status-message">
-          <span>STATUS</span>
-          <strong id="statusBadge">Ready</strong>
-        </div>
-      </div>
     </header>
 
     <div class="workspace-shell">
       <aside id="controlPanel" class="control-panel">
-        <section id="terrainSection" class="card">
-          <div class="section-title-row">
-            <h2>Terrain</h2>
-            <button id="clearTerrainBtn" class="ghost-button small" type="button">Clear Terrain</button>
-          </div>
-          <div class="two-column">
-            <label class="span-2">
-              DTED File
-              <input id="dtedInput" type="file" accept=".dt0,.dt1,.dt2,.dted">
-            </label>
-          </div>
-          <div class="terrain-summary" id="terrainSummary">
-            No terrain loaded. Propagation uses free-space or terrain diffraction only.
-          </div>
-          <div class="list-shell">
-            <div class="list-header">
-              <span>Loaded Terrain</span>
-            </div>
-            <div id="terrainList" class="asset-list"></div>
-          </div>
-          <div class="list-shell">
-            <div class="list-header">
-              <span>Terrain Streaming Notes</span>
-            </div>
-            <div class="asset-list">
-              <article class="asset-item compact-note">
-                DTED Level 2 streaming options:
-                quantized-mesh terrain services, Cesium terrain servers, WMTS/XYZ hillshade overlays, COG GeoTIFF DEM services, or pre-tiled local terrain packages behind a local web server.
-              </article>
-            </div>
-          </div>
-        </section>
-
         <section id="mapContentsCard" class="card hidden">
           <div class="section-title-row">
             <h2>Map Contents</h2>
@@ -183,32 +239,6 @@
             </div>
           </div>
           <div id="mapContentsList" class="asset-list map-contents-list"></div>
-        </section>
-
-        <section class="card">
-          <div class="section-title-row">
-            <h2>Weather</h2>
-            <button id="fetchWeatherBtn" class="primary-button small" type="button">Fetch Local Weather</button>
-          </div>
-          <div class="two-column">
-            <label>
-              <span id="tempLabel">Temperature C</span>
-              <input id="tempC" type="number" step="0.1" value="20">
-            </label>
-            <label>
-              Humidity %
-              <input id="humidity" type="number" min="0" max="100" step="1" value="50">
-            </label>
-            <label>
-              <span id="pressureLabel">Pressure hPa</span>
-              <input id="pressure" type="number" min="800" max="1100" step="0.1" value="1013.2">
-            </label>
-            <label>
-              <span id="windLabel">Wind m/s</span>
-              <input id="windSpeed" type="number" min="0" step="0.1" value="3">
-            </label>
-          </div>
-          <div class="weather-summary" id="weatherSummary">Manual weather profile active.</div>
         </section>
 
         <section class="card">
@@ -382,29 +412,6 @@
 
         <section id="planningSection" class="card">
           <div class="section-title-row">
-            <h2>GPS</h2>
-            <div class="button-row">
-              <button id="connectGeolocationBtn" class="ghost-button small" type="button">Browser GPS</button>
-              <button id="connectUsbGpsBtn" class="primary-button small" type="button">USB GPS</button>
-            </div>
-          </div>
-          <div class="two-column">
-            <label class="span-2">
-              GPS Centering
-              <select id="gpsCenterMode">
-                <option value="follow">Follow User</option>
-                <option value="once">Center Once</option>
-                <option value="off">Do Not Center</option>
-              </select>
-            </label>
-          </div>
-          <p class="fine-print">
-            Browser mode uses the Geolocation API. USB mode reads NMEA over Web Serial when supported. Direct gpsd access requires a local bridge service outside the browser sandbox.
-          </p>
-        </section>
-
-        <section class="card">
-          <div class="section-title-row">
             <h2>Site Planning</h2>
             <div class="button-row">
               <button id="drawPlanningRegionBtn" class="ghost-button small" type="button">Draw Region</button>
@@ -462,6 +469,7 @@
       <main class="map-stage">
         <div id="map"></div>
         <div id="cesiumContainer" class="viewer3d hidden"></div>
+        <button id="view3dToggleBtn" class="map-view-toggle ghost-button small" type="button">3D View</button>
         <button id="cesiumCompassBtn" class="cesium-compass hidden" type="button" aria-label="Reset 3D view to north up">
           <span id="cesiumCompassRose" class="cesium-compass-rose">
             <span class="cesium-compass-ring"></span>

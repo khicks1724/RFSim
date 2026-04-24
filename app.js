@@ -45,6 +45,14 @@ const dom = {
   imageryMenuBtn: document.querySelector("#imageryMenuBtn"),
   imageryMenu: document.querySelector("#imageryMenu"),
   imageryMenuValue: document.querySelector("#imageryMenuValue"),
+  terrainMenuBtn: document.querySelector("#terrainMenuBtn"),
+  terrainMenu: document.querySelector("#terrainMenu"),
+  terrainMenuValue: document.querySelector("#terrainMenuValue"),
+  weatherMenuBtn: document.querySelector("#weatherMenuBtn"),
+  weatherMenu: document.querySelector("#weatherMenu"),
+  weatherMenuValue: document.querySelector("#weatherMenuValue"),
+  gpsMenuBtn: document.querySelector("#gpsMenuBtn"),
+  gpsMenu: document.querySelector("#gpsMenu"),
   settingsMenuBtn: document.querySelector("#settingsMenuBtn"),
   settingsMenu: document.querySelector("#settingsMenu"),
   measurementUnitsSelect: document.querySelector("#measurementUnitsSelect"),
@@ -179,6 +187,9 @@ const state = {
   activeMapContentMenuId: null,
   renamingMapContentId: null,
   imageryMenuOpen: false,
+  terrainMenuOpen: false,
+  weatherMenuOpen: false,
+  gpsMenuOpen: false,
   settingsMenuOpen: false,
   settings: {
     measurementUnits: "metric",
@@ -259,6 +270,12 @@ function wireEvents() {
   window.addEventListener("mouseup", endPanelResize);
   dom.imageryMenuBtn.addEventListener("click", toggleImageryMenu);
   dom.imageryMenu.addEventListener("click", (event) => event.stopPropagation());
+  dom.terrainMenuBtn.addEventListener("click", toggleTerrainMenu);
+  dom.terrainMenu.addEventListener("click", (event) => event.stopPropagation());
+  dom.weatherMenuBtn.addEventListener("click", toggleWeatherMenu);
+  dom.weatherMenu.addEventListener("click", (event) => event.stopPropagation());
+  dom.gpsMenuBtn.addEventListener("click", toggleGpsMenu);
+  dom.gpsMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.settingsMenuBtn.addEventListener("click", toggleSettingsMenu);
   dom.settingsMenu.addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("click", closeTopBarMenus);
@@ -343,6 +360,9 @@ function persistSettings() {
 function toggleSettingsMenu(event) {
   event.stopPropagation();
   closeImageryMenu();
+  closeTerrainMenu();
+  closeWeatherMenu();
+  closeGpsMenu();
   state.settingsMenuOpen = !state.settingsMenuOpen;
   dom.settingsMenu.classList.toggle("hidden", !state.settingsMenuOpen);
   dom.settingsMenuBtn.setAttribute("aria-expanded", String(state.settingsMenuOpen));
@@ -351,9 +371,45 @@ function toggleSettingsMenu(event) {
 function toggleImageryMenu(event) {
   event.stopPropagation();
   closeSettingsMenu();
+  closeTerrainMenu();
+  closeWeatherMenu();
+  closeGpsMenu();
   state.imageryMenuOpen = !state.imageryMenuOpen;
   dom.imageryMenu.classList.toggle("hidden", !state.imageryMenuOpen);
   dom.imageryMenuBtn.setAttribute("aria-expanded", String(state.imageryMenuOpen));
+}
+
+function toggleTerrainMenu(event) {
+  event.stopPropagation();
+  closeImageryMenu();
+  closeWeatherMenu();
+  closeGpsMenu();
+  closeSettingsMenu();
+  state.terrainMenuOpen = !state.terrainMenuOpen;
+  dom.terrainMenu.classList.toggle("hidden", !state.terrainMenuOpen);
+  dom.terrainMenuBtn.setAttribute("aria-expanded", String(state.terrainMenuOpen));
+}
+
+function toggleWeatherMenu(event) {
+  event.stopPropagation();
+  closeImageryMenu();
+  closeTerrainMenu();
+  closeGpsMenu();
+  closeSettingsMenu();
+  state.weatherMenuOpen = !state.weatherMenuOpen;
+  dom.weatherMenu.classList.toggle("hidden", !state.weatherMenuOpen);
+  dom.weatherMenuBtn.setAttribute("aria-expanded", String(state.weatherMenuOpen));
+}
+
+function toggleGpsMenu(event) {
+  event.stopPropagation();
+  closeImageryMenu();
+  closeTerrainMenu();
+  closeWeatherMenu();
+  closeSettingsMenu();
+  state.gpsMenuOpen = !state.gpsMenuOpen;
+  dom.gpsMenu.classList.toggle("hidden", !state.gpsMenuOpen);
+  dom.gpsMenuBtn.setAttribute("aria-expanded", String(state.gpsMenuOpen));
 }
 
 function closeSettingsMenu() {
@@ -374,9 +430,39 @@ function closeImageryMenu() {
   dom.imageryMenuBtn.setAttribute("aria-expanded", "false");
 }
 
+function closeTerrainMenu() {
+  if (!state.terrainMenuOpen) {
+    return;
+  }
+  state.terrainMenuOpen = false;
+  dom.terrainMenu.classList.add("hidden");
+  dom.terrainMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+function closeWeatherMenu() {
+  if (!state.weatherMenuOpen) {
+    return;
+  }
+  state.weatherMenuOpen = false;
+  dom.weatherMenu.classList.add("hidden");
+  dom.weatherMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+function closeGpsMenu() {
+  if (!state.gpsMenuOpen) {
+    return;
+  }
+  state.gpsMenuOpen = false;
+  dom.gpsMenu.classList.add("hidden");
+  dom.gpsMenuBtn.setAttribute("aria-expanded", "false");
+}
+
 function closeTopBarMenus() {
   closeSettingsMenu();
   closeImageryMenu();
+  closeTerrainMenu();
+  closeWeatherMenu();
+  closeGpsMenu();
 }
 
 function closeMapContentsMenu() {
@@ -437,6 +523,11 @@ function syncWeatherInputsFromState() {
   dom.humidity.value = formatInputNumber(state.weather.humidity, 0);
   dom.pressure.value = formatInputNumber(displayPressure(state.weather.pressureHpa), state.settings.measurementUnits === "standard" ? 2 : 1);
   dom.windSpeed.value = formatInputNumber(displayWindSpeed(state.weather.windSpeedMps), 1);
+  updateWeatherMenuValue();
+}
+
+function updateWeatherMenuValue() {
+  dom.weatherMenuValue.textContent = state.weather.source === "open-meteo" ? "Live" : "Manual";
 }
 
 function coordinateSystemStatusLabel(system) {
@@ -591,6 +682,9 @@ function loadCesiumIonToken() {
   const stored = window.localStorage.getItem(CESIUM_ION_TOKEN_STORAGE_KEY);
   if (stored) {
     dom.cesiumIonToken.value = stored;
+    if (dom.terrainSourceSelect.value === "ellipsoid") {
+      dom.terrainSourceSelect.value = "cesium-world";
+    }
   }
 }
 
@@ -598,8 +692,14 @@ function onCesiumIonTokenChanged() {
   const token = dom.cesiumIonToken.value.trim();
   if (token) {
     window.localStorage.setItem(CESIUM_ION_TOKEN_STORAGE_KEY, token);
+    if (dom.terrainSourceSelect.value === "ellipsoid") {
+      dom.terrainSourceSelect.value = "cesium-world";
+    }
   } else {
     window.localStorage.removeItem(CESIUM_ION_TOKEN_STORAGE_KEY);
+    if (dom.terrainSourceSelect.value === "cesium-world") {
+      dom.terrainSourceSelect.value = "ellipsoid";
+    }
   }
   state.cesiumTerrainProvider = null;
   state.ionTerrainCache.clear();
@@ -880,6 +980,7 @@ function renderAssets() {
 
 function renderTerrains() {
   dom.terrainList.innerHTML = "";
+  updateTerrainMenuValue();
 
   if (!state.terrains.length) {
     dom.terrainList.innerHTML = `<div class="asset-item">No DTED loaded yet.</div>`;
@@ -914,6 +1015,21 @@ function renderTerrains() {
   dom.terrainList.querySelectorAll("[data-terrain-action]").forEach((button) => {
     button.addEventListener("click", onTerrainAction);
   });
+}
+
+function updateTerrainMenuValue() {
+  if (!state.terrains.length) {
+    dom.terrainMenuValue.textContent = "No DTED";
+    return;
+  }
+
+  const terrain = getActiveTerrain();
+  if (terrain) {
+    dom.terrainMenuValue.textContent = terrain.name;
+    return;
+  }
+
+  dom.terrainMenuValue.textContent = `${state.terrains.length} Loaded`;
 }
 
 function renderViewsheds() {
@@ -1128,12 +1244,14 @@ function updateTerrainSummary() {
   const terrain = getActiveTerrain();
   if (!terrain) {
     dom.terrainSummary.textContent = "No terrain loaded. Propagation uses free-space or terrain diffraction only.";
+    updateTerrainMenuValue();
     return;
   }
 
   dom.terrainSummary.textContent =
     `Active terrain: ${terrain.name}. ${terrain.rows} x ${terrain.cols} posts with ` +
     `${terrain.latStepDeg.toFixed(6)} x ${terrain.lonStepDeg.toFixed(6)} degree spacing.`;
+  updateTerrainMenuValue();
 }
 
 function clearAssets() {
@@ -1157,9 +1275,11 @@ function updateWeatherState() {
   state.weather.humidity = Number(dom.humidity.value);
   state.weather.pressureHpa = parsePressureInput(dom.pressure.value);
   state.weather.windSpeedMps = parseWindSpeedInput(dom.windSpeed.value);
+  state.weather.source = "manual";
   if (state.weather.source === "manual") {
     dom.weatherSummary.textContent = "Manual weather profile active.";
   }
+  updateWeatherMenuValue();
 }
 
 async function fetchWeather() {
@@ -1192,10 +1312,12 @@ async function fetchWeather() {
     state.weather.source = "open-meteo";
     syncWeatherInputsFromState();
     dom.weatherSummary.textContent = `Weather from Open-Meteo at ${payload.current.time}.`;
+    updateWeatherMenuValue();
     setStatus("Weather updated.");
   } catch (error) {
     state.weather.source = "manual";
     dom.weatherSummary.textContent = "Weather fetch failed. Manual values remain active.";
+    updateWeatherMenuValue();
     setStatus(error.message, true);
   }
 }
@@ -1437,6 +1559,9 @@ function updateMetrics(rssiArray) {
 }
 
 function setStatus(message, isError = false) {
+  if (!dom.statusBadge) {
+    return;
+  }
   dom.statusBadge.textContent = message;
   dom.statusBadge.style.color = isError ? "#ff9f9f" : "";
 }
@@ -2672,7 +2797,12 @@ function editMapContent(contentId) {
   }
 
   if (contentId.startsWith("terrain:")) {
-    dom.terrainSection.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    closeImageryMenu();
+    closeGpsMenu();
+    closeSettingsMenu();
+    state.terrainMenuOpen = true;
+    dom.terrainMenu.classList.remove("hidden");
+    dom.terrainMenuBtn.setAttribute("aria-expanded", "true");
     setStatus("Terrain extents are edited by re-importing terrain or toggling coverage visibility.");
     return;
   }

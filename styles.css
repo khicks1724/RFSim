@@ -54,7 +54,7 @@ body.panel-collapsed {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   padding: 8px 14px;
   background: #111317;
   border-bottom: 1px solid var(--border);
@@ -73,8 +73,10 @@ body.panel-collapsed {
 
 .status-strip {
   justify-content: flex-end;
-  flex: 1;
+  flex: 0 1 auto;
+  margin-left: auto;
   min-width: 0;
+  gap: 8px;
 }
 
 .top-bar-actions {
@@ -83,7 +85,10 @@ body.panel-collapsed {
 }
 
 .imagery-menu-shell,
-.settings-menu-shell {
+.terrain-menu-shell,
+.weather-menu-shell,
+.settings-menu-shell,
+.gps-menu-shell {
   position: relative;
 }
 
@@ -91,10 +96,20 @@ body.panel-collapsed {
   display: grid;
   grid-template-columns: auto auto auto;
   align-items: center;
-  gap: 8px;
-  min-width: 220px;
-  padding: 7px 12px;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 10px;
   text-align: left;
+  white-space: nowrap;
+}
+
+.terrain-menu-shell .imagery-menu-button,
+.weather-menu-shell .imagery-menu-button {
+  min-width: 150px;
+}
+
+.imagery-menu-shell .imagery-menu-button {
+  min-width: 182px;
 }
 
 .imagery-menu-caption {
@@ -136,6 +151,39 @@ body.panel-collapsed {
   width: 360px;
 }
 
+.terrain-menu {
+  width: 380px;
+}
+
+.weather-menu {
+  width: 380px;
+}
+
+.gps-menu {
+  width: 290px;
+}
+
+.terrain-menu .list-shell,
+.terrain-menu .terrain-summary,
+.terrain-menu label,
+.terrain-menu .button-row,
+.terrain-menu .menu-title-row,
+.weather-menu .weather-summary,
+.weather-menu label,
+.weather-menu .button-row,
+.weather-menu .menu-title-row {
+  margin-top: 0;
+}
+
+.compact-shell {
+  margin-top: 0;
+}
+
+.compact-list {
+  max-height: 180px;
+  overflow: auto;
+}
+
 .menu-title-row {
   display: flex;
   align-items: center;
@@ -169,11 +217,37 @@ body.panel-collapsed {
 .status-chip {
   display: grid;
   gap: 2px;
-  min-width: 118px;
+  min-width: 102px;
   padding: 6px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.status-chip-button {
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+
+.status-chip-button:hover {
+  border-color: var(--border-strong);
+}
+
+.gps-status-button {
+  min-width: 150px;
+}
+
+.status-chip-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-chip-chevron {
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
 .status-chip-clock {
@@ -258,13 +332,26 @@ body.panel-collapsed .panel-divider {
   display: none;
 }
 
-.cesium-compass {
+.map-view-toggle {
   position: absolute;
   top: 14px;
-  right: 64px;
+  left: 52px;
   z-index: 650;
-  width: 40px;
-  height: 40px;
+  width: 76px;
+  min-width: 76px;
+  padding: 6px 10px;
+  background: rgba(22, 24, 29, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.cesium-compass {
+  position: absolute;
+  top: 54px;
+  left: 72px;
+  right: auto;
+  z-index: 650;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: 1px solid var(--border);
   background: rgba(22, 24, 29, 0.92);
@@ -286,7 +373,7 @@ body.panel-collapsed .panel-divider {
 
 .cesium-compass-ring {
   position: absolute;
-  inset: 6px;
+  inset: 5px;
   border: 1px solid rgba(238, 242, 247, 0.7);
   border-radius: 999px;
 }
@@ -294,22 +381,22 @@ body.panel-collapsed .panel-divider {
 .cesium-compass-arrow {
   position: absolute;
   left: 50%;
-  top: 6px;
+  top: 5px;
   width: 0;
   height: 0;
-  margin-left: -5px;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-bottom: 16px solid #d9e4ff;
+  margin-left: -4px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 13px solid #d9e4ff;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
 }
 
 .cesium-compass-north {
   position: absolute;
   left: 50%;
-  bottom: 4px;
+  bottom: 3px;
   transform: translateX(-50%);
-  font-size: 0.58rem;
+  font-size: 0.5rem;
   letter-spacing: 0.08em;
   color: var(--text);
 }
@@ -401,6 +488,23 @@ label {
   gap: 5px;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inline-link {
+  color: var(--accent-strong);
+  text-decoration: none;
+  font-size: 0.76rem;
+}
+
+.inline-link:hover {
+  text-decoration: underline;
 }
 
 input,
