@@ -71,20 +71,7 @@ The Cesium Ion page you need is the `Access Tokens` page. Use the `Create token`
 3. In the imagery dropdown, find `Cesium Ion Token`.
 4. Click `Create token`.
 5. Sign up for or sign in to Cesium Ion.
-6. Create an access token in Cesium Ion.
-7. When Cesium shows the generated token value, use the copy button next to the token field.
-
-![Cesium Ion generated token value ready to copy](./images/cesium-ion-copy-token.svg)
-
-8. Paste the copied token into the `Cesium Ion Token` field at the bottom of the `Imagery` dropdown in the app.
-
-![Imagery dropdown showing the Cesium Ion Token field at the bottom](./images/imagery-menu-cesium-token-field.svg)
-
-The token is stored in browser local storage for later sessions on that machine/browser profile.
-
-### Recommended Token Settings
-
-When Cesium Ion shows the token configuration form, you can use a simple public-client setup like the one shown below.
+6. Configure the token settings on the Cesium Ion form.
 
 ![Cesium Ion token settings form with the public-client configuration options](./images/cesium-ion-token-settings.svg)
 
@@ -97,6 +84,17 @@ Recommended settings for this app:
 - Leave `Resources` on `All assets` unless you are intentionally limiting the token to a smaller Cesium asset set.
 
 For browser-based use, keep the token scoped as narrowly as practical. If you deploy this app publicly, prefer a restricted token over a broad reusable account token.
+
+7. Create the token in Cesium Ion.
+8. When Cesium shows the generated token value, use the copy button next to the token field.
+
+![Cesium Ion generated token value ready to copy](./images/cesium-ion-copy-token.svg)
+
+9. Paste the copied token into the `Cesium Ion Token` field at the bottom of the `Imagery` dropdown in the app.
+
+![Imagery dropdown showing the Cesium Ion Token field at the bottom](./images/imagery-menu-cesium-token-field.svg)
+
+The token is stored in browser local storage for later sessions on that machine/browser profile.
 
 ### How To Use Cesium Imagery And Terrain In The App
 
