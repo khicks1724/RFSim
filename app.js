@@ -7059,14 +7059,21 @@ function openShapeStylePanel(item, anchorEl) {
   dom.shapeWeightInput.value = s.weight;
   dom.shapeOpacityValue.textContent = `${Math.round(s.fillOpacity * 100)}%`;
   dom.shapeWeightValue.textContent = s.weight;
+  updateRangeTrack(dom.shapeOpacityInput);
+  updateRangeTrack(dom.shapeWeightInput);
 
   // Hide vertex button for pure polylines
   dom.shapeStyleEditVerticesBtn.style.display = item.geometryType === "LineString" || item.layer?.editing ? "" : "";
 
-  // Position near the context menu anchor
-  const rect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 120, top: 120 };
-  dom.shapeStylePanel.style.left = `${rect.left}px`;
-  dom.shapeStylePanel.style.top = `${rect.bottom + 4}px`;
+  // Position to the right of the left panel, aligned to the item's row
+  const contentId = `imported:${item.id}`;
+  const rowEl = dom.mapContentsList?.querySelector(`[data-content-id="${contentId}"]`);
+  const panelRect = dom.mapContentsCard?.getBoundingClientRect() ?? { right: 340, top: 80 };
+  const rowRect = rowEl ? rowEl.getBoundingClientRect() : panelRect;
+  const panelLeft = panelRect.right + 6;
+  const panelTop = Math.min(rowRect.top, window.innerHeight - 360);
+  dom.shapeStylePanel.style.left = `${panelLeft}px`;
+  dom.shapeStylePanel.style.top = `${panelTop}px`;
   dom.shapeStylePanel.classList.remove("hidden");
   syncShapeVertexEditUi(item);
 }
