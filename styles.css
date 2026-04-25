@@ -718,9 +718,8 @@ body:not(.ai-panel-open) .ai-panel {
 }
 
 .ai-panel-title-group {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -731,6 +730,16 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-panel-title-group .eyebrow {
   white-space: nowrap;
+}
+
+.ai-model-toggle {
+  display: grid;
+  gap: 4px;
+  max-width: 220px;
+}
+
+.ai-chat-model-select {
+  min-width: 180px;
 }
 
 .ai-chat-messages {
@@ -1144,6 +1153,37 @@ body:not(.ai-panel-open) .ai-panel {
   padding: 6px 10px;
   background: var(--bg-overlay);
   box-shadow: var(--shadow);
+}
+
+.center-grid-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 640;
+}
+
+.center-grid-crosshair-line {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: #ff3b30;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.center-grid-crosshair-line-horizontal {
+  width: 34px;
+  height: 1px;
+  transform: translate(-50%, -50%);
+}
+
+.center-grid-crosshair-line-vertical {
+  width: 1px;
+  height: 34px;
+  transform: translate(-50%, -50%);
 }
 
 .cesium-compass {
@@ -2169,6 +2209,88 @@ button:focus {
   background: var(--bg-soft);
 }
 
+.simulation-modal {
+  width: min(1320px, calc(100vw - 32px));
+}
+
+.simulation-modal-body {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.simulation-modal-config,
+.simulation-modal-results {
+  min-height: 0;
+  padding: 18px;
+}
+
+.simulation-modal-config {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.simulation-modal-results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.simulation-asset-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-card-alt);
+}
+
+.simulation-summary-eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.simulation-config-grid {
+  align-items: start;
+}
+
+.simulation-modal-note {
+  margin: 0;
+}
+
+.simulation-results-header {
+  align-items: center;
+  margin: 0;
+}
+
+.simulation-results-header h2 {
+  margin: 0;
+}
+
+.simulation-metrics-grid {
+  margin-top: auto;
+}
+
+@media (max-width: 960px) {
+  .simulation-modal-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .simulation-modal-config {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
 .emitter-modal-title-group {
   display: flex;
   align-items: center;
@@ -2421,6 +2543,15 @@ button:focus {
   padding-top: 6px;
   border-top: 1px solid var(--border);
   margin-top: 4px;
+}
+
+.emitter-location-help {
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card-alt);
 }
 
 /* Link budget tab */

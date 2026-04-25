@@ -445,7 +445,28 @@ const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
 const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
 const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
 const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
-const GENAI_MIL_MODEL = "gemini-2.5-flash";
+const AI_PROVIDER_CATALOG = {
+  "genai-mil": {
+    shortLabel: "GenAI.mil",
+    keyLabel: "GenAI.mil API Key",
+    keyPlaceholder: "Paste STARK_ API key",
+    defaultModel: "gemini-2.5-flash",
+    models: [
+      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+      { value: "gpt-4.1", label: "GPT-4.1" },
+    ],
+  },
+  anthropic: {
+    shortLabel: "Claude",
+    keyLabel: "Anthropic API Key",
+    keyPlaceholder: "Paste sk-ant-... API key",
+    defaultModel: "claude-sonnet-4-6",
+    models: [
+      { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+      { value: "claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet" },
+    ],
+  },
+};
 
 const dom = {
   collapsePanelBtn: document.querySelector("#collapsePanelBtn"),
@@ -490,9 +511,12 @@ const dom = {
   aiMenu: null,
   aiMenuValue: null,
   aiProviderSelect: document.querySelector("#aiProviderSelect"),
+  aiSavedConfigSelect: document.querySelector("#aiSavedConfigSelect"),
+  aiSavedConfigLabelInput: document.querySelector("#aiSavedConfigLabelInput"),
   aiApiKeyInput: document.querySelector("#aiApiKeyInput"),
   aiApiKeyLabelText: document.querySelector("#aiApiKeyLabelText"),
   aiProviderSummary: document.querySelector("#aiProviderSummary"),
+  saveAiProviderBtn: document.querySelector("#saveAiProviderBtn"),
   testAiConnectionBtn: document.querySelector("#testAiConnectionBtn"),
   clearAiProviderBtn: document.querySelector("#clearAiProviderBtn"),
   openAiPanelBtn: null, // removed from topbar — kept as null so refs don't throw
@@ -507,6 +531,7 @@ const dom = {
   themeSelect: document.querySelector("#themeSelect"),
   coordinateSystemSelect: document.querySelector("#coordinateSystemSelect"),
   gridlinesToggle: document.querySelector("#gridlinesToggle"),
+  centerGridToggle: document.querySelector("#centerGridToggle"),
   gridlinesColor: document.querySelector("#gridlinesColor"),
   clockValue: document.querySelector("#clockValue"),
   gpsStatusValue: document.querySelector("#gpsStatusValue"),
@@ -593,6 +618,9 @@ const dom = {
   receiverHeight: document.querySelector("#receiverHeight"),
   runSimulationBtn: document.querySelector("#runSimulationBtn"),
   simulationSection: document.querySelector("#simulationSection"),
+  simulationModal: document.querySelector("#simulationModal"),
+  simulationModalCloseBtn: document.querySelector("#simulationModalCloseBtn"),
+  simulationAssetSummary: document.querySelector("#simulationAssetSummary"),
   coverageMetric: document.querySelector("#coverageMetric"),
   minRssiMetric: document.querySelector("#minRssiMetric"),
   maxRssiMetric: document.querySelector("#maxRssiMetric"),
@@ -616,6 +644,7 @@ const dom = {
   centerCoordinateLabel: document.querySelector("#centerCoordinateLabel"),
   centerCoordinateValue: document.querySelector("#centerCoordinateValue"),
   centerElevationValue: document.querySelector("#centerElevationValue"),
+  centerGridCrosshair: document.querySelector("#centerGridCrosshair"),
   cesiumCompassBtn: document.querySelector("#cesiumCompassBtn"),
   cesiumCompassRose: document.querySelector("#cesiumCompassRose"),
   aiPanel: document.querySelector("#aiPanel"),
@@ -624,6 +653,7 @@ const dom = {
   aiPanelStatus: document.querySelector("#aiPanelStatus"),
   aiChatMessages: document.querySelector("#aiChatMessages"),
   aiChatForm: document.querySelector("#aiChatForm"),
+  aiChatModelSelect: document.querySelector("#aiChatModelSelect"),
   aiChatInput: document.querySelector("#aiChatInput"),
   aiSendBtn: document.querySelector("#aiSendBtn"),
   aiClearChatBtn: document.querySelector("#aiClearChatBtn"),
@@ -693,7 +723,8 @@ const state = {
     theme: "dark",
     coordinateSystem: "mgrs",
     gridLinesEnabled: false,
-    gridColor: "#8fb7ff",
+    centerGridEnabled: false,
+    gridColor: "#ffffff",
   },
   weather: {
     temperatureC: 20,
@@ -738,8 +769,12 @@ const state = {
     autosavePending: false,
   },
   ai: {
+    activeConfigId: "",
+    savedConfigs: [],
+    configLabel: "",
     provider: "",
     apiKey: "",
+    model: "",
     status: "offline",
     statusMessage: "Add a provider and API key to enable the AI planning assistant.",
     pendingImages: [],    // [{dataUrl, mediaType}]
@@ -774,6 +809,151 @@ async function apiFetch(path, options = {}) {
   }
 
   return payload;
+}
+
+function defaultAiStatusMessage() {
+  return "Add a provider and API key to enable the AI planning assistant.";
+}
+
+function getAiProviderMeta(provider) {
+  return AI_PROVIDER_CATALOG[provider] ?? null;
+}
+
+function getAiProviderModels(provider) {
+  return getAiProviderMeta(provider)?.models ?? [];
+}
+
+function getDefaultAiModel(provider) {
+  return getAiProviderMeta(provider)?.defaultModel ?? "";
+}
+
+function ensureAiModelForProvider(provider, model = "") {
+  const models = getAiProviderModels(provider);
+  if (!models.length) {
+    return "";
+  }
+  if (models.some((entry) => entry.value === model)) {
+    return model;
+  }
+  return getDefaultAiModel(provider);
+}
+
+function getAiModelLabel(provider, model) {
+  return getAiProviderModels(provider).find((entry) => entry.value === model)?.label ?? model ?? "";
+}
+
+function getAiProviderLabel(provider) {
+  return getAiProviderMeta(provider)?.shortLabel ?? "No Provider";
+}
+
+function maskAiApiKey(apiKey) {
+  if (!apiKey) {
+    return "No key";
+  }
+  if (apiKey.length <= 8) {
+    return `${apiKey.slice(0, 2)}...${apiKey.slice(-2)}`;
+  }
+  return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
+}
+
+function generateAiConfigId() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return `ai-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function sanitizeAiSavedConfig(config) {
+  if (!config || typeof config !== "object") {
+    return null;
+  }
+  const provider = typeof config.provider === "string" ? config.provider : "";
+  const apiKey = typeof config.apiKey === "string" ? config.apiKey.trim() : "";
+  if (!getAiProviderMeta(provider) || !apiKey) {
+    return null;
+  }
+  return {
+    id: typeof config.id === "string" && config.id ? config.id : generateAiConfigId(),
+    label: typeof config.label === "string" ? config.label.trim() : "",
+    provider,
+    apiKey,
+    model: ensureAiModelForProvider(provider, typeof config.model === "string" ? config.model : ""),
+  };
+}
+
+function getAiSavedConfigDisplayLabel(config) {
+  if (!config) {
+    return "";
+  }
+  return config.label || `${getAiProviderLabel(config.provider)} | ${maskAiApiKey(config.apiKey)}`;
+}
+
+function getSavedAiConfig(configId = state.ai.activeConfigId) {
+  return state.ai.savedConfigs.find((config) => config.id === configId) ?? null;
+}
+
+function setActiveAiDraft(provider, apiKey, model, configId = "", label = "") {
+  state.ai.provider = provider;
+  state.ai.apiKey = apiKey;
+  state.ai.model = ensureAiModelForProvider(provider, model);
+  state.ai.activeConfigId = configId;
+  state.ai.configLabel = label;
+}
+
+function syncActiveAiConfigFromDraft() {
+  if (!state.ai.activeConfigId) {
+    return;
+  }
+  const savedConfig = getSavedAiConfig();
+  if (!savedConfig) {
+    state.ai.activeConfigId = "";
+    return;
+  }
+  savedConfig.provider = state.ai.provider;
+  savedConfig.apiKey = state.ai.apiKey;
+  savedConfig.model = ensureAiModelForProvider(state.ai.provider, state.ai.model);
+  savedConfig.label = state.ai.configLabel.trim();
+}
+
+function setAiStatusFromCurrentConfig() {
+  if (state.ai.provider && state.ai.apiKey) {
+    state.ai.status = "pending";
+    state.ai.statusMessage = "Provider configured. Testing connection...";
+    return;
+  }
+  state.ai.status = "offline";
+  state.ai.statusMessage = defaultAiStatusMessage();
+}
+
+function renderAiSavedConfigOptions() {
+  if (!dom.aiSavedConfigSelect) {
+    return;
+  }
+  const options = [
+    `<option value="">Current Draft</option>`,
+    ...state.ai.savedConfigs.map((config) => {
+      const modelLabel = getAiModelLabel(config.provider, config.model);
+      return `<option value="${escapeHtml(config.id)}">${escapeHtml(`${getAiSavedConfigDisplayLabel(config)} | ${modelLabel}`)}</option>`;
+    }),
+  ];
+  dom.aiSavedConfigSelect.innerHTML = options.join("");
+  dom.aiSavedConfigSelect.value = state.ai.activeConfigId;
+}
+
+function renderAiModelOptions() {
+  if (!dom.aiChatModelSelect) {
+    return;
+  }
+  const models = getAiProviderModels(state.ai.provider);
+  if (!models.length) {
+    dom.aiChatModelSelect.innerHTML = '<option value="">No model available</option>';
+    dom.aiChatModelSelect.value = "";
+    return;
+  }
+  dom.aiChatModelSelect.innerHTML = models
+    .map((model) => `<option value="${escapeHtml(model.value)}">${escapeHtml(model.label)}</option>`)
+    .join("");
+  dom.aiChatModelSelect.value = ensureAiModelForProvider(state.ai.provider, state.ai.model);
 }
 
 function persistSessionStorage() {
@@ -1043,6 +1223,7 @@ const emitterModal = {
       "emNvisEnabled","emIonoModel","emTimeDayEffects","emSolarIndex",
       "emIsManet","emRelayCapable","emMaxHops","emLatencyMs","emAdaptiveDataRate",
       "emSatcomEnabled","emSatType","emSatUplinkMHz","emSatDownlinkMHz","emSatGainDbi",
+      "emGridLocation","emColocateAsset",
     ];
     ids.forEach((id) => { this.fields[id] = document.querySelector(`#${id}`); });
 
@@ -1095,6 +1276,7 @@ const emitterModal = {
     document.body.classList.add("emitter-modal-open");
     this.switchTab("rf");
     const isEditing = prefill && prefill.lat !== undefined;
+    this.populateColocateOptions(prefill?.id ?? null);
     if (isEditing) {
       this.resetToDefaults();
       this.applyAsset(prefill);
@@ -1108,6 +1290,25 @@ const emitterModal = {
     this.updateDerivedFields();
     this.updateLinkBudget();
     this.fields.emName?.focus();
+  },
+
+  populateColocateOptions(excludeAssetId = null) {
+    const select = this.fields.emColocateAsset;
+    if (!select) {
+      return;
+    }
+    const options = ['<option value="">Do not co-locate</option>'];
+    state.assets
+      .filter((asset) => asset.id !== excludeAssetId)
+      .forEach((asset) => {
+        const label = `${asset.name}${asset.unit ? ` | ${asset.unit}` : ""} | ${toMgrs(asset.lat, asset.lon)}`;
+        options.push(`<option value="${escapeHtml(asset.id)}">${escapeHtml(label)}</option>`);
+      });
+    if (options.length === 1) {
+      options.push('<option value="" disabled>No existing emitters on map</option>');
+    }
+    select.innerHTML = options.join("");
+    select.value = "";
   },
 
   close() {
@@ -1232,6 +1433,8 @@ const emitterModal = {
     set("emAntennaHeightM",asset.antennaHeightM);
     set("emRxSensDbm",     asset.receiverSensitivityDbm);
     set("emSystemLossDb",  asset.systemLossDb);
+    set("emGridLocation",  toMgrs(asset.lat, asset.lon));
+    set("emColocateAsset", "");
     this.updateDerivedFields();
     this.updateLinkBudget();
     this.validateInputs();
@@ -1253,6 +1456,8 @@ const emitterModal = {
     this.fields.emName && (this.fields.emName.value = "");
     this.fields.emForce && (this.fields.emForce.value = "friendly");
     this.fields.emColor && (this.fields.emColor.value = FORCE_COLORS.friendly);
+    this.fields.emGridLocation && (this.fields.emGridLocation.value = "");
+    this.fields.emColocateAsset && (this.fields.emColocateAsset.value = "");
   },
 
   updateDerivedFields() {
@@ -1315,8 +1520,43 @@ const emitterModal = {
       if (height > 30 && f.emAntennaType?.value !== "tower") warnings.push("Antenna height >30 m — requires a tower or mast.");
     }
     if (Number.isFinite(sens) && sens > -80) warnings.push("Receiver sensitivity >−80 dBm is poor — check your value.");
+    const gridInput = f.emGridLocation?.value?.trim();
+    if (gridInput) {
+      try {
+        parseMgrsReferenceInput(gridInput);
+      } catch (error) {
+        warnings.push(error.message);
+      }
+    }
     const el = document.querySelector("#emitterValidation");
     if (el) el.textContent = warnings.join(" · ");
+  },
+
+  resolveLocation() {
+    const gridInput = this.fields.emGridLocation?.value?.trim();
+    if (gridInput) {
+      const parsed = parseMgrsReferenceInput(gridInput);
+      return {
+        lat: parsed.lat,
+        lng: parsed.lng,
+        description: parsed.normalized,
+      };
+    }
+
+    const colocateAssetId = this.fields.emColocateAsset?.value;
+    if (colocateAssetId) {
+      const asset = state.assets.find((entry) => entry.id === colocateAssetId);
+      if (!asset) {
+        throw new Error("The selected co-located emitter could not be found.");
+      }
+      return {
+        lat: asset.lat,
+        lng: asset.lon,
+        description: `co-located with ${asset.name}`,
+      };
+    }
+
+    return null;
   },
 
   readFields() {
@@ -1361,6 +1601,8 @@ const emitterModal = {
         isManet: b("emIsManet"),
         relayCapable: b("emRelayCapable"),
         satcomEnabled: b("emSatcomEnabled"),
+        locationGrid: v("emGridLocation") || "",
+        colocateAssetId: v("emColocateAsset") || "",
       },
     };
   },
@@ -1374,22 +1616,48 @@ const emitterModal = {
       return;
     }
 
+    let resolvedLocation = null;
+    try {
+      resolvedLocation = this.resolveLocation();
+    } catch (error) {
+      document.querySelector("#emitterValidation").textContent = error.message;
+      this.switchTab("loc");
+      this.fields.emGridLocation?.focus();
+      return;
+    }
+
     // If editing an existing asset, save edits directly
     if (state.editingAssetId) {
       const asset = state.assets.find((a) => a.id === state.editingAssetId);
       if (asset) {
         Object.assign(asset, data);
+        if (resolvedLocation) {
+          asset.lat = resolvedLocation.lat;
+          asset.lon = resolvedLocation.lng;
+          const marker = state.assetMarkers.get(asset.id);
+          if (marker) {
+            marker.setLatLng([asset.lat, asset.lon]);
+          }
+        }
         asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
         updateAssetMarker(asset);
         renderAssets();
         renderMapContents();
         syncCesiumEntities();
         saveMapState();
-        setStatus(`Updated ${asset.name}.`);
+        setStatus(resolvedLocation ? `Updated ${asset.name} at ${resolvedLocation.description}.` : `Updated ${asset.name}.`);
       }
       state.editingAssetId = null;
       refreshActionButtons();
       this.close();
+      return;
+    }
+
+    if (resolvedLocation) {
+      state.pendingEmitterData = data;
+      addAsset(resolvedLocation);
+      this.close();
+      setStatus(`Emitter placed at ${resolvedLocation.description}.`);
       return;
     }
 
@@ -1726,6 +1994,7 @@ function wireEvents() {
   dom.themeSelect.addEventListener("change", onSettingsChanged);
   dom.coordinateSystemSelect.addEventListener("change", onSettingsChanged);
   dom.gridlinesToggle.addEventListener("change", onSettingsChanged);
+  dom.centerGridToggle.addEventListener("change", onSettingsChanged);
   dom.gridlinesColor.addEventListener("input", onSettingsChanged);
   dom.view3dToggleBtn.addEventListener("click", toggle3dView);
   dom.cesiumCompassBtn.addEventListener("click", resetCesiumNorthUp);
@@ -1736,11 +2005,15 @@ function wireEvents() {
   dom.customTerrainUrl.addEventListener("change", onTerrainSourceSettingsChanged);
   dom.cesiumIonToken.addEventListener("change", onCesiumIonTokenChanged);
   dom.aiProviderSelect.addEventListener("change", onAiProviderChanged);
+  dom.aiSavedConfigSelect.addEventListener("change", onAiSavedConfigChanged);
+  dom.aiSavedConfigLabelInput.addEventListener("change", onAiSavedConfigLabelChanged);
   dom.aiApiKeyInput.addEventListener("change", onAiProviderChanged);
+  dom.saveAiProviderBtn.addEventListener("click", saveAiProvider);
   dom.testAiConnectionBtn.addEventListener("click", testAiProviderConnection);
   dom.clearAiProviderBtn.addEventListener("click", clearAiProvider);
   dom.collapseAiPanelBtn.addEventListener("click", toggleAiPanelCollapse);
   dom.aiChatForm.addEventListener("submit", onAiChatSubmit);
+  dom.aiChatModelSelect.addEventListener("change", onAiModelChanged);
   dom.aiClearChatBtn.addEventListener("click", clearAiChat);
   dom.aiChatInput.addEventListener("paste", onAiChatPaste);
   dom.aiChatInput.addEventListener("keydown", onAiChatKeyDown);
@@ -1785,6 +2058,12 @@ function wireEvents() {
   dom.exportZipBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsZip(); });
   dom.clearViewshedsBtn.addEventListener("click", clearViewsheds);
   dom.runSimulationBtn.addEventListener("click", runSimulation);
+  dom.simulationModalCloseBtn?.addEventListener("click", closeSimulationModal);
+  dom.simulationModal?.addEventListener("click", (event) => {
+    if (event.target === dom.simulationModal) {
+      closeSimulationModal();
+    }
+  });
   dom.connectGeolocationBtn.addEventListener("click", connectBrowserGeolocation);
   dom.connectUsbGpsBtn.addEventListener("click", connectUsbGps);
   dom.drawPlanningRegionBtn.addEventListener("click", drawPlanningRegion);
@@ -1812,6 +2091,7 @@ function loadSettings() {
       ? parsed.coordinateSystem
       : state.settings.coordinateSystem;
     state.settings.gridLinesEnabled = Boolean(parsed.gridLinesEnabled);
+    state.settings.centerGridEnabled = Boolean(parsed.centerGridEnabled);
     state.settings.gridColor = typeof parsed.gridColor === "string" ? parsed.gridColor : state.settings.gridColor;
   } catch {
     window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
@@ -2197,6 +2477,7 @@ function onSettingsChanged() {
   state.settings.theme = dom.themeSelect.value;
   state.settings.coordinateSystem = dom.coordinateSystemSelect.value;
   state.settings.gridLinesEnabled = dom.gridlinesToggle.checked;
+  state.settings.centerGridEnabled = dom.centerGridToggle.checked;
   state.settings.gridColor = dom.gridlinesColor.value;
   persistSettings();
   applySettings();
@@ -2207,7 +2488,9 @@ function applySettings() {
   dom.themeSelect.value = state.settings.theme;
   dom.coordinateSystemSelect.value = state.settings.coordinateSystem;
   dom.gridlinesToggle.checked = state.settings.gridLinesEnabled;
+  dom.centerGridToggle.checked = state.settings.centerGridEnabled;
   dom.gridlinesColor.value = state.settings.gridColor;
+  dom.centerGridCrosshair.classList.toggle("hidden", !state.settings.centerGridEnabled);
   document.body.classList.toggle("theme-light", state.settings.theme === "light");
   dom.coordsLabel.textContent = coordinateSystemStatusLabel(state.settings.coordinateSystem);
   updateWeatherUnitLabels();
@@ -2633,8 +2916,34 @@ function loadAiProviderSettings() {
   }
   try {
     const parsed = JSON.parse(stored);
-    state.ai.provider = typeof parsed.provider === "string" ? parsed.provider : "";
-    state.ai.apiKey = typeof parsed.apiKey === "string" ? parsed.apiKey : "";
+    const savedConfigs = Array.isArray(parsed.configs)
+      ? parsed.configs.map(sanitizeAiSavedConfig).filter(Boolean)
+      : [];
+    if (!savedConfigs.length && typeof parsed.provider === "string" && typeof parsed.apiKey === "string") {
+      const migratedConfig = sanitizeAiSavedConfig({
+        id: generateAiConfigId(),
+        provider: parsed.provider,
+        apiKey: parsed.apiKey,
+        model: typeof parsed.model === "string" ? parsed.model : "",
+      });
+      if (migratedConfig) {
+        savedConfigs.push(migratedConfig);
+      }
+    }
+    state.ai.savedConfigs = savedConfigs;
+    const activeConfigId = typeof parsed.activeConfigId === "string" ? parsed.activeConfigId : "";
+    const activeConfig = savedConfigs.find((config) => config.id === activeConfigId) ?? savedConfigs[0] ?? null;
+    if (activeConfig) {
+      setActiveAiDraft(activeConfig.provider, activeConfig.apiKey, activeConfig.model, activeConfig.id, activeConfig.label);
+    } else {
+      setActiveAiDraft(
+        typeof parsed.provider === "string" ? parsed.provider : "",
+        typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "",
+        typeof parsed.model === "string" ? parsed.model : "",
+        "",
+        typeof parsed.configLabel === "string" ? parsed.configLabel.trim() : "",
+      );
+    }
     if (state.ai.provider && state.ai.apiKey) {
       state.ai.status = "pending";
       state.ai.statusMessage = "Stored provider found. Revalidating access...";
@@ -2657,8 +2966,12 @@ function loadAiProviderSettings() {
 
 function persistAiProviderSettings() {
   window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify({
+    configs: state.ai.savedConfigs,
+    activeConfigId: state.ai.activeConfigId,
+    configLabel: state.ai.configLabel,
     provider: state.ai.provider,
     apiKey: state.ai.apiKey,
+    model: state.ai.model,
     panelOpen: state.ai.panelOpen,
     aiPanelWidth: state.ui.aiPanelWidth,
   }));
@@ -2667,10 +2980,8 @@ function persistAiProviderSettings() {
 async function onAiProviderChanged() {
   state.ai.provider = dom.aiProviderSelect.value;
   state.ai.apiKey = dom.aiApiKeyInput.value.trim();
-  state.ai.status = state.ai.provider && state.ai.apiKey ? "pending" : "offline";
-  state.ai.statusMessage = state.ai.provider && state.ai.apiKey
-    ? "Provider configured. Testing connection..."
-    : "Add a provider and API key to enable the AI planning assistant.";
+  state.ai.model = ensureAiModelForProvider(state.ai.provider, state.ai.model);
+  setAiStatusFromCurrentConfig();
   persistAiProviderSettings();
   syncAiUi();
   if (state.ai.provider && state.ai.apiKey) {
@@ -2678,13 +2989,82 @@ async function onAiProviderChanged() {
   }
 }
 
+async function onAiSavedConfigChanged() {
+  const selectedId = dom.aiSavedConfigSelect.value;
+  state.ai.activeConfigId = selectedId;
+  if (selectedId) {
+    const savedConfig = getSavedAiConfig(selectedId);
+    if (savedConfig) {
+      setActiveAiDraft(savedConfig.provider, savedConfig.apiKey, savedConfig.model, savedConfig.id, savedConfig.label);
+      setAiStatusFromCurrentConfig();
+      persistAiProviderSettings();
+      syncAiUi();
+      await testAiProviderConnection();
+      return;
+    }
+  }
+  persistAiProviderSettings();
+  syncAiUi();
+}
+
+function onAiSavedConfigLabelChanged() {
+  state.ai.configLabel = dom.aiSavedConfigLabelInput.value.trim();
+  syncActiveAiConfigFromDraft();
+  persistAiProviderSettings();
+  syncAiUi();
+}
+
+function saveAiProvider() {
+  if (!state.ai.provider || !state.ai.apiKey) {
+    state.ai.status = "offline";
+    state.ai.statusMessage = "Select a provider and enter an API key before saving.";
+    syncAiUi();
+    return;
+  }
+
+  const nextConfig = {
+    id: state.ai.activeConfigId || generateAiConfigId(),
+    label: state.ai.configLabel.trim(),
+    provider: state.ai.provider,
+    apiKey: state.ai.apiKey,
+    model: ensureAiModelForProvider(state.ai.provider, state.ai.model),
+  };
+  const existingIndex = state.ai.savedConfigs.findIndex((config) => config.id === nextConfig.id);
+  if (existingIndex >= 0) {
+    state.ai.savedConfigs.splice(existingIndex, 1, nextConfig);
+  } else {
+    state.ai.savedConfigs.push(nextConfig);
+  }
+  state.ai.activeConfigId = nextConfig.id;
+  state.ai.configLabel = nextConfig.label;
+  state.ai.model = nextConfig.model;
+  if (state.ai.status !== "ready") {
+    state.ai.statusMessage = `Saved ${state.ai.savedConfigs.length} AI key${state.ai.savedConfigs.length === 1 ? "" : "s"}.`;
+  }
+  persistAiProviderSettings();
+  syncAiUi();
+}
+
+function onAiModelChanged() {
+  state.ai.model = ensureAiModelForProvider(state.ai.provider, dom.aiChatModelSelect.value);
+  syncActiveAiConfigFromDraft();
+  persistAiProviderSettings();
+  syncAiUi();
+}
+
 function clearAiProvider() {
+  if (state.ai.activeConfigId) {
+    state.ai.savedConfigs = state.ai.savedConfigs.filter((config) => config.id !== state.ai.activeConfigId);
+  }
+  state.ai.activeConfigId = "";
+  state.ai.configLabel = "";
   state.ai.provider = "";
   state.ai.apiKey = "";
+  state.ai.model = "";
   state.ai.status = "offline";
-  state.ai.statusMessage = "Add a provider and API key to enable the AI planning assistant.";
+  state.ai.statusMessage = defaultAiStatusMessage();
   state.ai.panelOpen = false;
-  window.localStorage.removeItem(AI_PROVIDER_STORAGE_KEY);
+  persistAiProviderSettings();
   document.body.classList.remove("ai-panel-open");
   dom.collapseAiPanelIcon.innerHTML = "&#9664;";
   clearAiChat();
@@ -2714,30 +3094,26 @@ function syncAiUi() {
     return;
   }
 
+  renderAiSavedConfigOptions();
+  renderAiModelOptions();
   dom.aiProviderSelect.value = state.ai.provider;
+  if (dom.aiSavedConfigLabelInput) {
+    dom.aiSavedConfigLabelInput.value = state.ai.configLabel;
+  }
   dom.aiApiKeyInput.value = state.ai.apiKey;
   if (dom.aiProviderSummary) {
-    dom.aiProviderSummary.textContent = state.ai.statusMessage;
+    const savedCount = state.ai.savedConfigs.length;
+    const savedSummary = savedCount ? ` Saved keys: ${savedCount}.` : "";
+    dom.aiProviderSummary.textContent = `${state.ai.statusMessage}${savedSummary}`;
   }
 
   if (dom.aiApiKeyLabelText) {
-    dom.aiApiKeyLabelText.textContent = state.ai.provider === "genai-mil"
-      ? "GenAI.mil API Key"
-      : state.ai.provider === "anthropic"
-        ? "Anthropic API Key"
-        : "API Key";
-    dom.aiApiKeyInput.placeholder = state.ai.provider === "genai-mil"
-      ? "Paste STARK_ API key"
-      : state.ai.provider === "anthropic"
-        ? "Paste sk-ant-... API key"
-        : "Paste API key";
+    const providerMeta = getAiProviderMeta(state.ai.provider);
+    dom.aiApiKeyLabelText.textContent = providerMeta?.keyLabel ?? "API Key";
+    dom.aiApiKeyInput.placeholder = providerMeta?.keyPlaceholder ?? "Paste API key";
   }
 
-  const providerLabel = state.ai.provider === "genai-mil"
-    ? "GenAI.mil"
-    : state.ai.provider === "anthropic"
-      ? "Claude"
-      : null;
+  const providerLabel = state.ai.provider ? getAiProviderLabel(state.ai.provider) : null;
   if (dom.aiMenuValue) {
     dom.aiMenuValue.textContent = providerLabel
       ? state.ai.status === "ready"
@@ -2762,11 +3138,17 @@ function syncAiUi() {
             ? "Provider error"
             : "Provider offline";
   }
-    renderAiEmptyState();
+  renderAiEmptyState();
   const hasConfiguredProvider = Boolean(state.ai.provider && state.ai.apiKey);
   const controlsEnabled = hasConfiguredProvider && state.ai.status !== "testing";
   const actionButtonsEnabled = controlsEnabled && !state.ai.requestInFlight;
   const sendEnabled = actionButtonsEnabled;
+  if (dom.aiChatModelSelect) {
+    dom.aiChatModelSelect.disabled = !state.ai.provider || state.ai.status === "testing";
+  }
+  if (dom.saveAiProviderBtn) {
+    dom.saveAiProviderBtn.disabled = !state.ai.provider || !state.ai.apiKey;
+  }
   if (dom.aiChatInput) {
     dom.aiChatInput.disabled = !controlsEnabled;
   }
@@ -3878,7 +4260,7 @@ async function callAiPlanningAssistant(prompt, images = [], contextIds = [], { o
 
 async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
   const payload = {
-    model: GENAI_MIL_MODEL,
+    model: ensureAiModelForProvider("genai-mil", state.ai.model),
     messages,
     max_tokens: maxTokens,
     temperature,
@@ -3951,7 +4333,6 @@ async function callGenAiMilEndpoint(url, apiKey, payload) {
 }
 
 async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
-  const ANTHROPIC_MODEL = "claude-sonnet-4-6";
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -3961,7 +4342,7 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
+      model: ensureAiModelForProvider("anthropic", state.ai.model),
       max_tokens: maxTokens,
       temperature,
       messages,
@@ -7011,6 +7392,10 @@ function openMapContentsMenu(event, contentId) {
   event.preventDefault();
   event.stopPropagation();
   state.activeMapContentMenuId = contentId;
+  const simulateButton = dom.mapContentsMenu.querySelector('[data-map-content-action="simulate"]');
+  if (simulateButton) {
+    simulateButton.classList.toggle("hidden", !contentId.startsWith("asset:"));
+  }
   dom.mapContentsMenu.style.left = `${event.clientX}px`;
   dom.mapContentsMenu.style.top = `${event.clientY}px`;
   dom.mapContentsMenu.classList.remove("hidden");
@@ -7035,8 +7420,71 @@ function onMapContentsMenuAction(event) {
     return;
   }
 
+  if (action === "simulate") {
+    openSimulationForContent(contentId);
+    return;
+  }
+
   if (action === "delete") {
     deleteMapContent(contentId);
+  }
+}
+
+function openSimulationModal() {
+  dom.simulationModal?.classList.remove("hidden");
+  document.body.classList.add("emitter-modal-open");
+}
+
+function closeSimulationModal() {
+  dom.simulationModal?.classList.add("hidden");
+  document.body.classList.remove("emitter-modal-open");
+  state.editingViewshedId = null;
+  refreshActionButtons();
+}
+
+function setSimulationModalAsset(asset) {
+  if (!asset) {
+    dom.assetSelect.value = "";
+    if (dom.simulationAssetSummary) {
+      dom.simulationAssetSummary.textContent = "No emitter selected";
+    }
+    return;
+  }
+  dom.assetSelect.value = asset.id;
+  if (dom.simulationAssetSummary) {
+    dom.simulationAssetSummary.textContent = `${asset.name} | ${asset.frequencyMHz} MHz | ${asset.powerW} W`;
+  }
+}
+
+function openSimulationForContent(contentId) {
+  if (contentId.startsWith("asset:")) {
+    const asset = state.assets.find((entry) => entry.id === contentId.slice("asset:".length));
+    if (!asset) {
+      return;
+    }
+    state.editingViewshedId = null;
+    setSimulationModalAsset(asset);
+    refreshActionButtons();
+    openSimulationModal();
+    setStatus(`Configuring RF simulation for ${asset.name}.`);
+    return;
+  }
+
+  if (contentId.startsWith("viewshed:")) {
+    const viewshed = state.viewsheds.find((entry) => entry.id === contentId.slice("viewshed:".length));
+    if (!viewshed) {
+      return;
+    }
+    state.editingViewshedId = viewshed.id;
+    setSimulationModalAsset(viewshed.asset);
+    dom.propagationModel.value = viewshed.propagationModel;
+    dom.receiverHeight.value = viewshed.receiverHeight;
+    dom.viewshedOpacity.value = viewshed.opacity;
+    updateRangeTrack(dom.viewshedOpacity);
+    dom.radiusKm.value = Math.round(viewshed.radiusMeters / 1000);
+    refreshActionButtons();
+    openSimulationModal();
+    setStatus(`Editing ${viewshed.name}. Adjust the simulation inputs and click Update Coverage.`);
   }
 }
 
@@ -7119,20 +7567,7 @@ function editMapContent(contentId) {
   }
 
   if (contentId.startsWith("viewshed:")) {
-    const viewshed = state.viewsheds.find((entry) => entry.id === contentId.slice("viewshed:".length));
-    if (!viewshed) {
-      return;
-    }
-    state.editingViewshedId = viewshed.id;
-    dom.assetSelect.value = viewshed.asset.id;
-    dom.propagationModel.value = viewshed.propagationModel;
-    dom.receiverHeight.value = viewshed.receiverHeight;
-    dom.viewshedOpacity.value = viewshed.opacity;
-    updateRangeTrack(dom.viewshedOpacity);
-    dom.radiusKm.value = Math.round(viewshed.radiusMeters / 1000);
-    refreshActionButtons();
-    dom.simulationSection.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    setStatus(`Editing ${viewshed.name}. Adjust the simulation inputs and click Update Coverage.`);
+    openSimulationForContent(contentId);
     return;
   }
 
@@ -8306,7 +8741,7 @@ function syncCesiumEntities() {
             longitudes[i] - halfLon, latitudes[i] - halfLat,
             longitudes[i] + halfLon, latitudes[i] + halfLat,
           ),
-          height: 0,
+          vertexFormat: C.PerInstanceColorAppearance.VERTEX_FORMAT,
         }),
         attributes: {
           color: C.ColorGeometryInstanceAttribute.fromColor(color),
@@ -8315,12 +8750,13 @@ function syncCesiumEntities() {
     }
 
     if (instances.length > 0) {
-      const primitive = new C.Primitive({
+      const primitive = new C.GroundPrimitive({
         geometryInstances: instances,
         appearance: new C.PerInstanceColorAppearance({
           flat: true,
           translucent: true,
         }),
+        classificationType: C.ClassificationType.TERRAIN,
         asynchronous: false,
       });
       viewer.scene.primitives.add(primitive);
@@ -8704,6 +9140,43 @@ function getMgrsComponents(lat, lon) {
   };
 }
 
+function parseMgrsReferenceInput(input) {
+  const raw = String(input ?? "").trim().toUpperCase();
+  if (!raw) {
+    return null;
+  }
+
+  const compact = raw.replace(/[^0-9A-Z]/g, "");
+  const match = compact.match(/^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d{4}|\d{6}|\d{8}|\d{10})$/i);
+  if (!match) {
+    throw new Error("Enter an MGRS grid like 11S NU 54 23, 11S NU 542 231, 11S NU 5423 2314, or a full 10-digit grid.");
+  }
+
+  const [, zoneBand, square, digits] = match;
+  const half = digits.length / 2;
+  const easting = digits.slice(0, half).padEnd(5, "0");
+  const northing = digits.slice(half).padEnd(5, "0");
+  const normalized = `${zoneBand}${square}${easting}${northing}`;
+
+  let bounds;
+  try {
+    bounds = window.mgrs.inverse(normalized);
+  } catch {
+    throw new Error("The MGRS grid could not be resolved.");
+  }
+
+  if (!Array.isArray(bounds) || bounds.length < 4 || bounds.some((value) => !Number.isFinite(value))) {
+    throw new Error("The MGRS grid could not be resolved.");
+  }
+
+  const [west, south, east, north] = bounds;
+  return {
+    normalized,
+    lat: (south + north) / 2,
+    lng: (west + east) / 2,
+  };
+}
+
 function formatCoordinate(lat, lon, system) {
   if (system === "latlon") {
     return `${formatDecimalDegrees(lat, true)}, ${formatDecimalDegrees(lon, false)}`;
@@ -8845,7 +9318,7 @@ function geographicGridStep(zoom) {
     return 0.01;
   }
   if (zoom >= 12) {
-    return 0.025;
+    return 0.02;
   }
   if (zoom >= 10) {
     return 0.05;
@@ -8854,14 +9327,14 @@ function geographicGridStep(zoom) {
     return 0.1;
   }
   if (zoom >= 6) {
-    return 0.25;
+    return 0.2;
   }
   return 0.5;
 }
 
 function metricGridStep(zoom) {
   if (zoom >= 14) {
-    return 250;
+    return 200;
   }
   if (zoom >= 12) {
     return 500;
@@ -8878,7 +9351,7 @@ function metricGridStep(zoom) {
   return 20000;
 }
 
-const METRIC_GRID_STEPS = [250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
+const METRIC_GRID_STEPS = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
 
 function metersToLatitudeDegrees(meters) {
   return meters / 111320;
@@ -8916,6 +9389,87 @@ function resolveMetricGridStep(map) {
   }
 
   return fallback;
+}
+
+function padMgrsCoordinate(value) {
+  return Math.max(0, Math.min(99999, value)).toString().padStart(5, "0");
+}
+
+function getMgrsSquarePrefixes(bounds) {
+  const prefixes = new Set();
+  const latSamples = 5;
+  const lonSamples = 5;
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+
+  for (let row = 0; row < latSamples; row += 1) {
+    const latRatio = latSamples === 1 ? 0 : row / (latSamples - 1);
+    const lat = south + (north - south) * latRatio;
+    for (let col = 0; col < lonSamples; col += 1) {
+      const lonRatio = lonSamples === 1 ? 0 : col / (lonSamples - 1);
+      const lon = west + (east - west) * lonRatio;
+      const parts = getMgrsComponents(lat, lon);
+      if (parts) {
+        prefixes.add(`${parts.zoneBand}${parts.square}`);
+      }
+    }
+  }
+
+  return [...prefixes].sort();
+}
+
+function mgrsCellBounds(prefix, easting, northing) {
+  try {
+    const cell = `${prefix}${padMgrsCoordinate(easting)}${padMgrsCoordinate(northing)}`;
+    const bounds = window.mgrs.inverse(cell);
+    if (!Array.isArray(bounds) || bounds.length < 4) {
+      return null;
+    }
+    return {
+      west: bounds[0],
+      south: bounds[1],
+      east: bounds[2],
+      north: bounds[3],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildMgrsVerticalLine(prefix, easting) {
+  const southCell = mgrsCellBounds(prefix, Math.min(easting, 99999), 0);
+  const northCell = mgrsCellBounds(prefix, Math.min(easting, 99999), 99999);
+  if (!southCell || !northCell) {
+    return null;
+  }
+  const useEastBoundary = easting >= 100000;
+  const lon = useEastBoundary ? northCell.east : southCell.west;
+  return {
+    points: [
+      [southCell.south, useEastBoundary ? southCell.east : southCell.west],
+      [northCell.north, useEastBoundary ? northCell.east : northCell.west],
+    ],
+    labelLatLng: [southCell.south, lon],
+  };
+}
+
+function buildMgrsHorizontalLine(prefix, northing) {
+  const westCell = mgrsCellBounds(prefix, 0, Math.min(northing, 99999));
+  const eastCell = mgrsCellBounds(prefix, 99999, Math.min(northing, 99999));
+  if (!westCell || !eastCell) {
+    return null;
+  }
+  const useNorthBoundary = northing >= 100000;
+  const lat = useNorthBoundary ? eastCell.north : westCell.south;
+  return {
+    points: [
+      [useNorthBoundary ? westCell.north : westCell.south, westCell.west],
+      [useNorthBoundary ? eastCell.north : eastCell.south, eastCell.east],
+    ],
+    labelLatLng: [lat, westCell.west],
+  };
 }
 
 const CoordinateGridLayer = L.Layer.extend({
@@ -8999,44 +9553,46 @@ const CoordinateGridLayer = L.Layer.extend({
   },
 
   _drawMetricGrid(context, bounds, topLeft) {
-    const center = this._map.getCenter();
     const stepMeters = resolveMetricGridStep(this._map);
-    const latStep = metersToLatitudeDegrees(stepMeters);
-    const lonStep = metersToLongitudeDegrees(stepMeters, center.lat);
-    const south = Math.floor(bounds.getSouth() / latStep) * latStep;
-    const west = Math.floor(bounds.getWest() / lonStep) * lonStep;
+    const prefixes = getMgrsSquarePrefixes(bounds);
+    const verticalKeys = new Set();
+    const horizontalKeys = new Set();
 
-    for (let lat = south; lat <= bounds.getNorth(); lat += latStep) {
-      const start = this._map.latLngToLayerPoint([lat, bounds.getWest()]).subtract(topLeft);
-      const end = this._map.latLngToLayerPoint([lat, bounds.getEast()]).subtract(topLeft);
-      this._drawLine(context, start, end);
-      const label = this._getMgrsLineLabel(lat, center.lng, "northing");
-      if (label) {
-        this._drawLabel(context, label, { x: 8, y: start.y - 4 });
+    prefixes.forEach((prefix) => {
+      for (let easting = 0; easting <= 100000; easting += stepMeters) {
+        const line = buildMgrsVerticalLine(prefix, easting);
+        if (!line) {
+          continue;
+        }
+        const key = `${prefix}:E:${easting}`;
+        if (verticalKeys.has(key)) {
+          continue;
+        }
+        verticalKeys.add(key);
+        const start = this._map.latLngToLayerPoint(line.points[0]).subtract(topLeft);
+        const end = this._map.latLngToLayerPoint(line.points[1]).subtract(topLeft);
+        this._drawLine(context, start, end);
+        const labelPoint = this._map.latLngToLayerPoint(line.labelLatLng).subtract(topLeft);
+        this._drawLabel(context, `${prefix} ${String(Math.floor(easting / 100)).padStart(3, "0")}`, { x: labelPoint.x + 4, y: 14 });
       }
-    }
 
-    for (let lon = west; lon <= bounds.getEast(); lon += lonStep) {
-      const start = this._map.latLngToLayerPoint([bounds.getSouth(), lon]).subtract(topLeft);
-      const end = this._map.latLngToLayerPoint([bounds.getNorth(), lon]).subtract(topLeft);
-      this._drawLine(context, start, end);
-      const label = this._getMgrsLineLabel(center.lat, lon, "easting");
-      if (label) {
-        this._drawLabel(context, label, { x: start.x + 4, y: 14 });
+      for (let northing = 0; northing <= 100000; northing += stepMeters) {
+        const line = buildMgrsHorizontalLine(prefix, northing);
+        if (!line) {
+          continue;
+        }
+        const key = `${prefix}:N:${northing}`;
+        if (horizontalKeys.has(key)) {
+          continue;
+        }
+        horizontalKeys.add(key);
+        const start = this._map.latLngToLayerPoint(line.points[0]).subtract(topLeft);
+        const end = this._map.latLngToLayerPoint(line.points[1]).subtract(topLeft);
+        this._drawLine(context, start, end);
+        const labelPoint = this._map.latLngToLayerPoint(line.labelLatLng).subtract(topLeft);
+        this._drawLabel(context, `${prefix} ${String(Math.floor(northing / 100)).padStart(3, "0")}`, { x: 8, y: labelPoint.y - 4 });
       }
-    }
-  },
-
-  _getMgrsLineLabel(lat, lon, axis) {
-    const parts = getMgrsComponents(lat, lon);
-    if (!parts) {
-      return "";
-    }
-
-    const prefix = `${parts.zoneBand}${parts.square}`;
-    return axis === "easting"
-      ? `${prefix} ${parts.easting.slice(0, 3)}`
-      : `${prefix} ${parts.northing.slice(0, 3)}`;
+    });
   },
 
   _drawLabel(context, text, point) {
