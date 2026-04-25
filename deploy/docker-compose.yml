@@ -28,6 +28,7 @@ services:
       NODE_ENV: production
       APP_ORIGIN: ${APP_ORIGIN}
       JWT_SECRET: ${JWT_SECRET}
+      DATABASE_SSL: ${DATABASE_SSL}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:

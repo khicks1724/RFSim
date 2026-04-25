@@ -13,7 +13,8 @@ const config = {
   appOrigin: requireEnv("APP_ORIGIN", "http://localhost:8080"),
   jwtSecret: requireEnv("JWT_SECRET", "dev-only-change-me"),
   databaseUrl: requireEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/ew_sim"),
-  nodeEnv: requireEnv("NODE_ENV", "development")
+  nodeEnv: requireEnv("NODE_ENV", "development"),
+  databaseSsl: requireEnv("DATABASE_SSL", "false").toLowerCase() === "true"
 };
 
 module.exports = { config };
