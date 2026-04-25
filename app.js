@@ -1954,17 +1954,6 @@ function getTopBarDropdownConfigs() {
 }
 
 function initTopBarDropdowns() {
-  if (!dom.topBarDropdownLayer) {
-    return;
-  }
-
-  getTopBarDropdownConfigs().forEach(({ menu }) => {
-    if (!menu) {
-      return;
-    }
-    dom.topBarDropdownLayer.appendChild(menu);
-  });
-
   window.addEventListener("resize", positionOpenTopBarDropdowns);
 }
 
