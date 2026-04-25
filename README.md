@@ -78,6 +78,28 @@ Then open:
 http://localhost:8080
 ```
 
+## Hosted Multi-User Deployment
+
+This repo now includes a production-oriented backend scaffold under `backend/` for moving beyond browser-only local storage.
+
+That hosted path is intended to support:
+
+- user accounts
+- multiple saved projects per user
+- server-backed project persistence in PostgreSQL
+- HTTPS deployment behind AWS ALB + ACM
+- EC2-hosted frontend and API services with nginx in front
+
+Key deployment files:
+
+- `backend/`: Express + PostgreSQL API for auth and project storage
+- `backend/sql/001_initial_schema.sql`: initial user/project schema
+- `deploy/docker-compose.yml`: small-team deployment stack for EC2
+- `deploy/nginx/default.conf`: nginx config for frontend hosting and API proxying
+- `docs/aws-ec2-production.md`: AWS resource and deployment guide
+
+If your goal is a real shared site for 10 to 20 users, this is the recommended path instead of deploying the browser-local app unchanged.
+
 ## Optional AI Proxy For GenAI.mil
 
 The main site does not require a backend, but `genai-proxy.js` is included as an optional local helper for GenAI.mil when direct browser access is blocked by network or CORS behavior.
@@ -103,8 +125,12 @@ Key files in this repo:
 - `index.html`: the application shell, panel layout, menus, forms, and modal/popup DOM
 - `styles.css`: all layout, theme, panel, top-bar, dropdown, and map UI styling
 - `app.js`: the main application controller for Leaflet, Cesium, UI state, imports/exports, AI, GPS, terrain sampling, and scenario persistence
+- `app-config.js`: frontend runtime config boundary for hosted API targeting
+- `backend/`: backend API for auth, multi-project persistence, and future provider proxying
 - `simulation-worker.js`: the worker that performs simulation, inspection, terrain-backed scoring, and planning calculations off the main UI thread
 - `genai-proxy.js`: optional local proxy for GenAI.mil requests
+- `deploy/`: container and nginx assets for EC2 deployment
+- `docs/`: deployment and production notes
 - `images/`: README support images, including the Cesium token walkthrough assets
 
 ## Architecture At A Glance

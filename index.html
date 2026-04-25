@@ -266,6 +266,64 @@
     <div class="workspace-shell">
       <aside id="controlPanel" class="control-panel">
         <div class="control-panel-top">
+          <section id="workspaceCard" class="card workspace-card">
+            <div class="section-title-row">
+              <h2>Workspace</h2>
+              <div class="button-row">
+                <button id="workspaceSignOutBtn" class="ghost-button small hidden" type="button">Sign Out</button>
+              </div>
+            </div>
+            <div id="workspaceAuthGuest" class="workspace-auth-block">
+              <div id="workspaceStatus" class="weather-summary workspace-summary">Sign in to save projects to the server. Local browser save remains available until then.</div>
+              <div class="two-column workspace-auth-grid">
+                <label class="span-2">
+                  Full Name
+                  <input id="workspaceFullName" type="text" placeholder="Required for new accounts">
+                </label>
+                <label class="span-2">
+                  Email
+                  <input id="workspaceEmail" type="email" placeholder="name@example.com">
+                </label>
+                <label class="span-2">
+                  Password
+                  <input id="workspacePassword" type="password" placeholder="Minimum 12 characters">
+                </label>
+              </div>
+              <div class="button-row compact-button-row workspace-auth-actions">
+                <button id="workspaceLoginBtn" class="primary-button small" type="button">Sign In</button>
+                <button id="workspaceRegisterBtn" class="ghost-button small" type="button">Create Account</button>
+              </div>
+            </div>
+            <div id="workspaceAuthMember" class="workspace-auth-block hidden">
+              <div class="workspace-member-header">
+                <div>
+                  <div class="eyebrow">Signed In</div>
+                  <strong id="workspaceUserLabel">Unknown User</strong>
+                </div>
+                <div class="workspace-pill" id="workspaceProjectMode">Local</div>
+              </div>
+              <div class="two-column workspace-project-grid">
+                <label class="span-2">
+                  Active Project
+                  <select id="workspaceProjectSelect">
+                    <option value="">Local Browser State</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Project Name
+                  <input id="workspaceProjectName" type="text" placeholder="New project name">
+                </label>
+              </div>
+              <div class="button-row compact-button-row workspace-project-actions">
+                <button id="workspaceProjectCreateBtn" class="primary-button small" type="button">New Project</button>
+                <button id="workspaceProjectSaveBtn" class="ghost-button small" type="button">Save Now</button>
+                <button id="workspaceProjectReloadBtn" class="ghost-button small" type="button">Reload</button>
+                <button id="workspaceProjectSnapshotBtn" class="ghost-button small" type="button">Snapshot</button>
+              </div>
+              <div id="workspaceProjectStatus" class="weather-summary workspace-summary">Projects load after sign-in. Selecting a project reloads the page into that project.</div>
+            </div>
+          </section>
+
           <section id="mapContentsCard" class="card map-contents-card">
             <div class="section-title-row">
               <h2>Map Contents</h2>
@@ -1069,6 +1127,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
+  <script src="./app-config.js"></script>
   <script type="module" src="./app.js?v=20260424-14"></script>
 </body>
 </html>

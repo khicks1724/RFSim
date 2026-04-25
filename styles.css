@@ -469,6 +469,51 @@ body.panel-collapsed .control-panel {
   padding-bottom: 14px;
 }
 
+.workspace-card {
+  margin-bottom: 12px;
+}
+
+.workspace-auth-block {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-auth-grid,
+.workspace-project-grid {
+  gap: 10px;
+}
+
+.workspace-summary {
+  margin-top: 0;
+}
+
+.workspace-auth-actions,
+.workspace-project-actions {
+  justify-content: flex-start;
+}
+
+.workspace-member-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-member-header strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.workspace-pill {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card-alt);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .control-panel-bottom {
   flex: 1 1 auto;
   min-height: 180px;

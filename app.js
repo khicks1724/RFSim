@@ -423,6 +423,9 @@ const CESIUM_ION_TOKEN_STORAGE_KEY = "ew-sim-cesium-ion-token";
 const AI_PROVIDER_STORAGE_KEY = "ew-sim-ai-provider";
 const MAP_STATE_STORAGE_KEY = "ew-sim-map-state";
 const MAP_STATE_STORAGE_KEY_LEGACY = null; // no prior keys to migrate
+const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
+const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
+const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
 const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
 const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
 const GENAI_MIL_MODEL = "gemini-2.5-flash";
@@ -444,6 +447,25 @@ const dom = {
   weatherMenu: document.querySelector("#weatherMenu"),
   weatherMenuValue: document.querySelector("#weatherMenuValue"),
   topBarDropdownLayer: document.querySelector("#topBarDropdownLayer"),
+  workspaceCard: document.querySelector("#workspaceCard"),
+  workspaceStatus: document.querySelector("#workspaceStatus"),
+  workspaceAuthGuest: document.querySelector("#workspaceAuthGuest"),
+  workspaceAuthMember: document.querySelector("#workspaceAuthMember"),
+  workspaceFullName: document.querySelector("#workspaceFullName"),
+  workspaceEmail: document.querySelector("#workspaceEmail"),
+  workspacePassword: document.querySelector("#workspacePassword"),
+  workspaceLoginBtn: document.querySelector("#workspaceLoginBtn"),
+  workspaceRegisterBtn: document.querySelector("#workspaceRegisterBtn"),
+  workspaceSignOutBtn: document.querySelector("#workspaceSignOutBtn"),
+  workspaceUserLabel: document.querySelector("#workspaceUserLabel"),
+  workspaceProjectMode: document.querySelector("#workspaceProjectMode"),
+  workspaceProjectSelect: document.querySelector("#workspaceProjectSelect"),
+  workspaceProjectName: document.querySelector("#workspaceProjectName"),
+  workspaceProjectCreateBtn: document.querySelector("#workspaceProjectCreateBtn"),
+  workspaceProjectSaveBtn: document.querySelector("#workspaceProjectSaveBtn"),
+  workspaceProjectReloadBtn: document.querySelector("#workspaceProjectReloadBtn"),
+  workspaceProjectSnapshotBtn: document.querySelector("#workspaceProjectSnapshotBtn"),
+  workspaceProjectStatus: document.querySelector("#workspaceProjectStatus"),
   aiMenuBtn: null,
   aiMenu: null,
   aiMenuValue: null,
@@ -683,6 +705,14 @@ const state = {
     aiResizeActive: false,
     aiPanelWidth: 400,
   },
+  session: {
+    token: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
+    activeProjectId: window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY),
+    user: null,
+    projects: [],
+    autosaveTimerId: null,
+    autosavePending: false,
+  },
   ai: {
     provider: "",
     apiKey: "",
@@ -697,6 +727,258 @@ const state = {
     requestInFlight: false,
   },
 };
+
+async function apiFetch(path, options = {}) {
+  const headers = new Headers(options.headers ?? {});
+  headers.set("Content-Type", headers.get("Content-Type") ?? "application/json");
+  if (state.session.token) {
+    headers.set("Authorization", `Bearer ${state.session.token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error ?? payload.message ?? `API request failed (${response.status}).`);
+  }
+
+  return payload;
+}
+
+function persistSessionStorage() {
+  if (state.session.token) {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, state.session.token);
+  } else {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  }
+
+  if (state.session.activeProjectId) {
+    window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, state.session.activeProjectId);
+  } else {
+    window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+  }
+}
+
+function clearSessionState() {
+  if (state.session.autosaveTimerId) {
+    window.clearTimeout(state.session.autosaveTimerId);
+  }
+  state.session.token = null;
+  state.session.user = null;
+  state.session.projects = [];
+  state.session.activeProjectId = null;
+  state.session.autosaveTimerId = null;
+  state.session.autosavePending = false;
+  persistSessionStorage();
+}
+
+async function hydrateSession() {
+  if (!state.session.token) {
+    syncWorkspaceUi();
+    return;
+  }
+
+  try {
+    const payload = await apiFetch("/auth/me");
+    state.session.user = payload.user;
+    await loadProjectList();
+  } catch (error) {
+    clearSessionState();
+    setStatus(`Session reset: ${error.message}`, true);
+  }
+  syncWorkspaceUi();
+}
+
+async function loadProjectList() {
+  if (!state.session.token) {
+    state.session.projects = [];
+    syncWorkspaceUi();
+    return;
+  }
+  const payload = await apiFetch("/projects");
+  state.session.projects = payload.projects ?? [];
+  syncWorkspaceUi();
+}
+
+function syncWorkspaceUi() {
+  if (!dom.workspaceCard) {
+    return;
+  }
+
+  const signedIn = Boolean(state.session.token && state.session.user);
+  dom.workspaceAuthGuest.classList.toggle("hidden", signedIn);
+  dom.workspaceAuthMember.classList.toggle("hidden", !signedIn);
+  dom.workspaceSignOutBtn.classList.toggle("hidden", !signedIn);
+
+  if (!signedIn) {
+    dom.workspaceStatus.textContent = "Sign in to save projects to the server. Local browser save remains available until then.";
+    return;
+  }
+
+  dom.workspaceUserLabel.textContent = state.session.user.fullName || state.session.user.email;
+  dom.workspaceProjectMode.textContent = state.session.activeProjectId ? "Server" : "Local";
+  dom.workspaceProjectStatus.textContent = state.session.activeProjectId
+    ? state.session.autosavePending
+      ? "Autosave queued for the selected server project."
+      : "Autosave is active for the selected server project."
+    : "No server project selected. The app is still using browser-local storage.";
+
+  dom.workspaceProjectSelect.innerHTML = "";
+  const localOption = document.createElement("option");
+  localOption.value = "";
+  localOption.textContent = "Local Browser State";
+  dom.workspaceProjectSelect.appendChild(localOption);
+  state.session.projects.forEach((project) => {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = project.name;
+    dom.workspaceProjectSelect.appendChild(option);
+  });
+  dom.workspaceProjectSelect.value = state.session.activeProjectId ?? "";
+}
+
+async function onWorkspaceLogin() {
+  const email = dom.workspaceEmail.value.trim();
+  const password = dom.workspacePassword.value;
+  if (!email || !password) {
+    setStatus("Enter email and password.", true);
+    return;
+  }
+
+  const payload = await apiFetch("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  state.session.token = payload.token;
+  state.session.user = payload.user;
+  persistSessionStorage();
+  await loadProjectList();
+  setStatus(`Signed in as ${payload.user.email}.`);
+}
+
+async function onWorkspaceRegister() {
+  const fullName = dom.workspaceFullName.value.trim();
+  const email = dom.workspaceEmail.value.trim();
+  const password = dom.workspacePassword.value;
+  if (!fullName || !email || !password) {
+    setStatus("Enter full name, email, and password to create an account.", true);
+    return;
+  }
+
+  const payload = await apiFetch("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ fullName, email, password }),
+  });
+  state.session.token = payload.token;
+  state.session.user = payload.user;
+  persistSessionStorage();
+  await loadProjectList();
+  setStatus(`Account created for ${payload.user.email}.`);
+}
+
+function onWorkspaceSignOut() {
+  clearSessionState();
+  syncWorkspaceUi();
+  setStatus("Signed out. Local browser save remains available.");
+}
+
+async function onWorkspaceProjectCreate() {
+  if (!state.session.token) {
+    setStatus("Sign in first to create a server project.", true);
+    return;
+  }
+
+  const name = dom.workspaceProjectName.value.trim();
+  if (!name) {
+    setStatus("Enter a project name.", true);
+    return;
+  }
+
+  const payload = await apiFetch("/projects", {
+    method: "POST",
+    body: JSON.stringify({ name, description: "", state: serializeCurrentMapState() }),
+  });
+  state.session.activeProjectId = payload.project.id;
+  persistSessionStorage();
+  await loadProjectList();
+  setStatus(`Created project ${payload.project.name}. Reloading into server-backed project.`);
+  window.location.reload();
+}
+
+async function onWorkspaceProjectSelectChanged() {
+  state.session.activeProjectId = dom.workspaceProjectSelect.value || null;
+  persistSessionStorage();
+  setStatus(state.session.activeProjectId ? "Project selected. Reloading project state..." : "Returned to local browser state.");
+  window.location.reload();
+}
+
+async function saveActiveProjectNow({ silent = false } = {}) {
+  if (!state.session.token || !state.session.activeProjectId) {
+    return false;
+  }
+
+  await apiFetch(`/projects/${state.session.activeProjectId}`, {
+    method: "PUT",
+    body: JSON.stringify({ state: serializeCurrentMapState() }),
+  });
+  state.session.autosavePending = false;
+  syncWorkspaceUi();
+  if (!silent) {
+    setStatus("Project saved to server.");
+  }
+  return true;
+}
+
+function queueActiveProjectAutosave() {
+  if (!state.session.token || !state.session.activeProjectId) {
+    return;
+  }
+  state.session.autosavePending = true;
+  syncWorkspaceUi();
+  if (state.session.autosaveTimerId) {
+    window.clearTimeout(state.session.autosaveTimerId);
+  }
+  state.session.autosaveTimerId = window.setTimeout(async () => {
+    state.session.autosaveTimerId = null;
+    try {
+      await saveActiveProjectNow({ silent: true });
+    } catch (error) {
+      setStatus(`Autosave failed: ${error.message}`, true);
+    }
+  }, 900);
+}
+
+function onWorkspaceProjectReload() {
+  if (!state.session.activeProjectId) {
+    setStatus("Select a server project first.", true);
+    return;
+  }
+  setStatus("Reloading active project.");
+  window.location.reload();
+}
+
+async function onWorkspaceProjectSnapshot() {
+  if (!state.session.activeProjectId) {
+    setStatus("Select a server project first.", true);
+    return;
+  }
+  const label = window.prompt("Snapshot label:", `Snapshot ${new Date().toLocaleString()}`)?.trim();
+  if (!label) {
+    return;
+  }
+  await apiFetch(`/projects/${state.session.activeProjectId}/snapshots`, {
+    method: "POST",
+    body: JSON.stringify({ label, state: serializeCurrentMapState() }),
+  });
+  setStatus(`Created snapshot ${label}.`);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EMITTER MODAL
@@ -1138,11 +1420,12 @@ function initRangeInputs() {
   });
 }
 
-function init() {
+async function init() {
   initMap();
   initTopBarDropdowns();
   initRangeInputs();
   initEmitterModal();
+  await hydrateSession();
   loadCesiumIonToken();
   loadAiProviderSettings();
   loadSettings();
@@ -1150,7 +1433,7 @@ function init() {
   applyBasemap(dom.basemapSelect.value);
   updateImageryMenuValue();
   wireEvents();
-  loadMapState();
+  await loadMapState();
   renderAssets();
   renderTerrains();
   renderViewsheds();
@@ -1296,6 +1579,14 @@ function wireEvents() {
   dom.gpsMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.settingsMenuBtn.addEventListener("click", toggleSettingsMenu);
   dom.settingsMenu.addEventListener("click", (event) => event.stopPropagation());
+  dom.workspaceLoginBtn?.addEventListener("click", () => onWorkspaceLogin().catch((error) => setStatus(error.message, true)));
+  dom.workspaceRegisterBtn?.addEventListener("click", () => onWorkspaceRegister().catch((error) => setStatus(error.message, true)));
+  dom.workspaceSignOutBtn?.addEventListener("click", onWorkspaceSignOut);
+  dom.workspaceProjectCreateBtn?.addEventListener("click", () => onWorkspaceProjectCreate().catch((error) => setStatus(error.message, true)));
+  dom.workspaceProjectSelect?.addEventListener("change", () => onWorkspaceProjectSelectChanged().catch((error) => setStatus(error.message, true)));
+  dom.workspaceProjectSaveBtn?.addEventListener("click", () => saveActiveProjectNow().catch((error) => setStatus(error.message, true)));
+  dom.workspaceProjectReloadBtn?.addEventListener("click", onWorkspaceProjectReload);
+  dom.workspaceProjectSnapshotBtn?.addEventListener("click", () => onWorkspaceProjectSnapshot().catch((error) => setStatus(error.message, true)));
   document.addEventListener("click", closeTopBarMenus);
   document.addEventListener("click", closeMapContentsMenu);
   document.addEventListener("click", closeRenamePopover);
@@ -1448,7 +1739,7 @@ function persistSettings() {
   window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
 }
 
-function saveMapState() {
+function serializeCurrentMapState() {
   const center = state.map.getCenter();
   const serializedImported = state.importedItems.map((item) => {
     let coordinates;
@@ -1475,9 +1766,12 @@ function saveMapState() {
     };
   });
 
-  const payload = {
+  return {
     mapView: { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() },
     assets: state.assets,
+    profiles: state.profiles,
+    weather: state.weather,
+    settings: state.settings,
     importedItems: serializedImported,
     mapContentFolders: state.mapContentFolders,
     mapContentOrder: state.mapContentOrder,
@@ -1485,23 +1779,21 @@ function saveMapState() {
     hiddenContentIds: [...state.hiddenContentIds],
     activeTerrainId: state.activeTerrainId,
   };
+}
+
+function saveMapState() {
+  const payload = serializeCurrentMapState();
   try {
     window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // localStorage quota exceeded — fail silently
   }
+
+  queueActiveProjectAutosave();
 }
 
-function loadMapState() {
-  const stored = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
-  if (!stored) return;
-  let saved;
-  try {
-    saved = JSON.parse(stored);
-  } catch {
-    window.localStorage.removeItem(MAP_STATE_STORAGE_KEY);
-    return;
-  }
+function applySavedMapState(saved) {
+  if (!saved) return;
 
   // Restore map view
   if (saved.mapView) {
@@ -1522,6 +1814,15 @@ function loadMapState() {
   }
   if (Array.isArray(saved.hiddenContentIds)) {
     state.hiddenContentIds = new Set(saved.hiddenContentIds);
+  }
+  if (Array.isArray(saved.profiles)) {
+    state.profiles = saved.profiles;
+  }
+  if (saved.weather) {
+    state.weather = { ...state.weather, ...saved.weather };
+  }
+  if (saved.settings) {
+    state.settings = { ...state.settings, ...saved.settings };
   }
 
   // Restore assets
@@ -1597,6 +1898,29 @@ function loadMapState() {
 
   // Apply hidden visibility after all layers are added
   state.hiddenContentIds.forEach((contentId) => setContentLayerVisible(contentId, false));
+}
+
+async function loadMapState() {
+  if (state.session.token && state.session.activeProjectId) {
+    try {
+      const payload = await apiFetch(`/projects/${state.session.activeProjectId}`);
+      applySavedMapState(payload.project?.latest_state_json ?? null);
+      return;
+    } catch (error) {
+      setStatus(`Server project load failed, falling back to browser state: ${error.message}`, true);
+    }
+  }
+
+  const stored = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
+  if (!stored) return;
+  let saved;
+  try {
+    saved = JSON.parse(stored);
+  } catch {
+    window.localStorage.removeItem(MAP_STATE_STORAGE_KEY);
+    return;
+  }
+  applySavedMapState(saved);
 }
 
 function toggleSettingsMenu(event) {
@@ -8692,4 +9016,7 @@ const CanvasViewshedLayer = L.Layer.extend({
   },
 });
 
-init();
+init().catch((error) => {
+  console.error(error);
+  setStatus(`Startup failed: ${error.message}`, true);
+});
