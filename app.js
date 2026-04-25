@@ -1393,8 +1393,7 @@ const emitterModal = {
     const profileName = prompt("Save profile as:", data.name || "Custom Profile");
     if (!profileName) return;
     const profile = {
-      id: crypto.randomUUID(),
-        id: generateId(),
+      id: generateId(),
       profileName,
       type: data.type,
       force: data.force,
@@ -2182,10 +2181,7 @@ function updateMapOverlayMetrics() {
     return;
   }
 
-  const requestId = crypto.randomUUID();
-    const requestId = generateId();
-    id: generateId(),
-    id: generateId(),
+  const requestId = generateId();
   state.centerElevationRequestId = requestId;
   dom.centerElevationValue.textContent = "Loading terrain...";
   sampleTerrainElevationAsync(center.lat, center.lng)
@@ -4254,7 +4250,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     // Build asset directly — do NOT route through the shared emitter form so we
     // don't accidentally inherit stale form state or overwrite it for subsequent placements.
     const newAsset = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       type: emitterData.type ?? "radio",
       force: emitterData.force ?? "friendly",
       name: emitterData.name ?? "Asset",
@@ -4730,7 +4726,7 @@ function addAsset(latlng) {
   const formData = state.pendingEmitterData ?? getEmitterFormData();
   state.pendingEmitterData = null;
   const asset = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     ...formData,
     lat: latlng.lat,
     lon: latlng.lng,
@@ -5245,8 +5241,7 @@ async function onTerrainImport(event) {
   try {
     const buffer = await file.arrayBuffer();
     const terrain = parseDted(buffer, file.name);
-    terrain.id = crypto.randomUUID();
-      terrain.id = generateId();
+    terrain.id = generateId();
     terrain.name = file.name;
     terrain.extentVisible = false;
 
@@ -5320,9 +5315,7 @@ async function runSimulation() {
     state.worker.postMessage({
       type: "simulation:start",
       payload: {
-        requestId: state.editingViewshedId ?? crypto.randomUUID(),
-          requestId: state.editingViewshedId ?? generateId(),
-          id: generateId(),
+        requestId: state.editingViewshedId ?? generateId(),
         asset: selected,
         weather: state.weather,
         terrainId,
@@ -5500,7 +5493,7 @@ function loadProfiles() {
   } else {
     state.profiles = [
       {
-        id: crypto.randomUUID(),
+        id: generateId(),
         profileName: "Standard VHF",
         type: "radio",
         force: "friendly",
@@ -5564,8 +5557,7 @@ function saveProfile() {
 
   const existing = state.profiles.find((entry) => entry.id === dom.profileSelect.value);
   const payload = {
-    ...(existing ?? { id: crypto.randomUUID() }),
-      ...(existing ?? { id: generateId() }),
+    ...(existing ?? { id: generateId() }),
     profileName: name,
     ...getEmitterFormData(),
   };
@@ -5931,12 +5923,7 @@ async function runPlanning() {
   try {
     const terrainId = await resolveTerrainIdForPlanning(polygon, Number(dom.planningGridMeters.value));
 
-    state.pendingPlanningRequestId = crypto.randomUUID();
-      state.pendingPlanningRequestId = generateId();
-      id: generateId(),
-      id: generateId(),
-      id: generateId(),
-      id: generateId(),
+    state.pendingPlanningRequestId = generateId();
     setStatus("Evaluating candidate placements...");
     state.worker.postMessage({
       type: "planning:start",
@@ -7042,7 +7029,7 @@ function editMapContent(contentId) {
 
 function addMapContentFolder() {
   const folder = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     name: `Folder ${state.mapContentFolders.length + 1}`,
     collapsed: false,
   };
@@ -7363,7 +7350,7 @@ function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
 
 function addDrawnFeature(feature, folderId = null) {
   const item = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     name: feature.name,
     subtitle: `Drawn | ${feature.geometryType}`,
     kind: `imported-${feature.geometryType.toLowerCase()}`,
@@ -7641,7 +7628,7 @@ function createMapContentFolderFromName(name) {
   }
 
   const folder = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     name,
   };
   state.mapContentFolders.push(folder);
@@ -7651,7 +7638,7 @@ function createMapContentFolderFromName(name) {
 
 function addImportedFeature(feature, folderId, index) {
   const item = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     name: feature.name || `${feature.geometryType} ${index + 1}`,
     subtitle: `${feature.sourceLabel} | ${feature.geometryType}`,
     kind: `imported-${feature.geometryType.toLowerCase()}`,
