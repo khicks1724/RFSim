@@ -528,6 +528,7 @@ const dom = {
   gpsMenu: document.querySelector("#gpsMenu"),
   settingsMenuBtn: document.querySelector("#settingsMenuBtn"),
   settingsMenu: document.querySelector("#settingsMenu"),
+  settingsModalDialog: document.querySelector("#settingsMenu .settings-modal"),
   settingsMenuCloseBtn: document.querySelector("#settingsMenuCloseBtn"),
   measurementUnitsSelect: document.querySelector("#measurementUnitsSelect"),
   themeSelect: document.querySelector("#themeSelect"),
@@ -1941,6 +1942,7 @@ function wireEvents() {
     }
     event.stopPropagation();
   });
+  dom.settingsModalDialog?.addEventListener("click", (event) => event.stopPropagation());
   dom.settingsMenuCloseBtn?.addEventListener("click", closeSettingsMenu);
   dom.workspaceLoginBtn?.addEventListener("click", () => onWorkspaceLogin().catch((error) => setStatus(error.message, true)));
   dom.workspaceRegisterBtn?.addEventListener("click", () => onWorkspaceRegister().catch((error) => setStatus(error.message, true)));
@@ -2455,7 +2457,6 @@ function closeGpsMenu() {
 
 function closeTopBarMenus() {
   closeWorkspaceMenu();
-  closeSettingsMenu();
   closeImageryMenu();
   closeTerrainMenu();
   closeWeatherMenu();
