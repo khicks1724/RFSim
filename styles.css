@@ -1220,14 +1220,12 @@ h2 {
 }
 
 .export-dropdown {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
+  position: fixed;
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow);
-  z-index: 999;
-  min-width: 110px;
+  z-index: 2000;
+  min-width: 130px;
   display: flex;
   flex-direction: column;
 }
@@ -1289,6 +1287,79 @@ h2 {
 
 .shape-style-row input[type="range"] {
   flex: 1;
+}
+
+/* ── Range sliders ─────────────────────────────────────────────────────────── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  /* --range-pct is set by JS; fallback 50% */
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--range-pct, 50%),
+    var(--border-strong) var(--range-pct, 50%),
+    var(--border-strong) 100%
+  );
+  transition: background 0.05s;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  border: 2px solid var(--bg-base);
+  box-shadow: 0 0 0 1px var(--accent);
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  border: 2px solid var(--bg-base);
+  box-shadow: 0 0 0 1px var(--accent);
+  cursor: pointer;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 3px rgba(143, 183, 255, 0.25);
+}
+
+input[type="range"]:hover::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgba(143, 183, 255, 0.25);
+}
+
+input[type="range"]:focus-visible {
+  outline: none;
+}
+
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(143, 183, 255, 0.35);
+}
+
+/* Firefox track */
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px 0 0 2px;
+  background: var(--accent);
 }
 
 .shape-style-row select {
@@ -1480,11 +1551,33 @@ button:focus {
   font-size: 0.78rem;
 }
 
-.map-content-kind {
+.map-content-type-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
   color: var(--muted);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin-top: 1px;
+}
+
+.map-content-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.map-content-collapse-btn:hover {
+  color: var(--fg);
 }
 
 .map-content-focus-button {
@@ -1754,39 +1847,47 @@ button:focus {
   pointer-events: none;
 }
 
+.emitter-divicon-wrapper {
+  background: none !important;
+  border: none !important;
+}
+
 .emitter-marker {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: 2px solid rgba(255, 255, 255, 0.92);
   border-radius: 999px;
-  color: #ffffff;
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
 }
 
+.emitter-marker svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3));
+}
+
+/* Jammer — diamond shape */
 .emitter-marker.jammer {
-  border-radius: 6px;
-}
-
-.emitter-marker.relay {
+  border-radius: 4px;
   transform: rotate(45deg);
 }
-
-.emitter-marker.relay span {
+.emitter-marker.jammer svg {
   transform: rotate(-45deg);
 }
 
-.emitter-marker.receiver {
-  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
-  border-radius: 0;
+/* Tower — square with notched corners */
+.emitter-marker.tower {
+  border-radius: 6px;
 }
 
-.emitter-marker.receiver span {
-  transform: translateY(2px);
+/* Sensor — slightly larger inner icon */
+.emitter-marker.sensor svg {
+  width: 13px;
+  height: 13px;
 }
 
 .leaflet-draw-toolbar a {

@@ -1,9 +1,9 @@
 const FORCE_COLORS = {
-  friendly: "#7ec8e3",
-  enemy: "#f28b82",
-  "host-nation": "#81c995",
-  civilian: "#ffffff",
-  other: "#aaaaaa",
+  friendly: "#a8d8ea",
+  enemy: "#f4a8a0",
+  "host-nation": "#a8dbb5",
+  civilian: "#e8e8e8",
+  other: "#c0c0c0",
 };
 
 const FORCE_LABELS = {
@@ -757,6 +757,13 @@ const emitterModal = {
     // Derived dBm display
     this.fields.emPowerW?.addEventListener("input", () => this.updateDerivedFields());
 
+    // Auto-update marker color when force affiliation changes
+    this.fields.emForce?.addEventListener("change", () => {
+      if (this.fields.emColor) {
+        this.fields.emColor.value = FORCE_COLORS[this.fields.emForce.value] ?? FORCE_COLORS.friendly;
+      }
+    });
+
     // Close buttons
     document.querySelector("#emitterModalCloseBtn")?.addEventListener("click", () => this.close());
     document.querySelector("#emitterCancelBtn")?.addEventListener("click", () => this.close());
@@ -776,11 +783,17 @@ const emitterModal = {
     this.backdrop.classList.remove("hidden");
     document.body.classList.add("emitter-modal-open");
     this.switchTab("rf");
-    if (prefill) {
+    const isEditing = prefill && prefill.lat !== undefined;
+    if (isEditing) {
+      this.resetToDefaults();
+      this.applyAsset(prefill);
+    } else if (prefill) {
       this.applyProfile(prefill);
     } else {
       this.resetToDefaults();
     }
+    const placeBtn = document.querySelector("#emitterPlaceBtn");
+    if (placeBtn) placeBtn.textContent = isEditing ? "Save Changes" : "Place on Map";
     this.updateDerivedFields();
     this.updateLinkBudget();
     this.fields.emName?.focus();
@@ -790,6 +803,9 @@ const emitterModal = {
     this.backdrop.classList.add("hidden");
     document.body.classList.remove("emitter-modal-open");
     document.querySelector("#emitterValidation").textContent = "";
+    const placeBtn = document.querySelector("#emitterPlaceBtn");
+    if (placeBtn) placeBtn.textContent = "Place on Map";
+    state.editingAssetId = null;
   },
 
   switchTab(name) {
@@ -890,6 +906,26 @@ const emitterModal = {
     this.validateInputs();
   },
 
+  applyAsset(asset) {
+    const f = this.fields;
+    const set = (id, val) => { if (f[id] && val !== undefined && val !== null) f[id].value = val; };
+    set("emName",          asset.name);
+    set("emUnit",          asset.unit);
+    set("emForce",         asset.force);
+    set("emColor",         asset.color ?? FORCE_COLORS[asset.force] ?? FORCE_COLORS.friendly);
+    set("emIcon",          asset.icon);
+    set("emNotes",         asset.notes);
+    set("emFreqMHz",       asset.frequencyMHz);
+    set("emPowerW",        asset.powerW);
+    set("emAntennaGainDbi",asset.antennaGainDbi);
+    set("emAntennaHeightM",asset.antennaHeightM);
+    set("emRxSensDbm",     asset.receiverSensitivityDbm);
+    set("emSystemLossDb",  asset.systemLossDb);
+    this.updateDerivedFields();
+    this.updateLinkBudget();
+    this.validateInputs();
+  },
+
   resetToDefaults() {
     this.radioTypeSelect.value = "";
     this.programSelect.disabled = true;
@@ -905,6 +941,7 @@ const emitterModal = {
     this.fields.emSystemLossDb && (this.fields.emSystemLossDb.value = "3");
     this.fields.emName && (this.fields.emName.value = "");
     this.fields.emForce && (this.fields.emForce.value = "friendly");
+    this.fields.emColor && (this.fields.emColor.value = FORCE_COLORS.friendly);
   },
 
   updateDerivedFields() {
@@ -981,13 +1018,14 @@ const emitterModal = {
     const emitterLabel = this.radioTypeSelect.value
       ? (RADIO_LIBRARY[this.radioTypeSelect.value]?.label ?? "radio")
       : "radio";
+    const iconVal = v("emIcon") || "radio";
     return {
-      type: "radio",
+      type: EMITTER_ICONS[iconVal] ? iconVal : "radio",
       emitterLabel,
       force: v("emForce") || "friendly",
       name: v("emName") || "Emitter",
       unit: v("emUnit") || "",
-      icon: v("emIcon") || "radio",
+      icon: iconVal,
       color: v("emColor") || FORCE_COLORS["friendly"],
       notes: v("emNotes") || "",
       frequencyMHz: n("emFreqMHz") || 150,
@@ -1024,7 +1062,27 @@ const emitterModal = {
       this.fields.emName?.focus();
       return;
     }
-    // Stash the modal data directly — bypass the hidden-form roundtrip
+
+    // If editing an existing asset, save edits directly
+    if (state.editingAssetId) {
+      const asset = state.assets.find((a) => a.id === state.editingAssetId);
+      if (asset) {
+        Object.assign(asset, data);
+        asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+        updateAssetMarker(asset);
+        renderAssets();
+        renderMapContents();
+        syncCesiumEntities();
+        saveMapState();
+        setStatus(`Updated ${asset.name}.`);
+      }
+      state.editingAssetId = null;
+      refreshActionButtons();
+      this.close();
+      return;
+    }
+
+    // New placement
     state.pendingEmitterData = data;
     this.close();
     state.placingAsset = true;
@@ -1065,9 +1123,25 @@ function initEmitterModal() {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 
+function updateRangeTrack(input) {
+  const min = parseFloat(input.min) || 0;
+  const max = parseFloat(input.max) || 100;
+  const val = parseFloat(input.value) || 0;
+  const pct = ((val - min) / (max - min)) * 100;
+  input.style.setProperty("--range-pct", `${pct.toFixed(1)}%`);
+}
+
+function initRangeInputs() {
+  document.querySelectorAll("input[type='range']").forEach((input) => {
+    updateRangeTrack(input);
+    input.addEventListener("input", () => updateRangeTrack(input));
+  });
+}
+
 function init() {
   initMap();
   initTopBarDropdowns();
+  initRangeInputs();
   initEmitterModal();
   loadCesiumIonToken();
   loadAiProviderSettings();
@@ -1081,7 +1155,7 @@ function init() {
   renderTerrains();
   renderViewsheds();
   renderPlanningResults();
-  renderMapContents(); // explicit final pass — ensures tray is never blank after load
+  renderMapContents();
   refreshActionButtons();
   updateTerrainSummary();
   updateWeatherState();
@@ -1094,6 +1168,8 @@ function init() {
   }
   window.setInterval(updateClock, 1000);
   setStatus("Ready.");
+  // Deferred render — guarantees map contents tray shows saved items after DOM settles
+  requestAnimationFrame(() => renderMapContents());
 
   state.map.on("click", onMapClick);
   state.map.on("dblclick", onMapDblClick);
@@ -1325,7 +1401,8 @@ function wireEvents() {
   });
   dom.exportMenuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    dom.exportDropdown.classList.toggle("hidden");
+    const hidden = dom.exportDropdown.classList.toggle("hidden");
+    if (!hidden) positionTopBarDropdown(dom.exportDropdown, dom.exportMenuBtn);
   });
   document.addEventListener("click", () => dom.exportDropdown.classList.add("hidden"));
   dom.exportGeoJsonBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsGeoJson(); });
@@ -4333,22 +4410,35 @@ function addAsset(latlng) {
   }
 }
 
-function createEmitterIcon(asset) {
-  const markerColor = asset.color || FORCE_COLORS[asset.force];
-  const symbol = asset.type === "jammer"
-    ? "J"
-    : asset.type === "relay"
-      ? "R"
-      : asset.type === "receiver"
-        ? "V"
-        : "A";
+const EMITTER_ICONS = {
+  // Antenna mast with two signal arcs — clearly a radio transmitter
+  radio:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="22"/><path d="M8 9c0-2.2 1.8-4 4-4s4 1.8 4 4"/><path d="M5 6c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>`,
+  // Lightning bolt — jammer/disruptor
+  jammer:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+  // Two-headed arrow — relay/repeater
+  relay:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M15 8l4 4-4 4"/><path d="M9 8L5 12l4 4"/></svg>`,
+  // EKG waveform — receiver/listener
+  receiver: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2 12 6 12 9 4 12 20 15 12 18 12 22 12"/></svg>`,
+  // Broadcast tower with base — fixed site
+  tower:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="9" x2="12" y2="22"/><path d="M7 9a7 7 0 0 1 10 0"/><path d="M4 6a12 12 0 0 1 16 0"/><line x1="9" y1="22" x2="15" y2="22"/></svg>`,
+  // Radar rings + center dot — sensor
+  sensor:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.5 5.5a9 9 0 0 0 0 13"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`,
+};
 
+function getAssetIconSvg(type) {
+  return EMITTER_ICONS[type] ?? EMITTER_ICONS.radio;
+}
+
+function createEmitterIcon(asset) {
+  const markerColor = asset.color || FORCE_COLORS[asset.force] || FORCE_COLORS.friendly;
+  const type = EMITTER_ICONS[asset.type] ? asset.type : "radio";
+  const svg = EMITTER_ICONS[type];
   return L.divIcon({
-    className: "",
-    html: `<div class="emitter-marker ${escapeHtml(asset.type)}" style="background:${escapeHtml(markerColor)}"><span>${symbol}</span></div>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-    popupAnchor: [0, -12],
+    className: "emitter-divicon-wrapper",
+    html: `<div class="emitter-marker ${type}" style="background:${escapeHtml(markerColor)}">${svg}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
   });
 }
 
@@ -4400,13 +4490,13 @@ function renderAssetPopup(asset) {
 }
 
 function renderAssets() {
-  dom.assetList.innerHTML = "";
+  if (dom.assetList) dom.assetList.innerHTML = "";
   dom.assetSelect.innerHTML = "";
   dom.planningTxAsset.innerHTML = "";
   dom.planningRxAsset.innerHTML = "";
 
   if (!state.assets.length) {
-    dom.assetList.innerHTML = `<div class="asset-item">No systems placed yet.</div>`;
+    if (dom.assetList) dom.assetList.innerHTML = `<div class="asset-item">No systems placed yet.</div>`;
     dom.assetSelect.innerHTML = `<option value="">No emitters available</option>`;
     dom.planningTxAsset.innerHTML = `<option value="">No assets</option>`;
     dom.planningRxAsset.innerHTML = `<option value="">No assets</option>`;
@@ -4415,23 +4505,25 @@ function renderAssets() {
   }
 
   state.assets.forEach((asset, index) => {
-    const row = document.createElement("article");
-    row.className = "asset-item";
-    row.innerHTML = `
-      <header>
-        <strong>${escapeHtml(asset.name)}</strong>
-        <span class="force-pill"><span class="force-dot" style="background:${asset.color || FORCE_COLORS[asset.force]}"></span>${FORCE_LABELS[asset.force]}</span>
-      </header>
-      <div class="asset-meta">
-        <span>${escapeHtml(asset.unit)}</span>
-        <span>${escapeHtml(asset.type)}</span>
-        <span>${asset.frequencyMHz} MHz</span>
-        <span>${asset.powerW} W</span>
-        <span>${asset.antennaGainDbi} dBi</span>
-        <span>${asset.antennaHeightM} m</span>
-      </div>
-    `;
-    dom.assetList.appendChild(row);
+    if (dom.assetList) {
+      const row = document.createElement("article");
+      row.className = "asset-item";
+      row.innerHTML = `
+        <header>
+          <strong>${escapeHtml(asset.name)}</strong>
+          <span class="force-pill"><span class="force-dot" style="background:${asset.color || FORCE_COLORS[asset.force]}"></span>${FORCE_LABELS[asset.force]}</span>
+        </header>
+        <div class="asset-meta">
+          <span>${escapeHtml(asset.unit)}</span>
+          <span>${escapeHtml(asset.type)}</span>
+          <span>${asset.frequencyMHz} MHz</span>
+          <span>${asset.powerW} W</span>
+          <span>${asset.antennaGainDbi} dBi</span>
+          <span>${asset.antennaHeightM} m</span>
+        </div>
+      `;
+      dom.assetList.appendChild(row);
+    }
 
     const optionLabel = `${index + 1}. ${asset.name} (${asset.unit})`;
     [dom.assetSelect, dom.planningTxAsset, dom.planningRxAsset].forEach((select) => {
@@ -6053,6 +6145,7 @@ function getMapContentEntries() {
     entries.push({
       id: `asset:${asset.id}`,
       kind: "asset",
+      assetType: asset.type,
       name: asset.name,
       subtitle: `${asset.type} | ${asset.unit}`,
     });
@@ -6064,6 +6157,8 @@ function getMapContentEntries() {
       kind: item.kind,
       name: item.name,
       subtitle: item.subtitle,
+      geometryType: item.geometryType,
+      drawn: item.drawn ?? false,
     });
   });
 
@@ -6131,24 +6226,59 @@ function setMapContentFolderId(contentId, folderId) {
   state.mapContentAssignments.set(contentId, folderId);
 }
 
+function getMapContentTypeIcon(entry) {
+  const s = (path, extra = "") => `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${path}</svg>`;
+
+  if (entry.kind === "folder") {
+    return s(`<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>`);
+  }
+  if (entry.kind === "asset") {
+    // Reuse the same icon SVG inner content as the map marker, just resized
+    const t = EMITTER_ICONS[entry.assetType] ? entry.assetType : "radio";
+    const inner = EMITTER_ICONS[t].replace(/^<svg[^>]*>/, "").replace(/<\/svg>$/, "");
+    return s(inner);
+  }
+  if (entry.kind === "viewshed") {
+    return s(`<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`);
+  }
+  if (entry.kind === "terrain") {
+    return s(`<polygon points="3 20 9 4 15 14 19 10 23 20"/>`);
+  }
+  if (entry.kind === "planning-region" || entry.kind === "planning-results") {
+    return s(`<polygon points="3 11 12 2 21 11 21 21 3 21"/>`);
+  }
+  // imported / drawn shapes
+  const geo = entry.geometryType;
+  if (geo === "LineString") return s(`<polyline points="3 17 9 11 13 15 21 7"/>`);
+  if (geo === "Point")      return s(`<circle cx="12" cy="12" r="3"/><path d="M12 2a7 7 0 0 1 7 7c0 5-7 13-7 13S5 14 5 9a7 7 0 0 1 7-7z"/>`);
+  // polygon / circle / rectangle
+  return s(`<polygon points="12 2 22 19 2 19"/>`);
+}
+
 function buildMapContentRow(entry, isChild = false) {
   const row = document.createElement("article");
   row.className = "asset-item map-content-item";
   row.draggable = true;
   row.dataset.contentId = entry.id;
-  const canFocus = entry.kind !== "folder";
-  if (isChild) {
-    row.dataset.child = "true";
-  }
+  const isFolder = entry.kind === "folder";
+  const canFocus = !isFolder;
+  if (isChild) row.dataset.child = "true";
   const isHidden = state.hiddenContentIds.has(entry.id);
   if (isHidden) row.dataset.hidden = "true";
 
+  const folder = isFolder ? state.mapContentFolders.find((f) => `folder:${f.id}` === entry.id) : null;
+  const isCollapsed = folder?.collapsed ?? false;
+
   const eyeOpen = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
   const eyeOff = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+  const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+  const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`;
 
   row.innerHTML = `
     <div class="map-content-row">
       <div class="map-content-grip">::</div>
+      ${isFolder ? `<button class="map-content-collapse-btn" type="button" aria-label="${isCollapsed ? "Expand" : "Collapse"}">${isCollapsed ? chevronRight : chevronDown}</button>` : ""}
+      <span class="map-content-type-icon">${getMapContentTypeIcon(entry)}</span>
       <div class="map-content-copy">
         <strong>${escapeHtml(entry.name)}</strong>
         <span>${escapeHtml(entry.subtitle)}</span>
@@ -6161,11 +6291,14 @@ function buildMapContentRow(entry, isChild = false) {
         </span>
       </button>` : ""}
       ${canFocus ? `<button class="map-content-visibility-btn${isHidden ? " hidden-layer" : ""}" type="button" aria-label="${isHidden ? "Show" : "Hide"}" title="${isHidden ? "Show" : "Hide"}">${isHidden ? eyeOff : eyeOpen}</button>` : ""}
-      <span class="map-content-kind">${escapeHtml(entry.kind.replace(/-/g, " "))}</span>
     </div>
   `;
 
   row.addEventListener("click", () => focusMapContent(entry.id));
+  row.querySelector(".map-content-collapse-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleFolderCollapsed(entry.id);
+  });
   row.querySelector(".map-content-focus-button")?.addEventListener("click", (event) => {
     event.stopPropagation();
     focusMapContent(entry.id);
@@ -6189,7 +6322,6 @@ function renderMapContents() {
     return;
   }
   const entries = getMapContentEntries();
-  console.log("[renderMapContents] entries:", entries.length, "folders:", state.mapContentFolders.length, "assets:", state.assets.length, "order:", state.mapContentOrder.length);
 
   // Rebuild order from scratch to guarantee it always matches current entries
   const entryIds = entries.map((e) => e.id);
@@ -6223,17 +6355,19 @@ function renderMapContents() {
     }
 
     if (folderIds.has(contentId)) {
+      const folder = state.mapContentFolders.find((f) => `folder:${f.id}` === contentId);
+      const isCollapsed = folder?.collapsed ?? false;
       const folderRow = buildMapContentRow(entry);
       dom.mapContentsList.appendChild(folderRow);
       rendered.add(contentId);
 
       const childIds = state.mapContentOrder.filter((id) => getMapContentFolderId(id) === contentId && entryMap.has(id));
-      if (childIds.length) {
+      childIds.forEach((childId) => rendered.add(childId));
+      if (childIds.length && !isCollapsed) {
         const childWrap = document.createElement("div");
         childWrap.className = "map-content-folder-children";
         childIds.forEach((childId) => {
           const childEntry = entryMap.get(childId);
-          rendered.add(childId);
           childWrap.appendChild(buildMapContentRow(childEntry, true));
         });
         dom.mapContentsList.appendChild(childWrap);
@@ -6493,10 +6627,9 @@ function editMapContent(contentId) {
     }
     state.editingAssetId = asset.id;
     state.placingAsset = false;
-    applyEmitterFormData(asset);
+    emitterModal.open(asset);
     refreshActionButtons();
-    dom.emittersSection.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    setStatus(`Editing ${asset.name}. Update the form and click Save Changes.`);
+    setStatus(`Editing ${asset.name}.`);
     return;
   }
 
@@ -6510,6 +6643,7 @@ function editMapContent(contentId) {
     dom.propagationModel.value = viewshed.propagationModel;
     dom.receiverHeight.value = viewshed.receiverHeight;
     dom.viewshedOpacity.value = viewshed.opacity;
+    updateRangeTrack(dom.viewshedOpacity);
     dom.radiusKm.value = Math.round(viewshed.radiusMeters / 1000);
     refreshActionButtons();
     dom.simulationSection.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -6556,9 +6690,18 @@ function addMapContentFolder() {
   const folder = {
     id: crypto.randomUUID(),
     name: `Folder ${state.mapContentFolders.length + 1}`,
+    collapsed: false,
   };
   state.mapContentFolders.push(folder);
   state.mapContentOrder.push(`folder:${folder.id}`);
+  renderMapContents();
+  saveMapState();
+}
+
+function toggleFolderCollapsed(folderId) {
+  const folder = state.mapContentFolders.find((f) => `folder:${f.id}` === folderId);
+  if (!folder) return;
+  folder.collapsed = !folder.collapsed;
   renderMapContents();
   saveMapState();
 }
@@ -6731,7 +6874,10 @@ function formatShapeArea(areaSqMeters) {
 
 function toggleDrawDropdown() {
   const hidden = dom.drawDropdown.classList.toggle("hidden");
-  if (!hidden) closeShapeStylePanel();
+  if (!hidden) {
+    closeShapeStylePanel();
+    positionTopBarDropdown(dom.drawDropdown, dom.drawShapeBtn);
+  }
 }
 
 function closeDrawDropdown() {
@@ -6745,7 +6891,7 @@ function startDrawing(mode) {
   cancelDrawing();
   state.draw.mode = mode;
   dom.map.classList.add("leaflet-drawing-active");
-  const hints = { circle: "Click to set center, click again to set radius.", rectangle: "Click two corners to draw a rectangle.", polyline: "Click to add points. Double-click or click near start to finish." };
+  const hints = { circle: "Click to set center, click again to set radius.", rectangle: "Click two corners to draw a rectangle.", polyline: "Click to add points. Double-click to finish." };
   setStatus(hints[mode]);
 }
 
@@ -6790,21 +6936,9 @@ function onDrawClick(latlng) {
   }
 
   if (mode === "polyline") {
-    // Close if clicking within 15px of first point and >=3 points
-    if (points.length >= 3) {
-      const firstPx = state.map.latLngToContainerPoint(points[0]);
-      const clickPx = state.map.latLngToContainerPoint(latlng);
-      const dist = Math.hypot(firstPx.x - clickPx.x, firstPx.y - clickPx.y);
-      if (dist < 15) {
-        const coords = points.map((p) => [p.lat, p.lng]);
-        cancelDrawing();
-        commitDrawnShape("Polygon", "Polygon", coords);
-        return;
-      }
-    }
     state.draw.points.push(latlng);
     updateDrawPreview(latlng);
-    setStatus(`${state.draw.points.length} point(s). Double-click or click near start to close as polygon.`);
+    setStatus(`${state.draw.points.length} point(s). Double-click to finish.`);
   }
 }
 
@@ -6815,15 +6949,11 @@ function onMapMouseMove(event) {
 
 function onMapDblClick(event) {
   if (state.draw.mode !== "polyline" || state.draw.points.length < 2) return;
-  // Leaflet fires click then dblclick — the last click already added a point, so we just commit
-  const points = state.draw.points;
+  // Leaflet fires click then dblclick — the last click already added a point, so remove the duplicate
+  const points = state.draw.points.slice(0, -1);
   const coords = points.map((p) => [p.lat, p.lng]);
   cancelDrawing();
-  if (coords.length >= 3) {
-    commitDrawnShape("Polygon", "Polygon", coords);
-  } else {
-    commitDrawnShape("Line", "LineString", coords);
-  }
+  commitDrawnShape("Polyline", "LineString", coords);
 }
 
 function updateDrawPreview(cursor) {
@@ -7447,12 +7577,15 @@ function parseKmlCoordinateList(value) {
 }
 
 async function parseKmzFeatures(buffer, fileName) {
+  console.log("[kmz] parseKmzFeatures called, JSZip:", typeof window.JSZip, "buffer bytes:", buffer.byteLength);
   let zip;
   try {
     zip = await window.JSZip.loadAsync(buffer);
   } catch (err) {
+    console.error("[kmz] JSZip.loadAsync failed:", err);
     throw new Error(`Could not read KMZ/ZIP archive: ${err.message}`);
   }
+  console.log("[kmz] zip entries:", Object.keys(zip.files));
 
   const files = Object.values(zip.files).filter((f) => !f.dir);
 
@@ -7479,7 +7612,9 @@ async function parseKmzFeatures(buffer, fileName) {
   const allFeatures = [];
   for (const kmlFile of kmlFiles) {
     const text = await kmlFile.async("text");
+    console.log("[kmz] parsing KML file:", kmlFile.name, "text length:", text.length, "preview:", text.slice(0, 200));
     const features = parseKmlFeatures(text, fileName);
+    console.log("[kmz] features from", kmlFile.name, ":", features.length, features.slice(0, 3));
     allFeatures.push(...features);
   }
 
