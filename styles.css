@@ -166,6 +166,7 @@ body.ai-panel-open {
 .imagery-menu-shell,
 .terrain-menu-shell,
 .weather-menu-shell,
+.workspace-menu-shell,
 .settings-menu-shell,
 .gps-menu-shell {
   position: relative;
@@ -290,6 +291,18 @@ body.ai-panel-open {
 
 .gps-menu {
   width: 290px;
+}
+
+.workspace-menu {
+  width: 420px;
+}
+
+.workspace-menu-title-row {
+  align-items: flex-start;
+}
+
+.workspace-menu-button {
+  min-width: 158px;
 }
 
 .terrain-menu .list-shell,
@@ -469,10 +482,6 @@ body.panel-collapsed .control-panel {
   padding-bottom: 14px;
 }
 
-.workspace-card {
-  margin-bottom: 12px;
-}
-
 .workspace-auth-block {
   display: grid;
   gap: 10px;
@@ -502,6 +511,15 @@ body.panel-collapsed .control-panel {
 .workspace-member-header strong {
   display: block;
   margin-top: 2px;
+}
+
+.workspace-menu .workspace-auth-grid,
+.workspace-menu .workspace-project-grid {
+  margin-top: 0;
+}
+
+.workspace-menu .workspace-summary {
+  margin-bottom: 0;
 }
 
 .workspace-pill {

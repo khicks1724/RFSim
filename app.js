@@ -464,7 +464,10 @@ const dom = {
   weatherMenu: document.querySelector("#weatherMenu"),
   weatherMenuValue: document.querySelector("#weatherMenuValue"),
   topBarDropdownLayer: document.querySelector("#topBarDropdownLayer"),
-  workspaceCard: document.querySelector("#workspaceCard"),
+  workspaceMenuBtn: document.querySelector("#workspaceMenuBtn"),
+  workspaceMenu: document.querySelector("#workspaceMenu"),
+  workspaceMenuValue: document.querySelector("#workspaceMenuValue"),
+  workspaceMenuHeadline: document.querySelector("#workspaceMenuHeadline"),
   workspaceStatus: document.querySelector("#workspaceStatus"),
   workspaceAuthGuest: document.querySelector("#workspaceAuthGuest"),
   workspaceAuthMember: document.querySelector("#workspaceAuthMember"),
@@ -677,6 +680,7 @@ const state = {
   hiddenContentIds: new Set(),
   activeMapContentMenuId: null,
   renamingMapContentId: null,
+  workspaceMenuOpen: false,
   imageryMenuOpen: false,
   terrainMenuOpen: false,
   weatherMenuOpen: false,
@@ -825,7 +829,7 @@ async function loadProjectList() {
 }
 
 function syncWorkspaceUi() {
-  if (!dom.workspaceCard) {
+  if (!dom.workspaceMenuBtn || !dom.workspaceMenu) {
     return;
   }
 
@@ -835,11 +839,16 @@ function syncWorkspaceUi() {
   dom.workspaceSignOutBtn.classList.toggle("hidden", !signedIn);
 
   if (!signedIn) {
+    dom.workspaceMenuValue.textContent = "Sign In";
+    dom.workspaceMenuHeadline.textContent = "Account & Projects";
     dom.workspaceStatus.textContent = "Sign in to save projects to the server. Local browser save remains available until then.";
     return;
   }
 
-  dom.workspaceUserLabel.textContent = state.session.user.fullName || state.session.user.email;
+  const userLabel = state.session.user.fullName || state.session.user.email;
+  dom.workspaceUserLabel.textContent = userLabel;
+  dom.workspaceMenuValue.textContent = userLabel;
+  dom.workspaceMenuHeadline.textContent = state.session.activeProjectId ? "Server Project" : "Workspace";
   dom.workspaceProjectMode.textContent = state.session.activeProjectId ? "Server" : "Local";
   dom.workspaceProjectStatus.textContent = state.session.activeProjectId
     ? state.session.autosavePending
@@ -1514,6 +1523,7 @@ async function init() {
 
 function getTopBarDropdownConfigs() {
   return [
+    { button: dom.workspaceMenuBtn, menu: dom.workspaceMenu },
     { button: dom.imageryMenuBtn, menu: dom.imageryMenu },
     { button: dom.terrainMenuBtn, menu: dom.terrainMenu },
     { button: dom.weatherMenuBtn, menu: dom.weatherMenu },
@@ -1591,6 +1601,8 @@ function wireEvents() {
   dom.terrainMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.weatherMenuBtn.addEventListener("click", toggleWeatherMenu);
   dom.weatherMenu.addEventListener("click", (event) => event.stopPropagation());
+  dom.workspaceMenuBtn?.addEventListener("click", toggleWorkspaceMenu);
+  dom.workspaceMenu?.addEventListener("click", (event) => event.stopPropagation());
   dom.aiChatToggleBtn.addEventListener("click", toggleAiPanelCollapse);
   dom.gpsMenuBtn.addEventListener("click", toggleGpsMenu);
   dom.gpsMenu.addEventListener("click", (event) => event.stopPropagation());
@@ -1942,6 +1954,7 @@ async function loadMapState() {
 
 function toggleSettingsMenu(event) {
   event.stopPropagation();
+  closeWorkspaceMenu();
   closeImageryMenu();
   closeTerrainMenu();
   closeWeatherMenu();
@@ -1955,8 +1968,25 @@ function toggleSettingsMenu(event) {
   }
 }
 
+function toggleWorkspaceMenu(event) {
+  event.stopPropagation();
+  closeImageryMenu();
+  closeTerrainMenu();
+  closeWeatherMenu();
+  closeAiMenu();
+  closeGpsMenu();
+  closeSettingsMenu();
+  state.workspaceMenuOpen = !state.workspaceMenuOpen;
+  dom.workspaceMenu.classList.toggle("hidden", !state.workspaceMenuOpen);
+  dom.workspaceMenuBtn.setAttribute("aria-expanded", String(state.workspaceMenuOpen));
+  if (state.workspaceMenuOpen) {
+    positionTopBarDropdown(dom.workspaceMenu, dom.workspaceMenuBtn);
+  }
+}
+
 function toggleImageryMenu(event) {
   event.stopPropagation();
+  closeWorkspaceMenu();
   closeSettingsMenu();
   closeTerrainMenu();
   closeWeatherMenu();
@@ -1972,6 +2002,7 @@ function toggleImageryMenu(event) {
 
 function toggleTerrainMenu(event) {
   event.stopPropagation();
+  closeWorkspaceMenu();
   closeImageryMenu();
   closeWeatherMenu();
   closeAiMenu();
@@ -1987,6 +2018,7 @@ function toggleTerrainMenu(event) {
 
 function toggleWeatherMenu(event) {
   event.stopPropagation();
+  closeWorkspaceMenu();
   closeImageryMenu();
   closeTerrainMenu();
   closeAiMenu();
@@ -2004,6 +2036,7 @@ function toggleAiMenu() { /* AI menu removed — settings now in gear dropdown *
 
 function toggleGpsMenu(event) {
   event.stopPropagation();
+  closeWorkspaceMenu();
   closeImageryMenu();
   closeTerrainMenu();
   closeWeatherMenu();
@@ -2024,6 +2057,15 @@ function closeSettingsMenu() {
   state.settingsMenuOpen = false;
   dom.settingsMenu.classList.add("hidden");
   dom.settingsMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+function closeWorkspaceMenu() {
+  if (!state.workspaceMenuOpen) {
+    return;
+  }
+  state.workspaceMenuOpen = false;
+  dom.workspaceMenu.classList.add("hidden");
+  dom.workspaceMenuBtn.setAttribute("aria-expanded", "false");
 }
 
 function closeImageryMenu() {
@@ -2065,6 +2107,7 @@ function closeGpsMenu() {
 }
 
 function closeTopBarMenus() {
+  closeWorkspaceMenu();
   closeSettingsMenu();
   closeImageryMenu();
   closeTerrainMenu();
@@ -2594,6 +2637,24 @@ function clearAiProvider() {
   syncAiUi();
 }
 
+function renderAiEmptyState() {
+  if (!dom.aiChatMessages || state.ai.messages.length > 0) {
+    return;
+  }
+
+  if (state.ai.status === "ready") {
+    dom.aiChatMessages.innerHTML = "";
+    return;
+  }
+
+  dom.aiChatMessages.innerHTML = `
+    <article class="ai-chat-message ai-chat-message-system">
+      <strong>Assistant</strong>
+      <p>Add a working AI provider in the top bar to enable chat-assisted planning.</p>
+    </article>
+  `;
+}
+
 function syncAiUi() {
   if (!dom.aiProviderSelect || !dom.aiApiKeyInput) {
     return;
@@ -2647,6 +2708,7 @@ function syncAiUi() {
             ? "Provider error"
             : "Provider offline";
   }
+    renderAiEmptyState();
   const hasConfiguredProvider = Boolean(state.ai.provider && state.ai.apiKey);
   const controlsEnabled = hasConfiguredProvider && state.ai.status !== "testing";
   const actionButtonsEnabled = controlsEnabled && !state.ai.requestInFlight;
@@ -2738,12 +2800,7 @@ async function onAiChatSubmit(event) {
 function clearAiChat() {
   state.ai.messages = [];
   clearAiAttachments();
-  dom.aiChatMessages.innerHTML = `
-    <article class="ai-chat-message ai-chat-message-system">
-      <strong>Assistant</strong>
-      <p>Add a working AI provider (GenAI.mil or Anthropic) in the top bar to enable chat-assisted planning.</p>
-    </article>
-  `;
+  renderAiEmptyState();
 }
 
 function renderMarkdown(text) {
