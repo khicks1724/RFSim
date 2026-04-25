@@ -517,6 +517,7 @@ const dom = {
   aiApiKeyLabelText: document.querySelector("#aiApiKeyLabelText"),
   aiProviderSummary: document.querySelector("#aiProviderSummary"),
   saveAiProviderBtn: document.querySelector("#saveAiProviderBtn"),
+  deleteAiProviderBtn: document.querySelector("#deleteAiProviderBtn"),
   testAiConnectionBtn: document.querySelector("#testAiConnectionBtn"),
   clearAiProviderBtn: document.querySelector("#clearAiProviderBtn"),
   openAiPanelBtn: null, // removed from topbar — kept as null so refs don't throw
@@ -527,6 +528,7 @@ const dom = {
   gpsMenu: document.querySelector("#gpsMenu"),
   settingsMenuBtn: document.querySelector("#settingsMenuBtn"),
   settingsMenu: document.querySelector("#settingsMenu"),
+  settingsMenuCloseBtn: document.querySelector("#settingsMenuCloseBtn"),
   measurementUnitsSelect: document.querySelector("#measurementUnitsSelect"),
   themeSelect: document.querySelector("#themeSelect"),
   coordinateSystemSelect: document.querySelector("#coordinateSystemSelect"),
@@ -929,15 +931,19 @@ function renderAiSavedConfigOptions() {
   if (!dom.aiSavedConfigSelect) {
     return;
   }
-  const options = [
-    `<option value="">Current Draft</option>`,
-    ...state.ai.savedConfigs.map((config) => {
-      const modelLabel = getAiModelLabel(config.provider, config.model);
-      return `<option value="${escapeHtml(config.id)}">${escapeHtml(`${getAiSavedConfigDisplayLabel(config)} | ${modelLabel}`)}</option>`;
-    }),
-  ];
+  const options = state.ai.savedConfigs.length
+    ? [
+        '<option value="">Select saved key</option>',
+        ...state.ai.savedConfigs.map((config) => {
+          const modelLabel = getAiModelLabel(config.provider, config.model);
+          return `<option value="${escapeHtml(config.id)}">${escapeHtml(`${getAiSavedConfigDisplayLabel(config)} | ${modelLabel}`)}</option>`;
+        }),
+      ]
+    : ['<option value="">No saved keys</option>'];
   dom.aiSavedConfigSelect.innerHTML = options.join("");
-  dom.aiSavedConfigSelect.value = state.ai.activeConfigId;
+  dom.aiSavedConfigSelect.value = state.ai.savedConfigs.some((config) => config.id === state.ai.activeConfigId)
+    ? state.ai.activeConfigId
+    : "";
 }
 
 function renderAiModelOptions() {
@@ -1850,7 +1856,6 @@ function getTopBarDropdownConfigs() {
     { button: dom.terrainMenuBtn, menu: dom.terrainMenu },
     { button: dom.weatherMenuBtn, menu: dom.weatherMenu },
     { button: dom.gpsMenuBtn, menu: dom.gpsMenu },
-    { button: dom.settingsMenuBtn, menu: dom.settingsMenu },
   ];
 }
 
@@ -1929,7 +1934,14 @@ function wireEvents() {
   dom.gpsMenuBtn.addEventListener("click", toggleGpsMenu);
   dom.gpsMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.settingsMenuBtn.addEventListener("click", toggleSettingsMenu);
-  dom.settingsMenu.addEventListener("click", (event) => event.stopPropagation());
+  dom.settingsMenu.addEventListener("click", (event) => {
+    if (event.target === dom.settingsMenu) {
+      closeSettingsMenu();
+      return;
+    }
+    event.stopPropagation();
+  });
+  dom.settingsMenuCloseBtn?.addEventListener("click", closeSettingsMenu);
   dom.workspaceLoginBtn?.addEventListener("click", () => onWorkspaceLogin().catch((error) => setStatus(error.message, true)));
   dom.workspaceRegisterBtn?.addEventListener("click", () => onWorkspaceRegister().catch((error) => setStatus(error.message, true)));
   dom.workspaceSignOutBtn?.addEventListener("click", onWorkspaceSignOut);
@@ -1983,7 +1995,8 @@ function wireEvents() {
   dom.mapContentsRenameInput.addEventListener("keydown", onRenamePopoverKeyDown);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (state.draw.mode) cancelDrawing();
+      if (state.settingsMenuOpen) closeSettingsMenu();
+      else if (state.draw.mode) cancelDrawing();
       else closeShapeStylePanel();
     }
   });
@@ -2009,6 +2022,7 @@ function wireEvents() {
   dom.aiSavedConfigLabelInput.addEventListener("change", onAiSavedConfigLabelChanged);
   dom.aiApiKeyInput.addEventListener("change", onAiProviderChanged);
   dom.saveAiProviderBtn.addEventListener("click", saveAiProvider);
+  dom.deleteAiProviderBtn?.addEventListener("click", deleteAiProvider);
   dom.testAiConnectionBtn.addEventListener("click", testAiProviderConnection);
   dom.clearAiProviderBtn.addEventListener("click", clearAiProvider);
   dom.collapseAiPanelBtn.addEventListener("click", toggleAiPanelCollapse);
@@ -2296,10 +2310,8 @@ function toggleSettingsMenu(event) {
   closeGpsMenu();
   state.settingsMenuOpen = !state.settingsMenuOpen;
   dom.settingsMenu.classList.toggle("hidden", !state.settingsMenuOpen);
+  document.body.classList.toggle("settings-modal-open", state.settingsMenuOpen);
   dom.settingsMenuBtn.setAttribute("aria-expanded", String(state.settingsMenuOpen));
-  if (state.settingsMenuOpen) {
-    positionTopBarDropdown(dom.settingsMenu, dom.settingsMenuBtn);
-  }
 }
 
 function toggleWorkspaceMenu(event) {
@@ -2390,6 +2402,7 @@ function closeSettingsMenu() {
   }
   state.settingsMenuOpen = false;
   dom.settingsMenu.classList.add("hidden");
+  document.body.classList.remove("settings-modal-open");
   dom.settingsMenuBtn.setAttribute("aria-expanded", "false");
 }
 
@@ -3003,6 +3016,7 @@ async function onAiSavedConfigChanged() {
       return;
     }
   }
+  state.ai.activeConfigId = "";
   persistAiProviderSettings();
   syncAiUi();
 }
@@ -3045,6 +3059,26 @@ function saveAiProvider() {
   syncAiUi();
 }
 
+function deleteAiProvider() {
+  if (!state.ai.activeConfigId) {
+    return;
+  }
+
+  const deletedConfig = getSavedAiConfig(state.ai.activeConfigId);
+  state.ai.savedConfigs = state.ai.savedConfigs.filter((config) => config.id !== state.ai.activeConfigId);
+  state.ai.activeConfigId = "";
+  state.ai.configLabel = "";
+  state.ai.provider = "";
+  state.ai.apiKey = "";
+  state.ai.model = "";
+  state.ai.status = "offline";
+  state.ai.statusMessage = deletedConfig
+    ? `Deleted ${getAiSavedConfigDisplayLabel(deletedConfig)}.`
+    : defaultAiStatusMessage();
+  persistAiProviderSettings();
+  syncAiUi();
+}
+
 function onAiModelChanged() {
   state.ai.model = ensureAiModelForProvider(state.ai.provider, dom.aiChatModelSelect.value);
   syncActiveAiConfigFromDraft();
@@ -3053,9 +3087,6 @@ function onAiModelChanged() {
 }
 
 function clearAiProvider() {
-  if (state.ai.activeConfigId) {
-    state.ai.savedConfigs = state.ai.savedConfigs.filter((config) => config.id !== state.ai.activeConfigId);
-  }
   state.ai.activeConfigId = "";
   state.ai.configLabel = "";
   state.ai.provider = "";
@@ -3063,11 +3094,7 @@ function clearAiProvider() {
   state.ai.model = "";
   state.ai.status = "offline";
   state.ai.statusMessage = defaultAiStatusMessage();
-  state.ai.panelOpen = false;
   persistAiProviderSettings();
-  document.body.classList.remove("ai-panel-open");
-  dom.collapseAiPanelIcon.innerHTML = "&#9664;";
-  clearAiChat();
   syncAiUi();
 }
 
@@ -3148,6 +3175,9 @@ function syncAiUi() {
   }
   if (dom.saveAiProviderBtn) {
     dom.saveAiProviderBtn.disabled = !state.ai.provider || !state.ai.apiKey;
+  }
+  if (dom.deleteAiProviderBtn) {
+    dom.deleteAiProviderBtn.disabled = !state.ai.activeConfigId;
   }
   if (dom.aiChatInput) {
     dom.aiChatInput.disabled = !controlsEnabled;

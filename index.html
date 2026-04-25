@@ -272,77 +272,6 @@
           <button id="settingsMenuBtn" class="status-chip status-chip-button settings-chip-button settings-chip-icon-only" type="button" aria-label="Open map settings" aria-expanded="false">
             <span class="settings-gear-icon">&#9881;</span>
           </button>
-          <div id="settingsMenu" class="settings-menu hidden">
-            <div class="menu-title-row">
-              <strong>Map Settings</strong>
-            </div>
-            <label>
-              Measurement Units
-              <select id="measurementUnitsSelect">
-                <option value="metric">Metric</option>
-                <option value="standard">Standard</option>
-              </select>
-            </label>
-            <label>
-              Theme
-              <select id="themeSelect">
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-              </select>
-            </label>
-            <label>
-              Coordinate System
-              <select id="coordinateSystemSelect">
-                <option value="mgrs">MGRS</option>
-                <option value="latlon">Lat / Long</option>
-                <option value="dms">Deg Min Sec</option>
-              </select>
-            </label>
-            <label class="settings-check-row">
-              <input id="gridlinesToggle" type="checkbox">
-              <span>Show Gridlines</span>
-            </label>
-            <label class="settings-check-row">
-              <input id="centerGridToggle" type="checkbox">
-              <span>Show Center Grid</span>
-            </label>
-            <label>
-              Gridlines Color
-              <input id="gridlinesColor" type="color" value="#ffffff">
-            </label>
-            <hr class="settings-divider">
-            <div class="menu-title-row">
-              <strong>AI Integration</strong>
-            </div>
-            <label>
-              Saved Keys
-              <select id="aiSavedConfigSelect">
-                <option value="">Current Draft</option>
-              </select>
-            </label>
-            <label>
-              Saved Key Label
-              <input id="aiSavedConfigLabelInput" type="text" placeholder="Optional display name">
-            </label>
-            <label>
-              Provider
-              <select id="aiProviderSelect">
-                <option value="">Disabled</option>
-                <option value="genai-mil">GenAI.mil (STARK)</option>
-                <option value="anthropic">Anthropic (Claude)</option>
-              </select>
-            </label>
-            <label id="aiApiKeyLabel">
-              <span id="aiApiKeyLabelText">API Key</span>
-              <input id="aiApiKeyInput" type="password" placeholder="Paste API key">
-            </label>
-            <div class="button-row compact-button-row">
-              <button id="saveAiProviderBtn" class="ghost-button small" type="button">Save Key</button>
-              <button id="testAiConnectionBtn" class="primary-button small" type="button">Test Key</button>
-              <button id="clearAiProviderBtn" class="ghost-button small" type="button">Clear</button>
-            </div>
-            <div class="weather-summary ai-summary" id="aiProviderSummary">Add a provider and API key to enable the AI planning assistant.</div>
-          </div>
         </div>
       </div>
     </header>
@@ -1115,6 +1044,99 @@
       </div><!-- /emitter-modal-body -->
     </div><!-- /emitter-modal -->
   </div><!-- /emitter-modal-backdrop -->
+
+  <div id="settingsMenu" class="emitter-modal-backdrop hidden">
+    <div class="emitter-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <span class="settings-gear-icon">&#9881;</span>
+          <h2 id="settingsModalTitle">Map Settings</h2>
+        </div>
+        <button id="settingsMenuCloseBtn" class="icon-button ghost-button" type="button" aria-label="Close">&#10005;</button>
+      </div>
+      <div class="settings-modal-body">
+        <section class="settings-modal-section">
+          <div class="menu-title-row">
+            <strong>Map Settings</strong>
+          </div>
+          <div class="settings-modal-grid">
+            <label>
+              Measurement Units
+              <select id="measurementUnitsSelect">
+                <option value="metric">Metric</option>
+                <option value="standard">Standard</option>
+              </select>
+            </label>
+            <label>
+              Theme
+              <select id="themeSelect">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
+            <label class="settings-span-2">
+              Coordinate System
+              <select id="coordinateSystemSelect">
+                <option value="mgrs">MGRS</option>
+                <option value="latlon">Lat / Long</option>
+                <option value="dms">Deg Min Sec</option>
+              </select>
+            </label>
+            <label class="settings-check-row">
+              <input id="gridlinesToggle" type="checkbox">
+              <span>Show Gridlines</span>
+            </label>
+            <label class="settings-check-row">
+              <input id="centerGridToggle" type="checkbox">
+              <span>Show Center Grid</span>
+            </label>
+            <label class="settings-span-2">
+              Gridlines Color
+              <input id="gridlinesColor" type="color" value="#ffffff">
+            </label>
+          </div>
+        </section>
+        <section class="settings-modal-section">
+          <div class="menu-title-row">
+            <strong>AI Integration</strong>
+          </div>
+          <div class="settings-modal-grid">
+            <label class="settings-span-2">
+              Saved Keys
+              <div class="settings-saved-key-row">
+                <select id="aiSavedConfigSelect">
+                  <option value="" selected>No saved keys</option>
+                </select>
+                <button id="deleteAiProviderBtn" class="ghost-button small" type="button">Delete Key</button>
+              </div>
+            </label>
+            <label class="settings-span-2">
+              Saved Key Label
+              <input id="aiSavedConfigLabelInput" type="text" placeholder="Optional display name">
+            </label>
+            <label>
+              Provider
+              <select id="aiProviderSelect">
+                <option value="">Disabled</option>
+                <option value="genai-mil">GenAI.mil (STARK)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+              </select>
+            </label>
+            <label id="aiApiKeyLabel">
+              <span id="aiApiKeyLabelText">API Key</span>
+              <input id="aiApiKeyInput" type="password" placeholder="Paste API key">
+            </label>
+          </div>
+          <div class="button-row compact-button-row settings-modal-actions">
+            <button id="saveAiProviderBtn" class="ghost-button small" type="button">Save Key</button>
+            <button id="testAiConnectionBtn" class="primary-button small" type="button">Test Key</button>
+            <button id="clearAiProviderBtn" class="ghost-button small" type="button">Clear Draft</button>
+          </div>
+          <div class="weather-summary ai-summary" id="aiProviderSummary">Add a provider and API key to enable the AI planning assistant.</div>
+        </section>
+      </div>
+    </div>
+  </div>
 
   <div id="simulationModal" class="emitter-modal-backdrop hidden">
     <div class="emitter-modal simulation-modal" role="dialog" aria-modal="true" aria-labelledby="simulationModalTitle">
