@@ -422,6 +422,7 @@ const SETTINGS_STORAGE_KEY = "ew-sim-map-settings";
 const CESIUM_ION_TOKEN_STORAGE_KEY = "ew-sim-cesium-ion-token";
 const AI_PROVIDER_STORAGE_KEY = "ew-sim-ai-provider";
 const MAP_STATE_STORAGE_KEY = "ew-sim-map-state";
+const MAP_STATE_STORAGE_KEY_LEGACY = null; // no prior keys to migrate
 const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
 const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
 const GENAI_MIL_MODEL = "gemini-2.5-flash";
@@ -600,6 +601,7 @@ const state = {
   map: null,
   baseLayer: null,
   placingAsset: false,
+  pendingEmitterData: null,
   draw: {
     mode: null,        // "circle" | "rectangle" | "polyline" | null
     points: [],        // accumulated latlngs for polyline/rectangle
@@ -974,11 +976,14 @@ const emitterModal = {
     const v = (id) => f[id]?.value;
     const n = (id) => parseFloat(f[id]?.value);
     const b = (id) => f[id]?.checked ?? false;
-    const emitterType = this.radioTypeSelect.value
-      ? (RADIO_LIBRARY[this.radioTypeSelect.value]?.label ?? v("emName") ?? "radio")
+    // type must be a valid asset category ("radio","jammer","relay","receiver")
+    // emitterLabel is the human-readable equipment name stored separately
+    const emitterLabel = this.radioTypeSelect.value
+      ? (RADIO_LIBRARY[this.radioTypeSelect.value]?.label ?? "radio")
       : "radio";
     return {
-      type: emitterType,
+      type: "radio",
+      emitterLabel,
       force: v("emForce") || "friendly",
       name: v("emName") || "Emitter",
       unit: v("emUnit") || "",
@@ -1019,22 +1024,8 @@ const emitterModal = {
       this.fields.emName?.focus();
       return;
     }
-    // Write back into the legacy hidden form fields so addAsset() picks them up
-    applyEmitterFormData({
-      type: data.type,
-      force: data.force,
-      name: data.name,
-      unit: data.unit,
-      frequencyMHz: data.frequencyMHz,
-      powerW: data.powerW,
-      antennaHeightM: data.antennaHeightM,
-      antennaGainDbi: data.antennaGainDbi,
-      receiverSensitivityDbm: data.receiverSensitivityDbm,
-      systemLossDb: data.systemLossDb,
-      icon: data.icon,
-      color: data.color,
-      notes: data.notes,
-    });
+    // Stash the modal data directly — bypass the hidden-form roundtrip
+    state.pendingEmitterData = data;
     this.close();
     state.placingAsset = true;
     setStatus("Click on the map to place the emitter.");
@@ -1090,6 +1081,7 @@ function init() {
   renderTerrains();
   renderViewsheds();
   renderPlanningResults();
+  renderMapContents(); // explicit final pass — ensures tray is never blank after load
   refreshActionButtons();
   updateTerrainSummary();
   updateWeatherState();
@@ -1238,6 +1230,22 @@ function wireEvents() {
     if (!dom.shapeStylePanel.contains(e.target)) closeShapeStylePanel({ stopEditing: false });
   });
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
+
+  const importBtn = document.querySelector("#importBtn");
+  const importFileInput = document.querySelector("#importFileInput");
+  if (importBtn && importFileInput) {
+    importBtn.addEventListener("click", () => importFileInput.click());
+    importFileInput.addEventListener("change", async () => {
+      const files = [...importFileInput.files];
+      importFileInput.value = "";
+      try {
+        for (const file of files) await importMapFile(file);
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    });
+  }
+
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
   dom.drawCircleBtn.addEventListener("click", () => startDrawing("circle"));
   dom.drawRectangleBtn.addEventListener("click", () => startDrawing("rectangle"));
@@ -2014,6 +2022,7 @@ function toggleAiPanelCollapse() {
   }
   dom.collapseAiPanelIcon.innerHTML = state.ai.panelOpen ? "&#9654;" : "&#9664;";
   syncAiChatToggleBtn();
+  persistAiProviderSettings();
   state.map.invalidateSize();
   if (state.cesiumViewer) {
     state.cesiumViewer.resize();
@@ -2037,6 +2046,7 @@ function beginPanelResize() {
   if (window.innerWidth <= 1024 || document.body.classList.contains("panel-collapsed")) {
     return;
   }
+  document.body.classList.add("is-resizing");
   state.ui.resizeActive = true;
 }
 
@@ -2044,6 +2054,7 @@ function beginAiPanelResize() {
   if (window.innerWidth <= 1024 || !document.body.classList.contains("ai-panel-open")) {
     return;
   }
+  document.body.classList.add("is-resizing");
   state.ui.aiResizeActive = true;
 }
 
@@ -2051,6 +2062,7 @@ function beginControlPanelSectionResize() {
   if (window.innerWidth <= 1024 || document.body.classList.contains("panel-collapsed")) {
     return;
   }
+  document.body.classList.add("is-resizing");
   state.ui.sectionResizeActive = true;
 }
 
@@ -2085,14 +2097,18 @@ function onControlPanelSectionResize(event) {
 
 function endPanelResize() {
   state.ui.resizeActive = false;
+  document.body.classList.remove("is-resizing");
 }
 
 function endControlPanelSectionResize() {
   state.ui.sectionResizeActive = false;
+  document.body.classList.remove("is-resizing");
 }
 
 function endAiPanelResize() {
   state.ui.aiResizeActive = false;
+  document.body.classList.remove("is-resizing");
+  persistAiProviderSettings();
 }
 
 function loadAiProviderSettings() {
@@ -2108,6 +2124,17 @@ function loadAiProviderSettings() {
       state.ai.status = "pending";
       state.ai.statusMessage = "Stored provider found. Revalidating access...";
     }
+    // Restore panel open state and width
+    if (parsed.panelOpen && state.ai.provider && state.ai.apiKey) {
+      state.ai.panelOpen = true;
+      document.body.classList.add("ai-panel-open");
+      const width = typeof parsed.aiPanelWidth === "number" && parsed.aiPanelWidth > 0
+        ? parsed.aiPanelWidth
+        : 400;
+      state.ui.aiPanelWidth = width;
+      document.documentElement.style.setProperty("--ai-panel-width", `${width}px`);
+      document.documentElement.style.setProperty("--ai-divider-width", "7px");
+    }
   } catch {
     window.localStorage.removeItem(AI_PROVIDER_STORAGE_KEY);
   }
@@ -2117,6 +2144,8 @@ function persistAiProviderSettings() {
   window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify({
     provider: state.ai.provider,
     apiKey: state.ai.apiKey,
+    panelOpen: state.ai.panelOpen,
+    aiPanelWidth: state.ui.aiPanelWidth,
   }));
 }
 
@@ -2222,6 +2251,9 @@ function syncAiUi() {
   if (dom.testAiConnectionBtn) {
     dom.testAiConnectionBtn.disabled = !state.ai.provider || !state.ai.apiKey || state.ai.status === "testing";
   }
+  if (dom.collapseAiPanelIcon) {
+    dom.collapseAiPanelIcon.innerHTML = state.ai.panelOpen ? "&#9654;" : "&#9664;";
+  }
   syncAiChatToggleBtn();
 }
 
@@ -2296,6 +2328,72 @@ function clearAiChat() {
   `;
 }
 
+function renderMarkdown(text) {
+  if (!text) return "";
+
+  // Escape HTML first (work on raw text)
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // Process line by line for block elements, then inline
+  const lines = text.split("\n");
+  const out = [];
+  let inList = false;
+
+  const flushList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+
+  const inlineFormat = (s) => {
+    return esc(s)
+      // Bold **text** or __text__
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/__(.+?)__/g, "<strong>$1</strong>")
+      // Italic *text* or _text_ (single, not double)
+      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
+      .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, "<em>$1</em>")
+      // Inline code `code`
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  };
+
+  lines.forEach((line) => {
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      flushList();
+      out.push("<hr>");
+      return;
+    }
+    // Heading ## or ###
+    const h3 = line.match(/^###\s+(.+)/);
+    const h2 = line.match(/^##\s+(.+)/);
+    const h1 = line.match(/^#\s+(.+)/);
+    if (h3) { flushList(); out.push(`<h4>${inlineFormat(h3[1])}</h4>`); return; }
+    if (h2) { flushList(); out.push(`<h4>${inlineFormat(h2[1])}</h4>`); return; }
+    if (h1) { flushList(); out.push(`<h4>${inlineFormat(h1[1])}</h4>`); return; }
+    // Bullet list - or *
+    const bullet = line.match(/^[\-\*]\s+(.+)/);
+    if (bullet) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${inlineFormat(bullet[1])}</li>`);
+      return;
+    }
+    // Numbered list
+    const numbered = line.match(/^\d+\.\s+(.+)/);
+    if (numbered) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${inlineFormat(numbered[1])}</li>`);
+      return;
+    }
+    flushList();
+    // Blank line → paragraph break
+    if (line.trim() === "") {
+      out.push("<br>");
+      return;
+    }
+    out.push(`<span>${inlineFormat(line)}</span><br>`);
+  });
+
+  flushList();
+  return out.join("");
+}
+
 function createAiMessageController(role, text = "", images = []) {
   state.ai.messages.push({ role, text });
   const article = document.createElement("article");
@@ -2326,9 +2424,9 @@ function createAiMessageController(role, text = "", images = []) {
     article.appendChild(imgRow);
   }
 
-  const body = document.createElement("p");
+  const body = document.createElement("div");
   body.className = "ai-chat-message-body";
-  body.textContent = text;
+  body.innerHTML = renderMarkdown(text);
   article.appendChild(body);
 
   dom.aiChatMessages.append(article);
@@ -2339,7 +2437,7 @@ function createAiMessageController(role, text = "", images = []) {
     body,
     status,
     setText(nextText) {
-      body.textContent = nextText;
+      body.innerHTML = renderMarkdown(nextText);
       dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
     },
     setStatus(nextStatus) {
@@ -4206,9 +4304,12 @@ function applyEmitterFormData(profile) {
 }
 
 function addAsset(latlng) {
+  // Use modal data if available (preferred), else fall back to hidden form fields
+  const formData = state.pendingEmitterData ?? getEmitterFormData();
+  state.pendingEmitterData = null;
   const asset = {
     id: crypto.randomUUID(),
-    ...getEmitterFormData(),
+    ...formData,
     lat: latlng.lat,
     lon: latlng.lng,
     groundElevationM: sampleTerrainElevation(latlng.lat, latlng.lng),
@@ -6013,7 +6114,7 @@ function syncMapContentOrder(entries) {
   state.mapContentOrder = state.mapContentOrder.filter((id) => ids.includes(id));
   ids.forEach((id) => {
     if (!state.mapContentOrder.includes(id)) {
-      state.mapContentOrder.unshift(id);
+      state.mapContentOrder.push(id);
     }
   });
 }
@@ -6083,19 +6184,35 @@ function buildMapContentRow(entry, isChild = false) {
 }
 
 function renderMapContents() {
+  if (!dom.mapContentsList) {
+    console.error("[renderMapContents] dom.mapContentsList is null — element not found");
+    return;
+  }
   const entries = getMapContentEntries();
-  syncMapContentOrder(entries);
+  console.log("[renderMapContents] entries:", entries.length, "folders:", state.mapContentFolders.length, "assets:", state.assets.length, "order:", state.mapContentOrder.length);
+
+  // Rebuild order from scratch to guarantee it always matches current entries
+  const entryIds = entries.map((e) => e.id);
+  // Keep any existing order for IDs we know about, append any new ones
+  const knownOrdered = state.mapContentOrder.filter((id) => entryIds.includes(id));
+  const missing = entryIds.filter((id) => !knownOrdered.includes(id));
+  state.mapContentOrder = [...knownOrdered, ...missing];
+
   dom.mapContentsList.innerHTML = "";
 
   if (!entries.length) {
-    dom.mapContentsList.innerHTML = '<div class="asset-item">No map contents yet. Place emitters, import files, or generate results to populate this panel.</div>';
+    dom.mapContentsList.innerHTML = '<div class="map-contents-empty">Add an emitter or a shape.</div>';
     return;
   }
 
   const entryMap = new Map(entries.map((entry) => [entry.id, entry]));
   const folderIds = new Set(state.mapContentFolders.map((folder) => `folder:${folder.id}`));
   const rendered = new Set();
-  state.mapContentOrder.forEach((contentId) => {
+
+  // Render in order; fall back to entry order if mapContentOrder is empty
+  const orderToUse = state.mapContentOrder.length ? state.mapContentOrder : entryIds;
+
+  orderToUse.forEach((contentId) => {
     if (rendered.has(contentId)) {
       return;
     }
@@ -6130,6 +6247,14 @@ function renderMapContents() {
 
     dom.mapContentsList.appendChild(buildMapContentRow(entry));
     rendered.add(contentId);
+  });
+
+  // Safety net: render any entries that slipped through (e.g. order/ID mismatch from old saves)
+  entries.forEach((entry) => {
+    if (!rendered.has(entry.id)) {
+      dom.mapContentsList.appendChild(buildMapContentRow(entry));
+      rendered.add(entry.id);
+    }
   });
 
   applyMapContentOrder();
@@ -6432,8 +6557,8 @@ function addMapContentFolder() {
     id: crypto.randomUUID(),
     name: `Folder ${state.mapContentFolders.length + 1}`,
   };
-  state.mapContentFolders.unshift(folder);
-  state.mapContentOrder.unshift(`folder:${folder.id}`);
+  state.mapContentFolders.push(folder);
+  state.mapContentOrder.push(`folder:${folder.id}`);
   renderMapContents();
   saveMapState();
 }
@@ -6787,7 +6912,7 @@ function addDrawnFeature(feature, folderId = null) {
   });
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId ?? null);
-  state.mapContentOrder.unshift(contentId);
+  state.mapContentOrder.push(contentId);
   renderMapContents();
   syncCesiumEntities();
   saveMapState();
@@ -7029,7 +7154,7 @@ function createMapContentFolderFromName(name) {
     name,
   };
   state.mapContentFolders.push(folder);
-  state.mapContentOrder.unshift(`folder:${folder.id}`);
+  state.mapContentOrder.push(`folder:${folder.id}`);
   return `folder:${folder.id}`;
 }
 
@@ -7080,7 +7205,7 @@ function addImportedFeature(feature, folderId, index) {
   item.layer.on?.("click", () => focusMapContent(contentId));
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId);
-  state.mapContentOrder.unshift(contentId);
+  state.mapContentOrder.push(contentId);
   syncCesiumEntities();
   saveMapState();
 }
@@ -7153,99 +7278,219 @@ function parseGeoJsonFeatures(text, fileName) {
 }
 
 function parseKmlFeatures(text, fileName) {
-  const xml = new DOMParser().parseFromString(text, "text/xml");
-  const features = [];
+  // Strip XML namespace declarations so querySelectorAll works without namespace prefixes
+  const stripped = text
+    .replace(/\sxmlns(?::\w+)?="[^"]*"/g, "")
+    .replace(/\sxmlns(?::\w+)?='[^']*'/g, "");
 
-  const walk = (node, folderPath = []) => {
-    Array.from(node.children).forEach((child) => {
-      const localName = child.localName;
-      if (localName === "Folder" || localName === "Document") {
-        const nextFolderPath = child.querySelector(":scope > name")?.textContent?.trim();
-        walk(child, nextFolderPath ? [...folderPath, nextFolderPath] : folderPath);
+  let xml;
+  try {
+    xml = new DOMParser().parseFromString(stripped, "text/xml");
+  } catch {
+    return [];
+  }
+
+  // Check for parse errors
+  if (xml.querySelector("parsererror")) {
+    // Try treating as HTML-wrapped KML (some exports)
+    try {
+      xml = new DOMParser().parseFromString(stripped, "text/html");
+    } catch {
+      return [];
+    }
+  }
+
+  const features = [];
+  const sourceLabel = fileName.toLowerCase().endsWith(".kmz") ? "KMZ" : "KML";
+
+  // Helper: get direct text child of element by local tag name (namespace-safe)
+  const directText = (el, tag) => {
+    for (const child of el.children) {
+      if (child.localName === tag) return child.textContent?.trim() ?? "";
+    }
+    return "";
+  };
+
+  // Helper: find first child element by localName (namespace-safe)
+  const findChild = (el, ...tags) => {
+    for (const child of el.children) {
+      if (tags.includes(child.localName)) return child;
+    }
+    return null;
+  };
+
+  // Helper: find all descendant elements by localName
+  const findAll = (el, tag) => {
+    const results = [];
+    const walk = (node) => {
+      for (const child of node.children) {
+        if (child.localName === tag) results.push(child);
+        walk(child);
+      }
+    };
+    walk(el);
+    return results;
+  };
+
+  const parsePlacemark = (placemark, folderPath) => {
+    const name = directText(placemark, "name") || "Imported Placemark";
+
+    const properties = {};
+    const extData = findChild(placemark, "ExtendedData");
+    if (extData) {
+      findAll(extData, "Data").forEach((d) => {
+        const key = d.getAttribute("name");
+        const val = findChild(d, "value")?.textContent?.trim();
+        if (key) properties[key] = val ?? "";
+      });
+      // ATAK SimpleData
+      findAll(extData, "SimpleData").forEach((d) => {
+        const key = d.getAttribute("name");
+        if (key) properties[key] = d.textContent?.trim() ?? "";
+      });
+    }
+
+    // Collect all geometry elements that are direct or near-direct children
+    const geomTags = ["Point", "LineString", "LinearRing", "Polygon", "MultiGeometry"];
+    const geometries = [];
+    for (const child of placemark.children) {
+      if (geomTags.includes(child.localName)) {
+        geometries.push(child);
+      }
+    }
+    // MultiGeometry: flatten children
+    const flatGeometries = [];
+    geometries.forEach((g) => {
+      if (g.localName === "MultiGeometry") {
+        for (const sub of g.children) {
+          if (geomTags.includes(sub.localName)) flatGeometries.push(sub);
+        }
+      } else {
+        flatGeometries.push(g);
+      }
+    });
+
+    flatGeometries.forEach((geometry, index) => {
+      const gName = flatGeometries.length > 1 ? `${name} ${index + 1}` : name;
+      const base = { name: gName, properties, folderPath, sourceLabel };
+
+      if (geometry.localName === "Point") {
+        const coordEl = findChild(geometry, "coordinates") || findAll(geometry, "coordinates")[0];
+        const coords = parseKmlCoordinateList(coordEl?.textContent ?? "");
+        if (coords.length && coords[0].length === 2) {
+          const [lon, lat] = coords[0];
+          if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            features.push({ ...base, geometryType: "Point", coordinates: [lat, lon] });
+          }
+        }
         return;
       }
 
-      if (localName === "Placemark") {
-        const name = child.querySelector(":scope > name")?.textContent?.trim() || "Imported Placemark";
-        features.push(...parseKmlPlacemark(child, folderPath, name, fileName));
+      if (geometry.localName === "LineString" || geometry.localName === "LinearRing") {
+        const coordEl = findChild(geometry, "coordinates") || findAll(geometry, "coordinates")[0];
+        const coords = parseKmlCoordinateList(coordEl?.textContent ?? "").map(([lon, lat]) => [lat, lon]);
+        if (coords.length >= 2) {
+          features.push({ ...base, geometryType: "LineString", coordinates: coords });
+        }
+        return;
+      }
+
+      if (geometry.localName === "Polygon") {
+        // outerBoundaryIs > LinearRing > coordinates
+        const outer = findChild(geometry, "outerBoundaryIs");
+        const ring = outer ? (findChild(outer, "LinearRing") || outer) : findChild(geometry, "LinearRing");
+        const coordEl = ring
+          ? (findChild(ring, "coordinates") || findAll(ring, "coordinates")[0])
+          : (findChild(geometry, "coordinates") || findAll(geometry, "coordinates")[0]);
+        const coords = parseKmlCoordinateList(coordEl?.textContent ?? "").map(([lon, lat]) => [lat, lon]);
+        if (coords.length >= 3) {
+          features.push({ ...base, geometryType: "Polygon", coordinates: coords });
+        }
       }
     });
+  };
+
+  const walk = (node, folderPath = []) => {
+    for (const child of node.children) {
+      const ln = child.localName;
+      if (ln === "Folder" || ln === "Document") {
+        const folderName = directText(child, "name");
+        walk(child, folderName ? [...folderPath, folderName] : folderPath);
+      } else if (ln === "Placemark") {
+        parsePlacemark(child, folderPath);
+      } else {
+        // Some KMLs nest Placemarks inside NetworkLink responses or other wrappers
+        walk(child, folderPath);
+      }
+    }
   };
 
   walk(xml.documentElement, []);
   return features;
 }
 
-function parseKmlPlacemark(placemark, folderPath, name, fileName) {
-  const sourceLabel = fileName.toLowerCase().endsWith(".kmz") ? "KMZ" : "KML";
-  const properties = {};
-  const extendedData = placemark.querySelector("ExtendedData");
-  if (extendedData) {
-    extendedData.querySelectorAll("Data").forEach((entry) => {
-      const key = entry.getAttribute("name");
-      const value = entry.querySelector("value")?.textContent?.trim();
-      if (key) {
-        properties[key] = value ?? "";
-      }
-    });
-  }
-
-  const geometries = [];
-  placemark.querySelectorAll("Point,LineString,Polygon").forEach((geometry) => {
-    if (geometry.closest("Placemark") === placemark) {
-      geometries.push(geometry);
-    }
-  });
-
-  return geometries.map((geometry, index) => {
-    if (geometry.localName === "Point") {
-      const [lon, lat] = parseKmlCoordinateList(geometry.querySelector("coordinates")?.textContent ?? "")[0] ?? [];
-      return {
-        name: geometries.length > 1 ? `${name} ${index + 1}` : name,
-        geometryType: "Point",
-        coordinates: [lat, lon],
-        properties,
-        folderPath,
-        sourceLabel,
-      };
-    }
-    if (geometry.localName === "LineString") {
-      return {
-        name: geometries.length > 1 ? `${name} ${index + 1}` : name,
-        geometryType: "LineString",
-        coordinates: parseKmlCoordinateList(geometry.querySelector("coordinates")?.textContent ?? "").map(([lon, lat]) => [lat, lon]),
-        properties,
-        folderPath,
-        sourceLabel,
-      };
-    }
-    return {
-      name: geometries.length > 1 ? `${name} ${index + 1}` : name,
-      geometryType: "Polygon",
-      coordinates: parseKmlCoordinateList(geometry.querySelector("outerBoundaryIs coordinates")?.textContent ?? geometry.querySelector("coordinates")?.textContent ?? "").map(([lon, lat]) => [lat, lon]),
-      properties,
-      folderPath,
-      sourceLabel,
-    };
-  }).filter((entry) => entry.coordinates?.length);
-}
-
 function parseKmlCoordinateList(value) {
+  if (!value) return [];
+  // KML coordinates: space-separated tuples of "lon,lat[,alt]"
   return value
     .trim()
+    .replace(/\r\n|\r/g, " ")
     .split(/\s+/)
-    .map((coordinate) => coordinate.split(",").slice(0, 2).map(Number))
-    .filter((coordinate) => coordinate.length === 2 && coordinate.every((entry) => Number.isFinite(entry)));
+    .map((tuple) => {
+      const parts = tuple.split(",").map(Number);
+      if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+        return [parts[0], parts[1]]; // [lon, lat] — altitude dropped
+      }
+      return null;
+    })
+    .filter(Boolean);
 }
 
 async function parseKmzFeatures(buffer, fileName) {
-  const zip = await window.JSZip.loadAsync(buffer);
-  const kmlEntry = Object.values(zip.files).find((entry) => entry.name.toLowerCase().endsWith(".kml"));
-  if (!kmlEntry) {
-    return [];
+  let zip;
+  try {
+    zip = await window.JSZip.loadAsync(buffer);
+  } catch (err) {
+    throw new Error(`Could not read KMZ/ZIP archive: ${err.message}`);
   }
-  const text = await kmlEntry.async("text");
-  return parseKmlFeatures(text, fileName);
+
+  const files = Object.values(zip.files).filter((f) => !f.dir);
+
+  // Find all KML files — ATAK packages can have multiple
+  const kmlFiles = files
+    .filter((f) => f.name.toLowerCase().endsWith(".kml"))
+    .sort((a, b) => {
+      // Prefer root-level doc.kml or files without subdirectories first
+      const aDepth = a.name.split("/").length;
+      const bDepth = b.name.split("/").length;
+      if (aDepth !== bDepth) return aDepth - bDepth;
+      // Prefer doc.kml
+      const aIsDoc = a.name.toLowerCase().includes("doc.kml");
+      const bIsDoc = b.name.toLowerCase().includes("doc.kml");
+      if (aIsDoc && !bIsDoc) return -1;
+      if (bIsDoc && !aIsDoc) return 1;
+      return 0;
+    });
+
+  if (!kmlFiles.length) {
+    throw new Error(`No KML found inside ${fileName}. The file may be a different format.`);
+  }
+
+  const allFeatures = [];
+  for (const kmlFile of kmlFiles) {
+    const text = await kmlFile.async("text");
+    const features = parseKmlFeatures(text, fileName);
+    allFeatures.push(...features);
+  }
+
+  // Deduplicate by name+coordinates fingerprint in case multiple KMLs reference same data
+  const seen = new Set();
+  return allFeatures.filter((f) => {
+    const key = `${f.name}|${f.geometryType}|${JSON.stringify(f.coordinates).slice(0, 60)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function syncCesiumEntities() {

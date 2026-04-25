@@ -18,7 +18,7 @@
     rel="stylesheet"
     href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
   >
-  <link rel="stylesheet" href="./styles.css?v=20260424-5">
+  <link rel="stylesheet" href="./styles.css?v=20260424-6">
 </head>
 <body>
   <div class="app-shell">
@@ -28,7 +28,7 @@
           <span id="collapsePanelIcon">&#9664;</span>
         </button>
         <div class="title-block">
-          <strong>RF Propagation Simulator</strong>
+          <strong>RF Planner</strong>
         </div>
       </div>
       <div class="status-strip">
@@ -270,25 +270,42 @@
             <div class="section-title-row">
               <h2>Map Contents</h2>
               <div class="button-row">
-                <button id="addEmitterBtn" class="ghost-button small icon-button add-emitter-btn" type="button" title="Add Emitter" aria-label="Add Emitter">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/>
-                    <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
-                  </svg>
-                  <span class="add-emitter-plus">+</span>
-                </button>
-                <button id="addMapFolderBtn" class="ghost-button small map-folder-icon-button" type="button" aria-label="Add Folder" data-tooltip="Add Folder">
+                <!-- Folder -->
+                <button id="addMapFolderBtn" class="ghost-button small map-folder-icon-button mc-icon-btn" type="button" aria-label="Add Folder" data-label="Folder">
                   <span class="map-folder-icon" aria-hidden="true">
                     <span class="map-folder-icon-tab"></span>
                     <span class="map-folder-icon-body"></span>
                     <span class="map-folder-icon-plus">+</span>
                   </span>
                 </button>
+                <!-- Import -->
+                <button id="importBtn" class="ghost-button small icon-button mc-icon-btn" type="button" aria-label="Import file" data-label="Import">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                </button>
+                <input id="importFileInput" type="file" accept=".kml,.kmz,.geojson,.json,.zip" style="display:none" aria-hidden="true">
+                <!-- Add Emitter -->
+                <button id="addEmitterBtn" class="ghost-button small icon-button add-emitter-btn mc-icon-btn" type="button" aria-label="Add Emitter" data-label="Emitter">
+                  <!-- handheld radio silhouette — larger viewBox gives more drawing room -->
+                  <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="6" y="9" width="12" height="13" rx="1"/>
+                    <line x1="9" y1="9" x2="9" y2="5"/>
+                    <line x1="14" y1="9" x2="14" y2="2"/>
+                    <rect x="8" y="12" width="8" height="4" rx="0.5"/>
+                  </svg>
+                  <span class="add-emitter-plus">+</span>
+                </button>
+                <!-- Draw Shape -->
                 <div class="draw-dropdown-wrapper">
-                  <button id="drawShapeBtn" class="ghost-button small icon-button" type="button" title="Draw Shape">
+                  <button id="drawShapeBtn" class="ghost-button small icon-button mc-icon-btn" type="button" aria-label="Draw Shape" data-label="Shape">
+                    <!-- polygon icon with corner + badge -->
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <polygon points="12 2 2 19 22 19"/>
+                      <polygon points="12 2 22 19 2 19"/>
                     </svg>
+                    <span class="add-emitter-plus">+</span>
                   </button>
                   <div id="drawDropdown" class="export-dropdown hidden">
                     <button id="drawCircleBtn" class="export-dropdown-item" type="button">Circle</button>
@@ -296,8 +313,9 @@
                     <button id="drawPolylineBtn" class="export-dropdown-item" type="button">Polyline / Polygon</button>
                   </div>
                 </div>
+                <!-- Export -->
                 <div class="export-dropdown-wrapper">
-                  <button id="exportMenuBtn" class="ghost-button small icon-button" type="button" title="Export">
+                  <button id="exportMenuBtn" class="ghost-button small icon-button mc-icon-btn" type="button" aria-label="Export" data-label="Export">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
                       <polyline points="16 6 12 2 8 6"/>
@@ -313,7 +331,7 @@
                 </div>
               </div>
             </div>
-            <div id="mapContentsList" class="asset-list map-contents-list"></div>
+            <div id="mapContentsList" class="map-contents-list"></div>
           </section>
         </div>
 

@@ -127,9 +127,9 @@ body.ai-panel-open {
 .top-bar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
   flex-shrink: 0;
-  padding: 0 10px;
+  padding: 0 20px;
   white-space: nowrap;
 }
 
@@ -419,7 +419,7 @@ body.ai-panel-open {
 }
 
 .title-block strong {
-  font-size: 0.88rem;
+  font-size: 1.1rem;
   letter-spacing: 0.06em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -490,18 +490,37 @@ body.panel-collapsed .control-panel {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.map-contents-card .section-title-row {
+  overflow: visible;
+}
+
+.map-contents-card .button-row {
+  overflow: visible;
+  gap: 4px;
+}
+
 .map-contents-list {
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: block;
+  background: var(--bg-input);
+}
+
+.map-contents-empty {
+  padding: 10px 10px;
+  color: var(--text-muted);
+  font-size: 0.73rem;
+  letter-spacing: 0.03em;
+  opacity: 0.4;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .map-folder-icon-button {
   position: relative;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -551,33 +570,41 @@ body.panel-collapsed .control-panel {
   text-align: center;
 }
 
-.map-folder-icon-button::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-menu);
-  color: var(--text);
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  box-shadow: var(--shadow);
-  opacity: 0;
-  transform: translateY(4px);
-  pointer-events: none;
-  transition: opacity 0.14s ease, transform 0.14s ease;
+/* ── Map-contents icon buttons: shared hover label ── */
+.mc-icon-btn {
+  position: relative;
+  overflow: visible;
 }
 
-.map-folder-icon-button:hover::after,
-.map-folder-icon-button:focus-visible::after {
+.mc-icon-btn::after {
+  content: attr(data-label);
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  padding: 2px 6px;
+  background: var(--bg-menu, #1e2430);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 200;
+}
+
+.mc-icon-btn:hover::after,
+.mc-icon-btn:focus-visible::after {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateX(-50%) translateY(0);
 }
 
 .panel-divider {
   cursor: col-resize;
+  -webkit-user-select: none;
+  user-select: none;
   background:
     linear-gradient(to right, transparent 0, transparent 2px, var(--border) 2px, var(--border) 5px, transparent 5px, transparent 100%);
 }
@@ -589,6 +616,12 @@ body.panel-collapsed .control-panel {
 
 body.panel-collapsed .panel-divider {
   cursor: default;
+}
+
+body.is-resizing {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: col-resize;
 }
 
 body:not(.ai-panel-open) .panel-divider-right {
@@ -676,7 +709,7 @@ body:not(.ai-panel-open) .ai-panel {
   margin: 0;
   white-space: pre-wrap;
   line-height: 1.55;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
 }
 
 .ai-chat-message-status {
@@ -688,6 +721,58 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-chat-message-body {
   min-height: 1.4em;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  margin-top: 4px;
+}
+
+.ai-chat-message-body br {
+  display: block;
+  content: "";
+  margin-top: 2px;
+}
+
+.ai-chat-message-body h4 {
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 8px 0 2px;
+  color: var(--accent-strong);
+}
+
+.ai-chat-message-body ul {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.ai-chat-message-body li {
+  margin: 2px 0;
+}
+
+.ai-chat-message-body strong {
+  font-weight: 700;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  opacity: 1;
+}
+
+.ai-chat-message-body em {
+  font-style: italic;
+}
+
+.ai-chat-message-body code {
+  font-family: monospace;
+  font-size: 0.78rem;
+  background: rgba(0,0,0,0.25);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.ai-chat-message-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
 }
 
 .ai-chat-message-user {
@@ -1131,6 +1216,7 @@ h2 {
 
 .export-dropdown-wrapper {
   position: relative;
+  overflow: visible;
 }
 
 .export-dropdown {
@@ -1163,6 +1249,7 @@ h2 {
 
 .draw-dropdown-wrapper {
   position: relative;
+  overflow: visible;
 }
 
 /* Shape style editor panel */
@@ -1317,15 +1404,38 @@ button:focus {
 }
 
 .asset-item {
-  padding: 6px 8px;
+  padding: 4px 8px;
   background: var(--bg-card-alt);
-  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.asset-item:first-child {
+  border-top: 1px solid var(--border);
+}
+
+/* In the map contents list, items are compact cards on a dark floor */
+.map-contents-list > .asset-item,
+.map-contents-list > div > .asset-item {
+  margin: 0;
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  align-self: flex-start;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .map-content-item {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   cursor: pointer;
+  width: 100%;
 }
 
 .map-content-item.is-dragging {
@@ -1859,18 +1969,29 @@ button:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 16px;
 }
 
 .emitter-modal {
   display: flex;
   flex-direction: column;
-  width: min(1060px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
+  width: min(1320px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow);
   overflow: hidden;
+  position: relative;
+}
+
+.emitter-modal select {
+  max-width: 100%;
+}
+
+.emitter-modal .param-grid select,
+.emitter-modal .library-select {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* Header */
