@@ -35,6 +35,23 @@ const BASEMAPS = {
   },
 };
 
+function generateId() {
+  if (typeof crypto !== "undefined") {
+    if (typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    if (typeof crypto.getRandomValues === "function") {
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+      return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10, 16).join("")}`;
+    }
+  }
+
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // ─── Radio Library ────────────────────────────────────────────────────────────
 // Each entry: radioType → { label, programs: { programKey → profile } }
 // Profile schema mirrors the emitter modal fields.
@@ -1377,6 +1394,7 @@ const emitterModal = {
     if (!profileName) return;
     const profile = {
       id: crypto.randomUUID(),
+        id: generateId(),
       profileName,
       type: data.type,
       force: data.force,
@@ -2165,6 +2183,9 @@ function updateMapOverlayMetrics() {
   }
 
   const requestId = crypto.randomUUID();
+    const requestId = generateId();
+    id: generateId(),
+    id: generateId(),
   state.centerElevationRequestId = requestId;
   dom.centerElevationValue.textContent = "Loading terrain...";
   sampleTerrainElevationAsync(center.lat, center.lng)
@@ -5225,6 +5246,7 @@ async function onTerrainImport(event) {
     const buffer = await file.arrayBuffer();
     const terrain = parseDted(buffer, file.name);
     terrain.id = crypto.randomUUID();
+      terrain.id = generateId();
     terrain.name = file.name;
     terrain.extentVisible = false;
 
@@ -5299,6 +5321,8 @@ async function runSimulation() {
       type: "simulation:start",
       payload: {
         requestId: state.editingViewshedId ?? crypto.randomUUID(),
+          requestId: state.editingViewshedId ?? generateId(),
+          id: generateId(),
         asset: selected,
         weather: state.weather,
         terrainId,
@@ -5541,6 +5565,7 @@ function saveProfile() {
   const existing = state.profiles.find((entry) => entry.id === dom.profileSelect.value);
   const payload = {
     ...(existing ?? { id: crypto.randomUUID() }),
+      ...(existing ?? { id: generateId() }),
     profileName: name,
     ...getEmitterFormData(),
   };
@@ -5907,6 +5932,11 @@ async function runPlanning() {
     const terrainId = await resolveTerrainIdForPlanning(polygon, Number(dom.planningGridMeters.value));
 
     state.pendingPlanningRequestId = crypto.randomUUID();
+      state.pendingPlanningRequestId = generateId();
+      id: generateId(),
+      id: generateId(),
+      id: generateId(),
+      id: generateId(),
     setStatus("Evaluating candidate placements...");
     state.worker.postMessage({
       type: "planning:start",
