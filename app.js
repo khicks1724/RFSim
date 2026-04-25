@@ -599,6 +599,7 @@ const dom = {
   connectGeolocationBtn: document.querySelector("#connectGeolocationBtn"),
   connectUsbGpsBtn: document.querySelector("#connectUsbGpsBtn"),
   gpsCenterMode: document.querySelector("#gpsCenterMode"),
+  gpsHelpText: document.querySelector("#gpsHelpText"),
   drawPlanningRegionBtn: document.querySelector("#drawPlanningRegionBtn"),
   runPlanningBtn: document.querySelector("#runPlanningBtn"),
   planningTxAsset: document.querySelector("#planningTxAsset"),
@@ -707,6 +708,8 @@ const state = {
     serialPort: null,
     serialReader: null,
     mode: "disconnected",
+    statusMessage: "",
+    statusIsError: false,
     marker: null,
     accuracyCircle: null,
     centeredOnce: false,
@@ -1469,6 +1472,7 @@ async function init() {
   updateTerrainSummary();
   updateWeatherState();
   applySettings();
+  syncGpsUi();
   updateMapOverlayMetrics();
   updateClock();
   syncAiUi();
@@ -1519,6 +1523,56 @@ async function init() {
   state.map.on(L.Draw.Event.CREATED, onPlanningRegionCreated);
   state.worker.addEventListener("message", onWorkerMessage);
   state.planning.markersLayer.addTo(state.map);
+}
+
+function setGpsStatusMessage(message, isError = false) {
+  state.gps.statusMessage = message;
+  state.gps.statusIsError = isError;
+  syncGpsUi();
+}
+
+function syncGpsUi() {
+  const secureContext = window.isSecureContext;
+  const browserGpsAvailable = secureContext && Boolean(navigator.geolocation);
+  const usbGpsAvailable = secureContext && ("serial" in navigator);
+
+  if (dom.connectGeolocationBtn) {
+    dom.connectGeolocationBtn.disabled = !browserGpsAvailable;
+    dom.connectGeolocationBtn.title = browserGpsAvailable
+      ? "Use the browser Geolocation API"
+      : secureContext
+        ? "Geolocation is not available in this browser"
+        : "Browser GPS requires HTTPS or localhost";
+  }
+
+  if (dom.connectUsbGpsBtn) {
+    dom.connectUsbGpsBtn.disabled = !usbGpsAvailable;
+    dom.connectUsbGpsBtn.title = usbGpsAvailable
+      ? "Select a GPS device over Web Serial"
+      : secureContext
+        ? "USB GPS requires a Chromium browser with Web Serial support"
+        : "USB GPS requires HTTPS or localhost";
+  }
+
+  if (!dom.gpsHelpText) {
+    return;
+  }
+
+  let helpText = state.gps.statusMessage;
+  if (!helpText) {
+    if (!secureContext) {
+      helpText = "Browser GPS and USB GPS require a secure context. Open the app on HTTPS or localhost to use either option.";
+    } else if (!navigator.geolocation && !("serial" in navigator)) {
+      helpText = "This browser exposes neither Geolocation nor Web Serial. Use Chrome or Edge on HTTPS for GPS features.";
+    } else if (!("serial" in navigator)) {
+      helpText = "Browser GPS is available. USB GPS requires Chrome or Edge with Web Serial support.";
+    } else {
+      helpText = "Browser mode uses the Geolocation API. USB mode reads NMEA over Web Serial when supported. Direct gpsd access requires a local bridge service outside the browser sandbox.";
+    }
+  }
+
+  dom.gpsHelpText.textContent = helpText;
+  dom.gpsHelpText.style.color = state.gps.statusIsError ? "#ff9f9f" : "";
 }
 
 function getTopBarDropdownConfigs() {
@@ -5778,8 +5832,17 @@ function buildKmlDocument() {
 }
 
 async function connectBrowserGeolocation() {
+  if (!window.isSecureContext) {
+    const message = "Browser GPS requires HTTPS or localhost. This page is not in a secure context.";
+    setGpsStatusMessage(message, true);
+    setStatus(message, true);
+    return;
+  }
+
   if (!navigator.geolocation) {
-    setStatus("Geolocation API is not available in this browser.", true);
+    const message = "Geolocation API is not available in this browser.";
+    setGpsStatusMessage(message, true);
+    setStatus(message, true);
     return;
   }
 
@@ -5789,36 +5852,57 @@ async function connectBrowserGeolocation() {
 
   state.gps.geolocationWatchId = navigator.geolocation.watchPosition(
     (position) => {
+      setGpsStatusMessage("Browser GPS is active.");
       applyGpsFix({
         lat: position.coords.latitude,
         lon: position.coords.longitude,
         accuracyM: position.coords.accuracy ?? null,
       }, "browser");
     },
-    (error) => setStatus(error.message, true),
+    (error) => {
+      const message = `Browser GPS failed: ${error.message}`;
+      setGpsStatusMessage(message, true);
+      setStatus(message, true);
+    },
     { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 },
   );
 
+  setGpsStatusMessage("Waiting for browser GPS permission or first fix...");
   setStatus("Browser GPS connected.");
 }
 
 async function connectUsbGps() {
+  if (!window.isSecureContext) {
+    const message = "USB GPS requires HTTPS or localhost. This page is not in a secure context.";
+    setGpsStatusMessage(message, true);
+    setStatus(message, true);
+    return;
+  }
+
   if (!("serial" in navigator)) {
-    setStatus("Web Serial is not supported in this browser.", true);
+    const message = "Web Serial is not supported in this browser. Use Chrome or Edge over HTTPS.";
+    setGpsStatusMessage(message, true);
+    setStatus(message, true);
     return;
   }
 
   try {
+    setGpsStatusMessage("Waiting for USB GPS device selection...");
     const port = await navigator.serial.requestPort();
     await port.open({ baudRate: 9600 });
     state.gps.serialPort = port;
     state.gps.serialReader = port.readable.getReader();
     state.gps.mode = "usb";
     dom.gpsStatusValue.textContent = "USB GPS Connected";
+    setGpsStatusMessage("USB GPS connected. Waiting for NMEA sentences...");
     setStatus("USB GPS connected. Waiting for NMEA sentences...");
     readUsbGpsLoop();
   } catch (error) {
-    setStatus(error.message, true);
+    const message = error?.name === "NotFoundError"
+      ? "USB GPS device selection was canceled."
+      : `USB GPS failed: ${error.message}`;
+    setGpsStatusMessage(message, true);
+    setStatus(message, true);
   }
 }
 
@@ -5843,7 +5927,9 @@ async function readUsbGpsLoop() {
       });
     }
   } catch (error) {
-    setStatus(error.message, true);
+    const message = `USB GPS read failed: ${error.message}`;
+    setGpsStatusMessage(message, true);
+    setStatus(message, true);
   }
 }
 
@@ -5889,6 +5975,7 @@ function nmeaToDecimal(raw, hemisphere) {
 function applyGpsFix(fix, mode) {
   state.gps.mode = mode;
   state.gps.location = fix;
+  state.gps.statusIsError = false;
   dom.gpsStatusValue.textContent = mode === "usb" ? "USB GPS Active" : "Browser GPS Active";
   updateCoordinateDisplays();
 
