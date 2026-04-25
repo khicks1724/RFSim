@@ -27,5 +27,18 @@ create table if not exists project_snapshot (
   created_at timestamptz not null default now()
 );
 
+create table if not exists user_ai_config (
+  id text primary key,
+  owner_user_id uuid not null references app_user(id) on delete cascade,
+  label text not null default '',
+  provider text not null,
+  api_key text not null,
+  model text not null default '',
+  position integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists idx_project_owner_updated on project (owner_user_id, updated_at desc);
 create index if not exists idx_project_snapshot_project_created on project_snapshot (project_id, created_at desc);
+create index if not exists idx_user_ai_config_owner_position on user_ai_config (owner_user_id, position asc, updated_at desc);

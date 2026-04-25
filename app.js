@@ -472,8 +472,14 @@ const dom = {
   collapsePanelBtn: document.querySelector("#collapsePanelBtn"),
   collapsePanelIcon: document.querySelector("#collapsePanelIcon"),
   controlPanel: document.querySelector("#controlPanel"),
+  mcSelectBtn: document.querySelector("#mcSelectBtn"),
+  undoBanner: document.querySelector("#undoBanner"),
+  undoBannerMsg: document.querySelector("#undoBannerMsg"),
+  undoBannerBtn: document.querySelector("#undoBannerBtn"),
+  undoBannerDismiss: document.querySelector("#undoBannerDismiss"),
   panelDivider: document.querySelector("#panelDivider"),
   controlPanelSectionDivider: document.querySelector("#controlPanelSectionDivider"),
+  panelModeBtn: document.querySelector("#panelModeBtn"),
   aiPanelDivider: document.querySelector("#aiPanelDivider"),
   imageryMenuBtn: document.querySelector("#imageryMenuBtn"),
   imageryMenu: document.querySelector("#imageryMenu"),
@@ -544,7 +550,8 @@ const dom = {
   view3dToggleBtn: document.querySelector("#view3dToggleBtn"),
   basemapSelect: document.querySelector("#basemapSelect"),
   customTileUrl: document.querySelector("#customTileUrl"),
-  radiusKm: document.querySelector("#radiusKm"),
+  radiusValue: document.querySelector("#radiusValue"),
+  radiusUnit: document.querySelector("#radiusUnit"),
   terrainSourceSelect: document.querySelector("#terrainSourceSelect"),
   imagerySourceSelect: document.querySelector("#imagerySourceSelect"),
   customTerrainUrl: document.querySelector("#customTerrainUrl"),
@@ -662,10 +669,13 @@ const dom = {
   aiClearChatBtn: document.querySelector("#aiClearChatBtn"),
   aiAttachmentBar: document.querySelector("#aiAttachmentBar"),
   aiImagePreviews: document.querySelector("#aiImagePreviews"),
+  aiFileChips: document.querySelector("#aiFileChips"),
   aiContextChips: document.querySelector("#aiContextChips"),
-  aiAttachImageBtn: document.querySelector("#aiAttachImageBtn"),
-  aiImageFileInput: document.querySelector("#aiImageFileInput"),
-  aiAddContextBtn: document.querySelector("#aiAddContextBtn"),
+  aiAddAttachmentBtn: document.querySelector("#aiAddAttachmentBtn"),
+  aiFileInput: document.querySelector("#aiFileInput"),
+  aiAttachmentMenu: document.querySelector("#aiAttachmentMenu"),
+  aiAddMapContextOption: document.querySelector("#aiAddMapContextOption"),
+  aiAddFilesOption: document.querySelector("#aiAddFilesOption"),
   aiContextPicker: document.querySelector("#aiContextPicker"),
   aiVoiceBtn: document.querySelector("#aiVoiceBtn"),
   aiMentionDropdown: document.querySelector("#aiMentionDropdown"),
@@ -712,6 +722,11 @@ const state = {
   mapContentFolders: [],
   mapContentAssignments: new Map(),
   hiddenContentIds: new Set(),
+  mcSelectMode: false,
+  mcSelectedIds: new Set(),
+  mcLastClickedId: null,
+  undoStack: [],          // [{label, snapshots:[{contentId, restoreFn}]}]
+  undoBannerTimerId: null,
   activeMapContentMenuId: null,
   renamingMapContentId: null,
   workspaceMenuOpen: false,
@@ -762,6 +777,7 @@ const state = {
     sectionResizeActive: false,
     aiResizeActive: false,
     aiPanelWidth: 400,
+    panelMode: "edit",
   },
   session: {
     token: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
@@ -781,6 +797,7 @@ const state = {
     status: "offline",
     statusMessage: "Add a provider and API key to enable the AI planning assistant.",
     pendingImages: [],    // [{dataUrl, mediaType}]
+    pendingFiles: [],     // [{id, name, mediaType, size, textExcerpt, contentAvailable}]
     contextItemIds: [],  // content IDs to include as extra context
     activeContextId: null,
     voiceRecording: false,
@@ -884,6 +901,43 @@ function sanitizeAiSavedConfig(config) {
   };
 }
 
+function sameAiSavedConfig(left, right) {
+  if (!left || !right) {
+    return false;
+  }
+  return left.label === right.label
+    && left.provider === right.provider
+    && left.apiKey === right.apiKey
+    && left.model === right.model;
+}
+
+function mergeAiSavedConfigs(primaryConfigs = [], secondaryConfigs = []) {
+  const merged = [];
+  [...primaryConfigs, ...secondaryConfigs].forEach((config) => {
+    const sanitized = sanitizeAiSavedConfig(config);
+    if (!sanitized) {
+      return;
+    }
+    const exists = merged.some((entry) => entry.id === sanitized.id || sameAiSavedConfig(entry, sanitized));
+    if (!exists) {
+      merged.push(sanitized);
+    }
+  });
+  return merged;
+}
+
+function aiSavedConfigListsEqual(leftConfigs = [], rightConfigs = []) {
+  if (leftConfigs.length !== rightConfigs.length) {
+    return false;
+  }
+  return leftConfigs.every((config, index) => {
+    const other = rightConfigs[index];
+    return Boolean(other)
+      && config.id === other.id
+      && sameAiSavedConfig(config, other);
+  });
+}
+
 function getAiSavedConfigDisplayLabel(config) {
   if (!config) {
     return "";
@@ -904,18 +958,7 @@ function setActiveAiDraft(provider, apiKey, model, configId = "", label = "") {
 }
 
 function syncActiveAiConfigFromDraft() {
-  if (!state.ai.activeConfigId) {
-    return;
-  }
-  const savedConfig = getSavedAiConfig();
-  if (!savedConfig) {
-    state.ai.activeConfigId = "";
-    return;
-  }
-  savedConfig.provider = state.ai.provider;
-  savedConfig.apiKey = state.ai.apiKey;
-  savedConfig.model = ensureAiModelForProvider(state.ai.provider, state.ai.model);
-  savedConfig.label = state.ai.configLabel.trim();
+  // Draft edits should not mutate a saved key until the user explicitly saves.
 }
 
 function setAiStatusFromCurrentConfig() {
@@ -963,6 +1006,50 @@ function renderAiModelOptions() {
   dom.aiChatModelSelect.value = ensureAiModelForProvider(state.ai.provider, state.ai.model);
 }
 
+async function syncAiProviderSettingsToServer() {
+  if (!state.session.token) {
+    return;
+  }
+
+  await apiFetch("/user/ai-configs", {
+    method: "PUT",
+    body: JSON.stringify({
+      configs: state.ai.savedConfigs.map((config) => ({
+        id: config.id,
+        label: config.label,
+        provider: config.provider,
+        apiKey: config.apiKey,
+        model: config.model,
+      })),
+    }),
+  });
+}
+
+async function loadServerAiProviderSettings() {
+  if (!state.session.token) {
+    return;
+  }
+
+  const localConfigs = state.ai.savedConfigs.map(sanitizeAiSavedConfig).filter(Boolean);
+  const payload = await apiFetch("/user/ai-configs");
+  const serverConfigs = Array.isArray(payload.configs)
+    ? payload.configs.map(sanitizeAiSavedConfig).filter(Boolean)
+    : [];
+  const mergedConfigs = mergeAiSavedConfigs(serverConfigs, localConfigs);
+
+  state.ai.savedConfigs = mergedConfigs;
+  if (state.ai.activeConfigId && !mergedConfigs.some((config) => config.id === state.ai.activeConfigId)) {
+    state.ai.activeConfigId = "";
+  }
+
+  persistAiProviderSettings();
+  syncAiUi();
+
+  if (!aiSavedConfigListsEqual(serverConfigs, mergedConfigs)) {
+    await syncAiProviderSettingsToServer();
+  }
+}
+
 function persistSessionStorage() {
   if (state.session.token) {
     window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, state.session.token);
@@ -1000,6 +1087,7 @@ async function hydrateSession() {
     const payload = await apiFetch("/auth/me");
     state.session.user = payload.user;
     await loadProjectList();
+    await loadServerAiProviderSettings();
   } catch (error) {
     clearSessionState();
     setStatus(`Session reset: ${error.message}`, true);
@@ -1076,6 +1164,7 @@ async function onWorkspaceLogin() {
   state.session.user = payload.user;
   persistSessionStorage();
   await loadProjectList();
+  await loadServerAiProviderSettings();
   setStatus(`Signed in as ${payload.user.email}.`);
 }
 
@@ -1096,6 +1185,7 @@ async function onWorkspaceRegister() {
   state.session.user = payload.user;
   persistSessionStorage();
   await loadProjectList();
+  await loadServerAiProviderSettings();
   setStatus(`Account created for ${payload.user.email}.`);
 }
 
@@ -1281,6 +1371,7 @@ const emitterModal = {
   open(prefill = null) {
     this.backdrop.classList.remove("hidden");
     document.body.classList.add("emitter-modal-open");
+    setAssetPlacementMode(false);
     this.switchTab("rf");
     const isEditing = prefill && prefill.lat !== undefined;
     this.populateColocateOptions(prefill?.id ?? null);
@@ -1662,6 +1753,7 @@ const emitterModal = {
 
     if (resolvedLocation) {
       state.pendingEmitterData = data;
+      setAssetPlacementMode(false);
       addAsset(resolvedLocation);
       this.close();
       setStatus(`Emitter placed at ${resolvedLocation.description}.`);
@@ -1671,7 +1763,7 @@ const emitterModal = {
     // New placement
     state.pendingEmitterData = data;
     this.close();
-    state.placingAsset = true;
+    setAssetPlacementMode(true);
     setStatus("Click on the map to place the emitter.");
   },
 
@@ -1729,14 +1821,15 @@ async function init() {
   initTopBarDropdowns();
   initRangeInputs();
   initEmitterModal();
+  loadAiProviderSettings();
   await hydrateSession();
   loadCesiumIonToken();
-  loadAiProviderSettings();
   loadSettings();
   loadProfiles();
   applyBasemap(dom.basemapSelect.value);
   updateImageryMenuValue();
   wireEvents();
+  applyPanelMode();
   await loadMapState();
   renderAssets();
   renderTerrains();
@@ -1914,6 +2007,10 @@ function initMap() {
 
 function wireEvents() {
   dom.collapsePanelBtn.addEventListener("click", togglePanelCollapse);
+  dom.panelModeBtn.addEventListener("click", togglePanelMode);
+  dom.mcSelectBtn.addEventListener("click", toggleMcSelectMode);
+  dom.undoBannerBtn.addEventListener("click", performUndo);
+  dom.undoBannerDismiss.addEventListener("click", dismissUndoBanner);
   dom.panelDivider.addEventListener("mousedown", beginPanelResize);
   dom.controlPanelSectionDivider.addEventListener("mousedown", beginControlPanelSectionResize);
   dom.aiPanelDivider.addEventListener("mousedown", beginAiPanelResize);
@@ -1999,7 +2096,24 @@ function wireEvents() {
     if (e.key === "Escape") {
       if (state.settingsMenuOpen) closeSettingsMenu();
       else if (state.draw.mode) cancelDrawing();
+      else if (state.mcSelectMode) toggleMcSelectMode();
       else closeShapeStylePanel();
+    }
+    if (e.key === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      const tag = document.activeElement?.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
+        e.preventDefault();
+        performUndo();
+      }
+    }
+    if (e.key === "Delete" || e.key === "Backspace") {
+      const tag = document.activeElement?.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
+        if (state.mcSelectMode && state.mcSelectedIds.size > 0) {
+          e.preventDefault();
+          deleteSelectedMcItems();
+        }
+      }
     }
   });
   dom.map.addEventListener("dragover", onMapFileDragOver);
@@ -2034,13 +2148,23 @@ function wireEvents() {
   dom.aiChatInput.addEventListener("paste", onAiChatPaste);
   dom.aiChatInput.addEventListener("keydown", onAiChatKeyDown);
   dom.aiChatInput.addEventListener("input", onAiChatInput);
-  dom.aiAttachImageBtn.addEventListener("click", () => dom.aiImageFileInput.click());
-  dom.aiImageFileInput.addEventListener("change", onAiImageFileChange);
-  dom.aiAddContextBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleAiContextPicker(); });
+  dom.aiAddAttachmentBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleAiAttachmentMenu(); });
+  dom.aiFileInput.addEventListener("change", onAiFileInputChange);
+  dom.aiAddMapContextOption.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dom.aiAttachmentMenu.classList.add("hidden");
+    toggleAiContextPicker(true);
+  });
+  dom.aiAddFilesOption.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dom.aiAttachmentMenu.classList.add("hidden");
+    dom.aiFileInput.click();
+  });
   dom.aiContextPicker.addEventListener("click", (e) => e.stopPropagation());
   dom.aiVoiceBtn.addEventListener("click", toggleVoiceInput);
   dom.aiMentionDropdown.addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", () => {
+    dom.aiAttachmentMenu.classList.add("hidden");
     dom.aiContextPicker.classList.add("hidden");
     dom.aiMentionDropdown.classList.add("hidden");
   });
@@ -2059,7 +2183,7 @@ function wireEvents() {
       saveAssetEdits();
       return;
     }
-    state.placingAsset = true;
+    setAssetPlacementMode(true);
     setStatus("Click on the map to place the emitter.");
   });
   dom.exportMenuBtn.addEventListener("click", (e) => {
@@ -2079,6 +2203,12 @@ function wireEvents() {
     if (event.target === dom.simulationModal) {
       closeSimulationModal();
     }
+  });
+  dom.radiusUnit?.addEventListener("change", () => {
+    const previousUnit = dom.radiusUnit.dataset.previousUnit || getDefaultCoverageRadiusUnit();
+    const previousMeters = convertRadiusUnitToMeters(Number(dom.radiusValue?.value || 0), previousUnit);
+    syncCoverageRadiusInput(dom.radiusUnit.value, previousMeters);
+    dom.radiusUnit.dataset.previousUnit = dom.radiusUnit.value;
   });
   dom.connectGeolocationBtn.addEventListener("click", connectBrowserGeolocation);
   dom.connectUsbGpsBtn.addEventListener("click", connectUsbGps);
@@ -2907,6 +3037,17 @@ function onControlPanelSectionResize(event) {
   document.documentElement.style.setProperty("--control-panel-top-height", `${nextHeight}px`);
 }
 
+function togglePanelMode() {
+  state.ui.panelMode = state.ui.panelMode === "edit" ? "plan" : "edit";
+  applyPanelMode();
+}
+
+function applyPanelMode() {
+  const isPlan = state.ui.panelMode === "plan";
+  dom.controlPanel.classList.toggle("panel-mode-edit", !isPlan);
+  dom.panelModeBtn.setAttribute("aria-checked", String(isPlan));
+}
+
 function endPanelResize() {
   state.ui.resizeActive = false;
   document.body.classList.remove("is-resizing");
@@ -3037,26 +3178,41 @@ function saveAiProvider() {
     return;
   }
 
-  const nextConfig = {
-    id: state.ai.activeConfigId || generateAiConfigId(),
+  const draftConfig = {
     label: state.ai.configLabel.trim(),
     provider: state.ai.provider,
     apiKey: state.ai.apiKey,
     model: ensureAiModelForProvider(state.ai.provider, state.ai.model),
   };
-  const existingIndex = state.ai.savedConfigs.findIndex((config) => config.id === nextConfig.id);
-  if (existingIndex >= 0) {
-    state.ai.savedConfigs.splice(existingIndex, 1, nextConfig);
+  const exactMatch = state.ai.savedConfigs.find((config) => (
+    config.label === draftConfig.label
+    && config.provider === draftConfig.provider
+    && config.apiKey === draftConfig.apiKey
+    && config.model === draftConfig.model
+  ));
+
+  if (exactMatch) {
+    state.ai.activeConfigId = exactMatch.id;
+    state.ai.configLabel = exactMatch.label;
+    state.ai.model = exactMatch.model;
+    if (state.ai.status !== "ready") {
+      state.ai.statusMessage = `Saved keys: ${state.ai.savedConfigs.length}. This key is already saved.`;
+    }
   } else {
+    const nextConfig = {
+      id: generateAiConfigId(),
+      ...draftConfig,
+    };
     state.ai.savedConfigs.push(nextConfig);
-  }
-  state.ai.activeConfigId = nextConfig.id;
-  state.ai.configLabel = nextConfig.label;
-  state.ai.model = nextConfig.model;
-  if (state.ai.status !== "ready") {
-    state.ai.statusMessage = `Saved ${state.ai.savedConfigs.length} AI key${state.ai.savedConfigs.length === 1 ? "" : "s"}.`;
+    state.ai.activeConfigId = nextConfig.id;
+    state.ai.configLabel = nextConfig.label;
+    state.ai.model = nextConfig.model;
+    if (state.ai.status !== "ready") {
+      state.ai.statusMessage = `Saved ${state.ai.savedConfigs.length} AI key${state.ai.savedConfigs.length === 1 ? "" : "s"}.`;
+    }
   }
   persistAiProviderSettings();
+  syncAiProviderSettingsToServer().catch((error) => setStatus(`AI key sync failed: ${error.message}`, true));
   syncAiUi();
 }
 
@@ -3077,6 +3233,7 @@ function deleteAiProvider() {
     ? `Deleted ${getAiSavedConfigDisplayLabel(deletedConfig)}.`
     : defaultAiStatusMessage();
   persistAiProviderSettings();
+  syncAiProviderSettingsToServer().catch((error) => setStatus(`AI key sync failed: ${error.message}`, true));
   syncAiUi();
 }
 
@@ -3157,14 +3314,8 @@ function syncAiUi() {
   }
   if (dom.aiPanelStatus) {
     dom.aiPanelStatus.textContent = state.ai.status === "ready"
-      ? "Provider connected"
-      : state.ai.status === "testing"
-        ? "Testing provider"
-        : state.ai.status === "pending"
-          ? "Awaiting validation"
-          : state.ai.status === "error"
-            ? "Provider error"
-            : "Provider offline";
+      ? "Connected"
+      : "Offline";
   }
   renderAiEmptyState();
   const hasConfiguredProvider = Boolean(state.ai.provider && state.ai.apiKey);
@@ -3186,11 +3337,8 @@ function syncAiUi() {
   if (dom.aiSendBtn) {
     dom.aiSendBtn.disabled = !sendEnabled;
   }
-  if (dom.aiAttachImageBtn) {
-    dom.aiAttachImageBtn.disabled = !actionButtonsEnabled;
-  }
-  if (dom.aiAddContextBtn) {
-    dom.aiAddContextBtn.disabled = !actionButtonsEnabled;
+  if (dom.aiAddAttachmentBtn) {
+    dom.aiAddAttachmentBtn.disabled = !actionButtonsEnabled;
   }
   if (dom.aiVoiceBtn) {
     dom.aiVoiceBtn.disabled = !actionButtonsEnabled || !("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
@@ -3213,7 +3361,7 @@ function openAiPanel() {
 async function onAiChatSubmit(event) {
   event.preventDefault();
   const prompt = dom.aiChatInput.value.trim();
-  if (!prompt && state.ai.pendingImages.length === 0) return;
+  if (!prompt && state.ai.pendingImages.length === 0 && state.ai.pendingFiles.length === 0) return;
   if (state.ai.requestInFlight) return;
   if (state.ai.status !== "ready") {
     if (!state.ai.provider || !state.ai.apiKey) {
@@ -3226,6 +3374,7 @@ async function onAiChatSubmit(event) {
   }
 
   const images = [...state.ai.pendingImages];
+  const files = [...state.ai.pendingFiles];
   const contextIds = getAiContextIds(state.ai.contextItemIds);
 
   // Render user message in chat
@@ -3242,7 +3391,7 @@ async function onAiChatSubmit(event) {
   const stopThinkingIndicator = startAiThinkingIndicator(assistantMessageController);
 
   try {
-    const response = await callAiPlanningAssistant(prompt, images, contextIds, {
+    const response = await callAiPlanningAssistant(prompt, images, files, contextIds, {
       onStatus: (statusText) => assistantMessageController.setStatus(statusText),
     });
     const executionSummary = await executeAiActions(response.actions ?? []);
@@ -3621,14 +3770,18 @@ function setContentLayerVisible(contentId, visible) {
 
 function clearAiAttachments() {
   state.ai.pendingImages = [];
+  state.ai.pendingFiles = [];
   state.ai.contextItemIds = [];
   dom.aiImagePreviews.innerHTML = "";
+  dom.aiFileChips.innerHTML = "";
   dom.aiContextChips.innerHTML = "";
+  dom.aiAttachmentMenu.classList.add("hidden");
+  dom.aiContextPicker.classList.add("hidden");
   dom.aiAttachmentBar.classList.add("hidden");
 }
 
 function syncAttachmentBar() {
-  const hasContent = state.ai.pendingImages.length > 0 || state.ai.contextItemIds.length > 0;
+  const hasContent = state.ai.pendingImages.length > 0 || state.ai.pendingFiles.length > 0 || state.ai.contextItemIds.length > 0;
   dom.aiAttachmentBar.classList.toggle("hidden", !hasContent);
 }
 
@@ -3643,10 +3796,66 @@ function onAiChatPaste(event) {
   }
 }
 
-function onAiImageFileChange(event) {
+function onAiFileInputChange(event) {
   const files = [...(event.target.files ?? [])];
-  files.forEach((f) => addAiPendingImage(f, f.type));
+  files.forEach((file) => {
+    if (file.type.startsWith("image/")) {
+      addAiPendingImage(file, file.type);
+      return;
+    }
+    void addAiPendingFile(file);
+  });
   event.target.value = "";
+}
+
+function generateAiAttachmentId(prefix = "attachment") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function isAiTextLikeFile(file) {
+  const type = (file.type || "").toLowerCase();
+  if (type.startsWith("text/")) {
+    return true;
+  }
+  return /json|javascript|typescript|xml|yaml|csv|markdown/.test(type)
+    || /\.(txt|md|markdown|json|geojson|csv|log|xml|yaml|yml|js|ts|html|css|kml)$/i.test(file.name || "");
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file."));
+    reader.readAsText(file);
+  });
+}
+
+async function addAiPendingFile(file) {
+  const attachmentId = generateAiAttachmentId("file");
+  let textExcerpt = "";
+  let contentAvailable = false;
+
+  if (isAiTextLikeFile(file)) {
+    try {
+      const text = await readFileAsText(file);
+      textExcerpt = text.slice(0, 20000);
+      contentAvailable = Boolean(textExcerpt.trim());
+    } catch {
+      contentAvailable = false;
+    }
+  }
+
+  state.ai.pendingFiles.push({
+    id: attachmentId,
+    name: file.name,
+    mediaType: file.type || "application/octet-stream",
+    size: file.size,
+    textExcerpt,
+    contentAvailable,
+  });
+
+  addAiFileChip(attachmentId, file.name, contentAvailable);
+  syncAttachmentBar();
 }
 
 function addAiPendingImage(blob, mediaType) {
@@ -3678,7 +3887,22 @@ function addAiPendingImage(blob, mediaType) {
   reader.readAsDataURL(blob);
 }
 
-function toggleAiContextPicker() {
+function toggleAiContextPicker(forceOpen = false) {
+  return toggleAiContextPickerWithState(forceOpen);
+}
+
+function toggleAiAttachmentMenu() {
+  dom.aiContextPicker.classList.add("hidden");
+  dom.aiAttachmentMenu.classList.toggle("hidden");
+}
+
+function toggleAiContextPickerWithState(forceOpen = false) {
+  dom.aiAttachmentMenu.classList.add("hidden");
+  if (forceOpen) {
+    dom.aiContextPicker.classList.remove("hidden");
+    renderAiContextPicker();
+    return;
+  }
   const hidden = dom.aiContextPicker.classList.toggle("hidden");
   if (!hidden) renderAiContextPicker();
 }
@@ -3739,6 +3963,27 @@ function addAiContextChip(id, name) {
   dom.aiContextChips.appendChild(chip);
 }
 
+function addAiFileChip(id, name, contentAvailable) {
+  const chip = document.createElement("div");
+  chip.className = `ai-context-chip ai-file-chip${contentAvailable ? "" : " ai-file-chip-binary"}`;
+  chip.dataset.fileId = id;
+  chip.title = contentAvailable ? `${name} attached as text context` : `${name} attached as file metadata only`;
+  const label = document.createElement("span");
+  label.textContent = name;
+  label.style.cssText = "overflow:hidden;text-overflow:ellipsis;";
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "ai-context-chip-remove";
+  removeBtn.textContent = "×";
+  removeBtn.type = "button";
+  removeBtn.addEventListener("click", () => {
+    state.ai.pendingFiles = state.ai.pendingFiles.filter((file) => file.id !== id);
+    chip.remove();
+    syncAttachmentBar();
+  });
+  chip.append(label, removeBtn);
+  dom.aiFileChips.appendChild(chip);
+}
+
 function buildContextDetail(contextIds) {
   if (!contextIds.length) return "";
   const details = contextIds
@@ -3748,6 +3993,17 @@ function buildContextDetail(contextIds) {
     return "";
   }
   return JSON.stringify(details, null, 2);
+}
+
+function buildFileContextDetail(files) {
+  if (!files.length) return "";
+  return files.map((file) => {
+    const sizeKb = Number.isFinite(file.size) ? `${(file.size / 1024).toFixed(1)} KB` : "unknown size";
+    const excerpt = file.contentAvailable && file.textExcerpt
+      ? `\nCONTENT EXCERPT:\n${file.textExcerpt}`
+      : "\nCONTENT EXCERPT: [Binary or unsupported file type; only filename and metadata available]";
+    return `FILE: ${file.name}\nTYPE: ${file.mediaType || "unknown"}\nSIZE: ${sizeKb}${excerpt}`;
+  }).join("\n\n");
 }
 
 function roundAiNumber(value, digits = 6) {
@@ -3897,6 +4153,8 @@ function serializeViewshedForAi(viewshed) {
     propagationModelLabel: viewshed.propagationModelLabel,
     radiusMeters: roundAiNumber(viewshed.radiusMeters, 2),
     radiusKm: roundAiNumber(viewshed.radiusMeters / 1000, 2),
+    radiusUnit: viewshed.radiusUnit || getDefaultCoverageRadiusUnit(),
+    radiusValue: roundAiNumber(convertMetersToRadiusUnit(viewshed.radiusMeters, viewshed.radiusUnit || getDefaultCoverageRadiusUnit()), 2),
     receiverHeight: roundAiNumber(viewshed.receiverHeight, 2),
     opacity: roundAiNumber(viewshed.opacity, 3),
     bounds: serializeBoundsForAi(viewshed.bounds),
@@ -4126,9 +4384,10 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
   syncAiUi();
 }
 
-async function callAiPlanningAssistant(prompt, images = [], contextIds = [], { onStatus } = {}) {
+async function callAiPlanningAssistant(prompt, images = [], files = [], contextIds = [], { onStatus } = {}) {
   const scenarioSummary = buildAiScenarioSummary();
   const contextDetail = buildContextDetail(contextIds);
+  const fileDetail = buildFileContextDetail(files);
 
   const systemText = [
     "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
@@ -4256,6 +4515,7 @@ async function callAiPlanningAssistant(prompt, images = [], contextIds = [], { o
     "SCENARIO SUMMARY:",
     scenarioSummary,
     contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
+    fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
     "USER REQUEST:",
     prompt || "(see attached image)",
   ].filter(Boolean).join("\n\n");
@@ -4581,7 +4841,6 @@ function buildAiScenarioSummary() {
       basemap: dom.basemapSelect.value,
       terrainSource: dom.terrainSourceSelect.value,
       imagerySource: dom.imagerySourceSelect.value,
-      radiusKm: Number(dom.radiusKm.value),
     },
     settings: state.settings,
     weather: state.weather,
@@ -4598,6 +4857,9 @@ function buildAiScenarioSummary() {
     simulationDraft: {
       assetId: dom.assetSelect.value,
       propagationModel: dom.propagationModel.value,
+      radius: Number(dom.radiusValue.value),
+      radiusUnit: getSelectedCoverageRadiusUnit(),
+      radiusMeters: roundAiNumber(getSimulationRadiusMeters(), 2),
       gridMeters: Number(dom.gridMeters.value),
       receiverHeight: Number(dom.receiverHeight.value),
       opacity: Number(dom.viewshedOpacity.value),
@@ -4740,9 +5002,6 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     }
     if (typeof action.customTileUrl === "string") {
       dom.customTileUrl.value = action.customTileUrl;
-    }
-    if (Number.isFinite(Number(action.radiusKm))) {
-      dom.radiusKm.value = String(clamp(Number(action.radiusKm), 1, 300));
     }
     if (typeof action.terrainSource === "string") {
       dom.terrainSourceSelect.value = action.terrainSource;
@@ -4930,8 +5189,16 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     if (Number.isFinite(Number(action.gridMeters))) {
       dom.gridMeters.value = String(Number(action.gridMeters));
     }
-    if (Number.isFinite(Number(action.radiusKm))) {
-      dom.radiusKm.value = String(Number(action.radiusKm));
+    if (typeof action.radiusUnit === "string" && ["m", "km", "mi"].includes(action.radiusUnit)) {
+      syncCoverageRadiusInput(action.radiusUnit, Number.isFinite(Number(action.radiusMeters)) ? Number(action.radiusMeters) : null);
+      dom.radiusUnit.dataset.previousUnit = dom.radiusUnit.value;
+    }
+    if (Number.isFinite(Number(action.radiusMeters))) {
+      setSimulationRadiusFromMeters(Number(action.radiusMeters), typeof action.radiusUnit === "string" ? action.radiusUnit : undefined);
+      dom.radiusUnit.dataset.previousUnit = dom.radiusUnit.value;
+    } else if (Number.isFinite(Number(action.radiusKm))) {
+      setSimulationRadiusFromMeters(Number(action.radiusKm) * 1000, typeof action.radiusUnit === "string" ? action.radiusUnit : "km");
+      dom.radiusUnit.dataset.previousUnit = dom.radiusUnit.value;
     }
     if (Number.isFinite(Number(action.opacity))) {
       dom.viewshedOpacity.value = String(Number(action.opacity));
@@ -5196,7 +5463,7 @@ function onMapClick(event) {
   }
   if (state.placingAsset) {
     addAsset(event.latlng);
-    state.placingAsset = false;
+    setAssetPlacementMode(false);
     setStatus("Emitter placed.");
     return;
   }
@@ -5204,6 +5471,12 @@ function onMapClick(event) {
   if (state.activeInspectionViewshedId) {
     inspectSignalPoint(event.latlng);
   }
+}
+
+function setAssetPlacementMode(enabled) {
+  state.placingAsset = Boolean(enabled);
+  dom.map?.classList.toggle("asset-placement-active", state.placingAsset);
+  dom.cesiumContainer?.classList.toggle("asset-placement-active", state.placingAsset);
 }
 
 function onMapContextMenu(event) {
@@ -5478,7 +5751,7 @@ function renderViewsheds() {
         <span>${viewshed.asset.powerW} W</span>
         <span>${viewshed.cellCount} cells</span>
         ${formatCoverageArea(viewshed) ? `<span>${formatCoverageArea(viewshed)}</span>` : ""}
-        <span>Radius ${formatDistance(viewshed.radiusMeters)}</span>
+        <span>Radius ${formatCoverageRadius(viewshed)}</span>
       </div>
       <div class="terrain-actions">
         <button class="ghost-button small" type="button" data-viewshed-action="focus" data-viewshed-id="${viewshed.id}">
@@ -5490,7 +5763,7 @@ function renderViewsheds() {
       </div>
       <label>
         Layer Opacity
-        <input type="range" min="0.15" max="1" step="0.05" value="${viewshed.opacity}" data-viewshed-action="opacity" data-viewshed-id="${viewshed.id}">
+        <input class="coverage-opacity-slider" type="range" min="0.15" max="1" step="0.05" value="${viewshed.opacity}" data-viewshed-action="opacity" data-viewshed-id="${viewshed.id}">
       </label>
     `;
     dom.viewshedList.appendChild(row);
@@ -5498,7 +5771,13 @@ function renderViewsheds() {
 
   dom.viewshedList.querySelectorAll("[data-viewshed-action]").forEach((control) => {
     const action = control.dataset.viewshedAction;
-    control.addEventListener(action === "opacity" ? "input" : "click", onViewshedAction);
+    if (action === "opacity") {
+      updateRangeTrack(control);
+      control.addEventListener("input", () => updateRangeTrack(control));
+      control.addEventListener("input", onViewshedAction);
+      return;
+    }
+    control.addEventListener("click", onViewshedAction);
   });
 
   renderMapContents();
@@ -5556,6 +5835,7 @@ function onViewshedAction(event) {
   }
 
   if (action === "opacity") {
+    updateRangeTrack(event.currentTarget);
     const opacity = Number(event.currentTarget.value);
     viewshed.opacity = opacity;
     viewshed.layer.setOpacity(opacity);
@@ -5842,7 +6122,8 @@ async function runSimulation() {
         asset: selected,
         weather: state.weather,
         terrainId,
-        radiusMeters: Number(dom.radiusKm.value) * 1000,
+        radiusMeters: getSimulationRadiusMeters(),
+        radiusUnit: getSelectedCoverageRadiusUnit(),
         gridMeters: Number(dom.gridMeters.value),
         receiverHeight: Number(dom.receiverHeight.value),
         opacity: Number(dom.viewshedOpacity.value),
@@ -5879,6 +6160,7 @@ function consumeSimulationResult(payload) {
     asset: payload.asset,
     terrainId: payload.terrainId ?? null,
     radiusMeters: payload.radiusMeters,
+    radiusUnit: payload.radiusUnit || getDefaultCoverageRadiusUnit(),
     receiverHeight: payload.receiverHeight,
     opacity: payload.opacity,
     propagationModel: payload.propagationModel,
@@ -6616,8 +6898,16 @@ async function initCesiumIfNeeded() {
     terrainProvider: new window.Cesium.EllipsoidTerrainProvider(),
   });
 
-  state.cesiumViewer.camera.percentageChanged = 0.001;
+  state.cesiumViewer.camera.percentageChanged = 0.05;
   state.cesiumViewer.camera.changed.addEventListener(updateCesiumCompass);
+
+  // Redraw terrain-clamped gridlines when the 3D camera moves.
+  let _gridRafId = null;
+  state.cesiumViewer.camera.changed.addEventListener(() => {
+    if (!state.settings?.gridLinesEnabled) return;
+    if (_gridRafId) return;
+    _gridRafId = requestAnimationFrame(() => { _gridRafId = null; syncCesiumEntities(); });
+  });
 
   const handler = new window.Cesium.ScreenSpaceEventHandler(state.cesiumViewer.scene.canvas);
   handler.setInputAction((click) => {
@@ -6630,7 +6920,7 @@ async function initCesiumIfNeeded() {
     const lat = window.Cesium.Math.toDegrees(carto.latitude);
     const lon = window.Cesium.Math.toDegrees(carto.longitude);
     addAsset({ lat, lng: lon });
-    state.placingAsset = false;
+    setAssetPlacementMode(false);
     setStatus("Emitter placed.");
   }, window.Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
@@ -6828,7 +7118,7 @@ async function resolveTerrainIdForSimulation(asset) {
     return null;
   }
 
-  const radiusMeters = Number(dom.radiusKm.value) * 1000;
+  const radiusMeters = getSimulationRadiusMeters();
   const bounds = boundsFromCenter(asset.lat, asset.lon, radiusMeters);
   return await ensureIonTerrainGrid(bounds, Number(dom.gridMeters.value), `sim:${asset.id}:${radiusMeters}:${dom.gridMeters.value}`);
 }
@@ -7162,6 +7452,7 @@ function buildMapContentRow(entry, isChild = false) {
   if (isChild) row.dataset.child = "true";
   const isHidden = state.hiddenContentIds.has(entry.id);
   if (isHidden) row.dataset.hidden = "true";
+  if (state.mcSelectMode && state.mcSelectedIds.has(entry.id)) row.classList.add("mc-selected");
 
   const folder = isFolder ? state.mapContentFolders.find((f) => `folder:${f.id}` === entry.id) : null;
   const isCollapsed = folder?.collapsed ?? false;
@@ -7191,7 +7482,15 @@ function buildMapContentRow(entry, isChild = false) {
     </div>
   `;
 
-  row.addEventListener("click", () => focusMapContent(entry.id));
+  row.addEventListener("click", (event) => {
+    if (state.mcSelectMode) {
+      const allRows = [...dom.mapContentsList.querySelectorAll(".map-content-item")];
+      const allIds = allRows.map((r) => r.dataset.contentId);
+      onMcItemClick(event, entry.id, allIds);
+    } else {
+      focusMapContent(entry.id);
+    }
+  });
   row.querySelector(".map-content-collapse-btn")?.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleFolderCollapsed(entry.id);
@@ -7289,6 +7588,7 @@ function renderMapContents() {
   });
 
   applyMapContentOrder();
+  updateMcSelectToolbar();
 }
 
 function onMapContentDragStart(event) {
@@ -7457,11 +7757,19 @@ function onMapContentsMenuAction(event) {
   }
 
   if (action === "delete") {
+    pushUndoSnapshot([contentId], `Deleted item`);
     deleteMapContent(contentId);
+    showUndoBanner("Item deleted — Undo?");
   }
 }
 
 function openSimulationModal() {
+  if (dom.radiusUnit && !dom.radiusUnit.value) {
+    syncCoverageRadiusInput(getDefaultCoverageRadiusUnit());
+  }
+  if (dom.radiusUnit) {
+    dom.radiusUnit.dataset.previousUnit = dom.radiusUnit.value || getDefaultCoverageRadiusUnit();
+  }
   dom.simulationModal?.classList.remove("hidden");
   document.body.classList.add("emitter-modal-open");
 }
@@ -7512,7 +7820,8 @@ function openSimulationForContent(contentId) {
     dom.receiverHeight.value = viewshed.receiverHeight;
     dom.viewshedOpacity.value = viewshed.opacity;
     updateRangeTrack(dom.viewshedOpacity);
-    dom.radiusKm.value = Math.round(viewshed.radiusMeters / 1000);
+    setSimulationRadiusFromMeters(viewshed.radiusMeters, viewshed.radiusUnit || getDefaultCoverageRadiusUnit());
+    dom.radiusUnit.dataset.previousUnit = dom.radiusUnit.value;
     refreshActionButtons();
     openSimulationModal();
     setStatus(`Editing ${viewshed.name}. Adjust the simulation inputs and click Update Coverage.`);
@@ -7590,7 +7899,7 @@ function editMapContent(contentId) {
       return;
     }
     state.editingAssetId = asset.id;
-    state.placingAsset = false;
+    setAssetPlacementMode(false);
     emitterModal.open(asset);
     refreshActionButtons();
     setStatus(`Editing ${asset.name}.`);
@@ -7656,6 +7965,205 @@ function toggleFolderCollapsed(folderId) {
   renderMapContents();
   saveMapState();
 }
+
+// ── Multi-select ─────────────────────────────────────────────────────────────
+
+function toggleMcSelectMode() {
+  state.mcSelectMode = !state.mcSelectMode;
+  if (!state.mcSelectMode) {
+    state.mcSelectedIds.clear();
+    state.mcLastClickedId = null;
+  }
+  dom.mcSelectBtn.setAttribute("aria-pressed", String(state.mcSelectMode));
+  renderMapContents();
+}
+
+function getOrCreateMcSelectToolbar() {
+  const card = dom.mapContentsList.closest(".map-contents-card");
+  let toolbar = card.querySelector(".mc-select-toolbar");
+  if (!toolbar) {
+    toolbar = document.createElement("div");
+    toolbar.className = "mc-select-toolbar";
+    toolbar.innerHTML = `
+      <span class="mc-select-count"></span>
+      <button class="mc-select-delete-btn" type="button" disabled>
+        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        Delete selected
+      </button>`;
+    toolbar.querySelector(".mc-select-delete-btn").addEventListener("click", deleteSelectedMcItems);
+    card.appendChild(toolbar);
+  }
+  return toolbar;
+}
+
+function updateMcSelectToolbar() {
+  const card = dom.mapContentsList.closest(".map-contents-card");
+  const existing = card.querySelector(".mc-select-toolbar");
+  if (!state.mcSelectMode) {
+    existing?.remove();
+    return;
+  }
+  const toolbar = getOrCreateMcSelectToolbar();
+  const n = state.mcSelectedIds.size;
+  toolbar.querySelector(".mc-select-count").textContent =
+    n === 0 ? "No items selected" : `${n} item${n === 1 ? "" : "s"} selected`;
+  toolbar.querySelector(".mc-select-delete-btn").disabled = n === 0;
+}
+
+function onMcItemClick(event, contentId, allIds) {
+  if (!state.mcSelectMode) return;
+  event.stopPropagation();
+
+  if (event.shiftKey && state.mcLastClickedId && allIds.includes(state.mcLastClickedId)) {
+    const a = allIds.indexOf(state.mcLastClickedId);
+    const b = allIds.indexOf(contentId);
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    allIds.slice(lo, hi + 1).forEach((id) => state.mcSelectedIds.add(id));
+  } else if (event.ctrlKey || event.metaKey) {
+    if (state.mcSelectedIds.has(contentId)) {
+      state.mcSelectedIds.delete(contentId);
+    } else {
+      state.mcSelectedIds.add(contentId);
+    }
+    state.mcLastClickedId = contentId;
+  } else {
+    // Plain click: toggle this item, deselect others
+    const wasSelected = state.mcSelectedIds.has(contentId);
+    state.mcSelectedIds.clear();
+    if (!wasSelected) state.mcSelectedIds.add(contentId);
+    state.mcLastClickedId = contentId;
+  }
+
+  // Reflect selection visually without full re-render
+  dom.mapContentsList.querySelectorAll(".map-content-item").forEach((row) => {
+    row.classList.toggle("mc-selected", state.mcSelectedIds.has(row.dataset.contentId));
+  });
+  updateMcSelectToolbar();
+}
+
+function deleteSelectedMcItems() {
+  if (state.mcSelectedIds.size === 0) return;
+  const ids = [...state.mcSelectedIds];
+  const label = `Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}`;
+  pushUndoSnapshot(ids, label);
+  state.mcSelectedIds.clear();
+  state.mcLastClickedId = null;
+  ids.forEach((id) => deleteMapContent(id));
+  updateMcSelectToolbar();
+  showUndoBanner(`${label} — Undo?`);
+}
+
+// ── Undo ──────────────────────────────────────────────────────────────────────
+
+function snapshotContentId(contentId) {
+  // Capture enough state to restore this content item.
+  if (contentId.startsWith("asset:")) {
+    const id = contentId.slice("asset:".length);
+    const asset = state.assets.find((a) => a.id === id);
+    if (!asset) return null;
+    const assignment = state.mapContentAssignments.get(contentId);
+    const orderIdx = state.mapContentOrder.indexOf(contentId);
+    const snap = { asset: JSON.parse(JSON.stringify(asset)), assignment, orderIdx };
+    return {
+      contentId,
+      restore() {
+        if (state.assets.find((a) => a.id === snap.asset.id)) return;
+        state.assets.push(snap.asset);
+        if (snap.assignment) state.mapContentAssignments.set(contentId, snap.assignment);
+        if (snap.orderIdx >= 0) {
+          state.mapContentOrder.splice(Math.min(snap.orderIdx, state.mapContentOrder.length), 0, contentId);
+        } else {
+          state.mapContentOrder.push(contentId);
+        }
+        renderAssets();
+        renderMapContents();
+        syncCesiumEntities();
+        saveMapState();
+      },
+    };
+  }
+
+  if (contentId.startsWith("folder:")) {
+    const id = contentId.slice("folder:".length);
+    const folder = state.mapContentFolders.find((f) => f.id === id);
+    if (!folder) return null;
+    const orderIdx = state.mapContentOrder.indexOf(contentId);
+    const snap = { folder: JSON.parse(JSON.stringify(folder)), orderIdx };
+    return {
+      contentId,
+      restore() {
+        if (state.mapContentFolders.find((f) => f.id === snap.folder.id)) return;
+        state.mapContentFolders.push(snap.folder);
+        if (snap.orderIdx >= 0) {
+          state.mapContentOrder.splice(Math.min(snap.orderIdx, state.mapContentOrder.length), 0, contentId);
+        } else {
+          state.mapContentOrder.push(contentId);
+        }
+        renderMapContents();
+        saveMapState();
+      },
+    };
+  }
+
+  if (contentId.startsWith("imported:")) {
+    const id = contentId.slice("imported:".length);
+    const item = state.importedItems.find((i) => i.id === id);
+    if (!item) return null;
+    const assignment = state.mapContentAssignments.get(contentId);
+    const orderIdx = state.mapContentOrder.indexOf(contentId);
+    const snap = { item, assignment, orderIdx };
+    return {
+      contentId,
+      restore() {
+        if (state.importedItems.find((i) => i.id === snap.item.id)) return;
+        state.importedItems.push(snap.item);
+        if (!state.map.hasLayer(snap.item.layer)) snap.item.layer.addTo(state.map);
+        if (snap.assignment) state.mapContentAssignments.set(contentId, snap.assignment);
+        if (snap.orderIdx >= 0) {
+          state.mapContentOrder.splice(Math.min(snap.orderIdx, state.mapContentOrder.length), 0, contentId);
+        } else {
+          state.mapContentOrder.push(contentId);
+        }
+        renderMapContents();
+        saveMapState();
+      },
+    };
+  }
+
+  // Viewsheds, terrain, planning items — not easily reversible; skip
+  return null;
+}
+
+function pushUndoSnapshot(contentIds, label) {
+  const snapshots = contentIds.map(snapshotContentId).filter(Boolean);
+  if (!snapshots.length) return;
+  state.undoStack.push({ label, snapshots });
+  if (state.undoStack.length > 20) state.undoStack.shift();
+}
+
+function performUndo() {
+  const entry = state.undoStack.pop();
+  if (!entry) return;
+  // Restore in reverse order to preserve ordering
+  [...entry.snapshots].reverse().forEach((s) => s.restore());
+  dismissUndoBanner();
+  setStatus(`Undid: ${entry.label}`);
+}
+
+function showUndoBanner(label) {
+  clearTimeout(state.undoBannerTimerId);
+  dom.undoBannerMsg.textContent = label;
+  dom.undoBanner.classList.remove("hidden");
+  state.undoBannerTimerId = setTimeout(dismissUndoBanner, 8000);
+}
+
+function dismissUndoBanner() {
+  clearTimeout(state.undoBannerTimerId);
+  state.undoBannerTimerId = null;
+  dom.undoBanner.classList.add("hidden");
+}
+
+// ── deleteMapContent (with undo) ──────────────────────────────────────────────
 
 function deleteMapContent(contentId) {
   if (contentId.startsWith("folder:")) {
@@ -8946,21 +9454,83 @@ function syncCesiumEntities() {
   });
 
   // --- GRIDLINES ---
-  if (state.settings?.gridLinesEnabled) {
-    const gridColor = C.Color.fromCssColorString(state.settings.gridColor || "#8fb7ff").withAlpha(0.4);
-    entities.add({
-      id: "managed:gridlines",
-      rectangle: {
-        coordinates: C.Rectangle.fromDegrees(-180, -90, 180, 90),
-        material: new C.GridMaterialProperty({
-          color: gridColor,
-          cellAlpha: 0,
-          lineCount: new C.Cartesian2(36, 18),
-          lineThickness: new C.Cartesian2(1.5, 1.5),
-        }),
-        height: 0,
-      },
-    });
+  if (state.settings?.gridLinesEnabled && state.map) {
+    const gridColor = C.Color.fromCssColorString(state.settings.gridColor || "#8fb7ff").withAlpha(0.55);
+
+    // Derive visible bounds. In 3D mode, use the Cesium camera's computed
+    // viewport rectangle so the grid follows the 3D camera, not the frozen
+    // Leaflet view. Fall back to Leaflet bounds when the rectangle isn't
+    // available (e.g. looking straight down at the poles).
+    let rawSouth, rawNorth, rawWest, rawEast;
+    const cesiumRect = viewer.camera.computeViewRectangle?.();
+    if (cesiumRect) {
+      const CM = C.Math;
+      rawSouth = CM.toDegrees(cesiumRect.south);
+      rawNorth = CM.toDegrees(cesiumRect.north);
+      rawWest  = CM.toDegrees(cesiumRect.west);
+      rawEast  = CM.toDegrees(cesiumRect.east);
+    } else {
+      const b = state.map.getBounds();
+      rawSouth = b.getSouth(); rawNorth = b.getNorth();
+      rawWest  = b.getWest();  rawEast  = b.getEast();
+    }
+
+    // Choose a step size. Map a rough pixel-per-degree estimate from the
+    // visible degree span to the same GEO_STEPS table used in 2D.
+    const degSpan = Math.max(1, rawNorth - rawSouth);
+    const estPxPerDeg = Math.max(1, 800 / degSpan); // assume ~800px viewport height
+    let step = GEO_STEPS[GEO_STEPS.length - 1];
+    for (const s of GEO_STEPS) {
+      if (s * estPxPerDeg >= MIN_GRID_PX) { step = s; break; }
+    }
+
+    // Expand slightly so lines reach the visible edges.
+    const south = Math.max(-85, alignFloor(rawSouth - step, step));
+    const north = Math.min( 85, alignCeil(rawNorth  + step, step));
+    const west  = alignFloor(rawWest  - step, step);
+    const east  = alignCeil(rawEast   + step, step);
+
+    // Subdivide each line into segments so it drapes over terrain correctly.
+    const SEG = 32;
+
+    let gridIdx = 0;
+
+    // Latitude lines (horizontal bands)
+    for (let lat = south; lat <= north + step * 0.01; lat = Math.round((lat + step) * 1e8) / 1e8) {
+      const clampedLat = Math.max(-85, Math.min(85, lat));
+      const positions = [];
+      for (let i = 0; i <= SEG; i++) {
+        const lon = west + (east - west) * i / SEG;
+        positions.push(C.Cartesian3.fromDegrees(lon, clampedLat));
+      }
+      entities.add({
+        id: `managed:gridlines:lat:${gridIdx++}`,
+        polyline: {
+          positions,
+          width: 1,
+          material: gridColor,
+          clampToGround: true,
+        },
+      });
+    }
+
+    // Longitude lines (vertical)
+    for (let lon = west; lon <= east + step * 0.01; lon = Math.round((lon + step) * 1e8) / 1e8) {
+      const positions = [];
+      for (let i = 0; i <= SEG; i++) {
+        const lat = Math.max(-85, Math.min(85, south + (north - south) * i / SEG));
+        positions.push(C.Cartesian3.fromDegrees(lon, lat));
+      }
+      entities.add({
+        id: `managed:gridlines:lon:${gridIdx++}`,
+        polyline: {
+          positions,
+          width: 1,
+          material: gridColor,
+          clampToGround: true,
+        },
+      });
+    }
   }
 }
 
@@ -9258,6 +9828,67 @@ function formatInputNumber(value, digits) {
   return Number(value).toFixed(digits).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }
 
+function getDefaultCoverageRadiusUnit() {
+  return state.settings.measurementUnits === "standard" ? "mi" : "km";
+}
+
+function getRadiusUnitMeta(unit) {
+  if (unit === "m") {
+    return { label: "m", factor: 1, min: 100, max: 300000, step: 100, digits: 0 };
+  }
+  if (unit === "mi") {
+    return { label: "mi", factor: 1609.344, min: 1, max: 200, step: 1, digits: 2 };
+  }
+  return { label: "km", factor: 1000, min: 1, max: 300, step: 1, digits: 2 };
+}
+
+function getSelectedCoverageRadiusUnit() {
+  return dom.radiusUnit?.value || getDefaultCoverageRadiusUnit();
+}
+
+function convertMetersToRadiusUnit(meters, unit) {
+  return meters / getRadiusUnitMeta(unit).factor;
+}
+
+function convertRadiusUnitToMeters(value, unit) {
+  return value * getRadiusUnitMeta(unit).factor;
+}
+
+function syncCoverageRadiusInput(unit = getSelectedCoverageRadiusUnit(), meters = null) {
+  if (!dom.radiusValue || !dom.radiusUnit) {
+    return;
+  }
+  const meta = getRadiusUnitMeta(unit);
+  dom.radiusUnit.value = unit;
+  dom.radiusValue.min = String(meta.min);
+  dom.radiusValue.max = String(meta.max);
+  dom.radiusValue.step = String(meta.step);
+
+  if (Number.isFinite(meters)) {
+    const converted = clamp(convertMetersToRadiusUnit(meters, unit), meta.min, meta.max);
+    dom.radiusValue.value = formatInputNumber(converted, meta.digits);
+    return;
+  }
+
+  const current = Number(dom.radiusValue.value);
+  if (!Number.isFinite(current)) {
+    dom.radiusValue.value = formatInputNumber(meta.min, meta.digits);
+    return;
+  }
+  dom.radiusValue.value = formatInputNumber(clamp(current, meta.min, meta.max), meta.digits);
+}
+
+function getSimulationRadiusMeters() {
+  const unit = getSelectedCoverageRadiusUnit();
+  const meta = getRadiusUnitMeta(unit);
+  const value = clamp(Number(dom.radiusValue?.value), meta.min, meta.max);
+  return convertRadiusUnitToMeters(value, unit);
+}
+
+function setSimulationRadiusFromMeters(meters, preferredUnit = null) {
+  syncCoverageRadiusInput(preferredUnit || getSelectedCoverageRadiusUnit() || getDefaultCoverageRadiusUnit(), meters);
+}
+
 function formatDistance(meters) {
   if (state.settings.measurementUnits === "standard") {
     return `${(meters / 1609.344).toFixed(2)} mi`;
@@ -9272,10 +9903,19 @@ function formatCoverageArea(viewshed) {
     (viewshed.gridLatStepDeg * 111.32) *
     (viewshed.gridLonStepDeg * 111.32 * Math.cos(latRad));
   const totalKm2 = cellAreaKm2 * viewshed.cellCount;
-  if (state.settings.measurementUnits === "standard") {
+  if ((viewshed.radiusUnit || getDefaultCoverageRadiusUnit()) === "m") {
+    return `${Math.round(totalKm2 * 1000000).toLocaleString()} m²`;
+  }
+  if ((viewshed.radiusUnit || getDefaultCoverageRadiusUnit()) === "mi") {
     return `${(totalKm2 * 0.386102).toFixed(2)} mi²`;
   }
   return `${totalKm2.toFixed(2)} km²`;
+}
+
+function formatCoverageRadius(viewshed) {
+  const unit = viewshed.radiusUnit || getDefaultCoverageRadiusUnit();
+  const meta = getRadiusUnitMeta(unit);
+  return `${formatInputNumber(convertMetersToRadiusUnit(viewshed.radiusMeters, unit), meta.digits)} ${meta.label}`;
 }
 
 function formatElevation(meters) {
@@ -9344,45 +9984,7 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function geographicGridStep(zoom) {
-  if (zoom >= 14) {
-    return 0.01;
-  }
-  if (zoom >= 12) {
-    return 0.02;
-  }
-  if (zoom >= 10) {
-    return 0.05;
-  }
-  if (zoom >= 8) {
-    return 0.1;
-  }
-  if (zoom >= 6) {
-    return 0.2;
-  }
-  return 0.5;
-}
-
-function metricGridStep(zoom) {
-  if (zoom >= 14) {
-    return 200;
-  }
-  if (zoom >= 12) {
-    return 500;
-  }
-  if (zoom >= 10) {
-    return 1000;
-  }
-  if (zoom >= 8) {
-    return 5000;
-  }
-  if (zoom >= 6) {
-    return 10000;
-  }
-  return 20000;
-}
-
-const METRIC_GRID_STEPS = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
+// ── Grid utility functions ────────────────────────────────────────────────────
 
 function metersToLatitudeDegrees(meters) {
   return meters / 111320;
@@ -9390,263 +9992,525 @@ function metersToLatitudeDegrees(meters) {
 
 function metersToLongitudeDegrees(meters, latitude) {
   const cosine = Math.cos((latitude * Math.PI) / 180);
-  const safeCosine = Math.max(Math.abs(cosine), 0.000001);
-  return meters / (111320 * safeCosine);
+  return meters / (111320 * Math.max(Math.abs(cosine), 1e-6));
 }
 
-function resolveMetricGridStep(map) {
-  const center = map.getCenter();
-  const centerPoint = map.latLngToLayerPoint(center);
-  const minimumPixels = 80;
-  const baseStep = metricGridStep(map.getZoom());
-  let fallback = METRIC_GRID_STEPS[METRIC_GRID_STEPS.length - 1];
+function alignFloor(value, step) {
+  return Math.floor(value / step) * step;
+}
 
-  for (const stepMeters of METRIC_GRID_STEPS) {
-    if (stepMeters < baseStep) {
-      continue;
-    }
+function alignCeil(value, step) {
+  return Math.ceil(value / step) * step;
+}
 
-    fallback = stepMeters;
-    const latStep = metersToLatitudeDegrees(stepMeters);
-    const lonStep = metersToLongitudeDegrees(stepMeters, center.lat);
-    const northPoint = map.latLngToLayerPoint([center.lat + latStep, center.lng]);
-    const eastPoint = map.latLngToLayerPoint([center.lat, center.lng + lonStep]);
-    const latPixels = Math.abs(centerPoint.y - northPoint.y);
-    const lonPixels = Math.abs(centerPoint.x - eastPoint.x);
-
-    if (Math.min(latPixels, lonPixels) >= minimumPixels) {
-      return stepMeters;
-    }
+// Cohen-Sutherland clip for arbitrary line segments against [0,w]x[0,h]
+function csClipLine(x0, y0, x1, y1, w, h) {
+  const INSIDE = 0, LEFT = 1, RIGHT = 2, BOTTOM = 4, TOP = 8;
+  const code = (x, y) => {
+    let c = INSIDE;
+    if (x < 0) c |= LEFT;
+    else if (x > w) c |= RIGHT;
+    if (y < 0) c |= TOP;
+    else if (y > h) c |= BOTTOM;
+    return c;
+  };
+  let c0 = code(x0, y0), c1 = code(x1, y1);
+  for (;;) {
+    if (!(c0 | c1)) return [x0, y0, x1, y1]; // both inside
+    if (c0 & c1) return null;                  // trivially outside
+    const c = c0 || c1;
+    let x, y;
+    if (c & BOTTOM) { x = x0 + (x1 - x0) * (h - y0) / (y1 - y0); y = h; }
+    else if (c & TOP) { x = x0 + (x1 - x0) * (0 - y0) / (y1 - y0); y = 0; }
+    else if (c & RIGHT) { y = y0 + (y1 - y0) * (w - x0) / (x1 - x0); x = w; }
+    else { y = y0 + (y1 - y0) * (0 - x0) / (x1 - x0); x = 0; }
+    if (c === c0) { x0 = x; y0 = y; c0 = code(x0, y0); }
+    else { x1 = x; y1 = y; c1 = code(x1, y1); }
   }
+}
 
-  return fallback;
+// ── Geographic step selection ─────────────────────────────────────────────────
+
+const GEO_STEPS = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10];
+const METRIC_GRID_STEPS = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
+const MIN_GRID_PX = 80; // minimum pixels between grid lines
+
+function resolveGeoStep(map) {
+  const center = map.getCenter();
+  const cp = map.latLngToContainerPoint(center);
+  for (const step of GEO_STEPS) {
+    const np = map.latLngToContainerPoint([center.lat + step, center.lng]);
+    const ep = map.latLngToContainerPoint([center.lat, center.lng + step]);
+    const px = Math.min(Math.abs(cp.y - np.y), Math.abs(cp.x - ep.x));
+    if (px >= MIN_GRID_PX) return step;
+  }
+  return GEO_STEPS[GEO_STEPS.length - 1];
+}
+
+function resolveMetricStep(map) {
+  const center = map.getCenter();
+  const cp = map.latLngToContainerPoint(center);
+  for (const step of METRIC_GRID_STEPS) {
+    const latStep = metersToLatitudeDegrees(step);
+    const lonStep = metersToLongitudeDegrees(step, center.lat);
+    const np = map.latLngToContainerPoint([center.lat + latStep, center.lng]);
+    const ep = map.latLngToContainerPoint([center.lat, center.lng + lonStep]);
+    const px = Math.min(Math.abs(cp.y - np.y), Math.abs(cp.x - ep.x));
+    if (px >= MIN_GRID_PX) return step;
+  }
+  return METRIC_GRID_STEPS[METRIC_GRID_STEPS.length - 1];
+}
+
+// ── Label formatters ─────────────────────────────────────────────────────────
+
+function formatDecGridLabel(value, isLat) {
+  const hem = isLat ? (value >= 0 ? "N" : "S") : (value >= 0 ? "E" : "W");
+  return `${Math.abs(value).toFixed(4)}° ${hem}`;
+}
+
+function formatDmsGridLabel(value, isLat, step) {
+  const hem = isLat ? (value >= 0 ? "N" : "S") : (value >= 0 ? "E" : "W");
+  const abs = Math.abs(value);
+  const deg = Math.floor(abs);
+  const mf = (abs - deg) * 60;
+  const min = Math.floor(mf);
+  const sec = Math.round((mf - min) * 60);
+  if (step < 1 / 60) return `${deg}° ${String(min).padStart(2,"0")}' ${String(sec).padStart(2,"0")}" ${hem}`;
+  if (step < 1)      return `${deg}° ${String(min).padStart(2,"0")}' ${hem}`;
+  return `${deg}° ${hem}`;
+}
+
+function formatGeoLabel(value, isLat, system, step) {
+  if (system === "dms") return formatDmsGridLabel(value, isLat, step);
+  return formatDecGridLabel(value, isLat);
 }
 
 function padMgrsCoordinate(value) {
   return Math.max(0, Math.min(99999, value)).toString().padStart(5, "0");
 }
 
-function getMgrsSquarePrefixes(bounds) {
-  const prefixes = new Set();
-  const latSamples = 5;
-  const lonSamples = 5;
-  const south = bounds.getSouth();
-  const north = bounds.getNorth();
-  const west = bounds.getWest();
-  const east = bounds.getEast();
+function getMgrsLabelDigits(stepMeters) {
+  if (stepMeters >= 10000) return 1;
+  if (stepMeters >= 1000)  return 2;
+  return 3;
+}
 
-  for (let row = 0; row < latSamples; row += 1) {
-    const latRatio = latSamples === 1 ? 0 : row / (latSamples - 1);
-    const lat = south + (north - south) * latRatio;
-    for (let col = 0; col < lonSamples; col += 1) {
-      const lonRatio = lonSamples === 1 ? 0 : col / (lonSamples - 1);
-      const lon = west + (east - west) * lonRatio;
-      const parts = getMgrsComponents(lat, lon);
-      if (parts) {
-        prefixes.add(`${parts.zoneBand}${parts.square}`);
-      }
+function formatMgrsLabel(prefix, value, stepMeters) {
+  if (stepMeters >= 100000) return prefix;
+  const digits = getMgrsLabelDigits(stepMeters);
+  const divisor = digits === 1 ? 10000 : digits === 2 ? 1000 : 100;
+  return `${prefix} ${String(Math.round(value / divisor)).padStart(digits, "0")}`;
+}
+
+// ── MGRS range sampling ──────────────────────────────────────────────────────
+
+function collectVisibleMgrsRanges(map, stepMeters) {
+  const size = map.getSize();
+  const spacing = stepMeters >= 100000 ? 140 : stepMeters >= 10000 ? 110 : 85;
+  const cols = Math.max(3, Math.ceil(size.x / spacing) + 1);
+  const rows = Math.max(3, Math.ceil(size.y / spacing) + 1);
+  const ranges = new Map();
+
+  const sample = (lat, lon) => {
+    const parts = getMgrsComponents(lat, lon);
+    if (!parts) return;
+    const prefix = `${parts.zoneBand}${parts.square}`;
+    const e = Number(parts.easting), n = Number(parts.northing);
+    if (!ranges.has(prefix)) {
+      ranges.set(prefix, { prefix, minE: e, maxE: e, minN: n, maxN: n });
+    } else {
+      const r = ranges.get(prefix);
+      r.minE = Math.min(r.minE, e); r.maxE = Math.max(r.maxE, e);
+      r.minN = Math.min(r.minN, n); r.maxN = Math.max(r.maxN, n);
+    }
+  };
+
+  for (let r = 0; r < rows; r++) {
+    const y = rows === 1 ? size.y / 2 : (size.y * r) / (rows - 1);
+    for (let c = 0; c < cols; c++) {
+      const x = cols === 1 ? size.x / 2 : (size.x * c) / (cols - 1);
+      const ll = map.containerPointToLatLng([x, y]);
+      sample(ll.lat, ll.lng);
     }
   }
+  const b = map.getBounds();
+  [[b.getSouth(), b.getWest()],[b.getSouth(), b.getEast()],
+   [b.getNorth(), b.getWest()],[b.getNorth(), b.getEast()],
+   [b.getCenter().lat, b.getCenter().lng]].forEach(([la, lo]) => sample(la, lo));
 
-  return [...prefixes].sort();
+  return [...ranges.values()].sort((a, b2) => a.prefix.localeCompare(b2.prefix));
 }
 
-function mgrsCellBounds(prefix, easting, northing) {
-  try {
-    const cell = `${prefix}${padMgrsCoordinate(easting)}${padMgrsCoordinate(northing)}`;
-    const bounds = window.mgrs.inverse(cell);
-    if (!Array.isArray(bounds) || bounds.length < 4) {
-      return null;
-    }
-    return {
-      west: bounds[0],
-      south: bounds[1],
-      east: bounds[2],
-      north: bounds[3],
-    };
-  } catch {
-    return null;
-  }
-}
-
-function buildMgrsVerticalLine(prefix, easting) {
-  const southCell = mgrsCellBounds(prefix, Math.min(easting, 99999), 0);
-  const northCell = mgrsCellBounds(prefix, Math.min(easting, 99999), 99999);
-  if (!southCell || !northCell) {
-    return null;
-  }
-  const useEastBoundary = easting >= 100000;
-  const lon = useEastBoundary ? northCell.east : southCell.west;
-  return {
-    points: [
-      [southCell.south, useEastBoundary ? southCell.east : southCell.west],
-      [northCell.north, useEastBoundary ? northCell.east : northCell.west],
-    ],
-    labelLatLng: [southCell.south, lon],
-  };
-}
-
-function buildMgrsHorizontalLine(prefix, northing) {
-  const westCell = mgrsCellBounds(prefix, 0, Math.min(northing, 99999));
-  const eastCell = mgrsCellBounds(prefix, 99999, Math.min(northing, 99999));
-  if (!westCell || !eastCell) {
-    return null;
-  }
-  const useNorthBoundary = northing >= 100000;
-  const lat = useNorthBoundary ? eastCell.north : westCell.south;
-  return {
-    points: [
-      [useNorthBoundary ? westCell.north : westCell.south, westCell.west],
-      [useNorthBoundary ? eastCell.north : eastCell.south, eastCell.east],
-    ],
-    labelLatLng: [lat, westCell.west],
-  };
-}
+// ── CoordinateGridLayer ──────────────────────────────────────────────────────
 
 const CoordinateGridLayer = L.Layer.extend({
   initialize(options) {
     this.options = options;
     this._canvas = null;
+    this._rafId = null;
   },
 
   onAdd(map) {
     this._map = map;
     this._canvas = L.DomUtil.create("canvas", "leaflet-coordinate-grid");
-    const pane = map.getPane("overlayPane");
-    pane.appendChild(this._canvas);
-    map.on("moveend zoomend resize", this._redraw, this);
-    this._redraw();
+    const canvas = this._canvas;
+    canvas.style.position = "absolute";
+    canvas.style.pointerEvents = "none";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    // Use the mapPane so the canvas stays in Leaflet's coordinate space and
+    // automatically follows pans without needing a move event.
+    map.getPane("overlayPane").appendChild(canvas);
+    map.on("moveend zoomend resize viewreset", this._scheduleRedraw, this);
+    // Also redraw on every move so the grid stays locked during panning.
+    map.on("move", this._scheduleRedraw, this);
+    this._scheduleRedraw();
   },
 
   onRemove(map) {
-    map.off("moveend zoomend resize", this._redraw, this);
-    if (this._canvas?.parentNode) {
-      this._canvas.parentNode.removeChild(this._canvas);
-    }
+    map.off("moveend zoomend resize viewreset move", this._scheduleRedraw, this);
+    if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+    if (this._canvas?.parentNode) this._canvas.parentNode.removeChild(this._canvas);
     this._canvas = null;
   },
 
   setOptions(options) {
     Object.assign(this.options, options);
-    this._redraw();
+    this._scheduleRedraw();
+  },
+
+  _scheduleRedraw() {
+    if (this._rafId) cancelAnimationFrame(this._rafId);
+    this._rafId = requestAnimationFrame(() => { this._rafId = null; this._redraw(); });
   },
 
   _redraw() {
-    if (!this._canvas || !this._map) {
-      return;
+    if (!this._canvas || !this._map) return;
+
+    const map = this._map;
+    const size = map.getSize();
+    const canvas = this._canvas;
+
+    // Size the canvas to the full container every frame.
+    if (canvas.width !== size.x || canvas.height !== size.y) {
+      canvas.width = size.x;
+      canvas.height = size.y;
     }
 
-    const size = this._map.getSize();
-    const bounds = this._map.getBounds();
-    const topLeft = this._map.containerPointToLayerPoint([0, 0]);
-    this._canvas.width = size.x;
-    this._canvas.height = size.y;
-    this._canvas.style.width = `${size.x}px`;
-    this._canvas.style.height = `${size.y}px`;
-    this._canvas.style.position = "absolute";
-    this._canvas.style.pointerEvents = "none";
-    L.DomUtil.setPosition(this._canvas, topLeft);
+    // Align the canvas with the container origin in layer-point space so it
+    // exactly covers the visible viewport regardless of pan offset.
+    this._topLeft = map.containerPointToLayerPoint([0, 0]);
+    L.DomUtil.setPosition(canvas, this._topLeft);
 
-    const context = this._canvas.getContext("2d");
-    context.clearRect(0, 0, size.x, size.y);
-    context.strokeStyle = this.options.color;
-    context.fillStyle = this.options.color;
-    context.lineWidth = 1;
-    context.globalAlpha = 0.75;
-    context.font = "11px Bahnschrift";
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, size.x, size.y);
+    ctx.font = "bold 11px Bahnschrift, Arial";
+    ctx.lineCap = "round";
 
     if (this.options.coordinateSystem === "mgrs") {
-      this._drawMetricGrid(context, bounds, topLeft);
-      return;
-    }
-
-    this._drawGeographicGrid(context, bounds, topLeft);
-  },
-
-  _drawGeographicGrid(context, bounds, topLeft) {
-    const step = geographicGridStep(this._map.getZoom());
-    const south = Math.floor(bounds.getSouth() / step) * step;
-    const west = Math.floor(bounds.getWest() / step) * step;
-
-    for (let lat = south; lat <= bounds.getNorth(); lat += step) {
-      const start = this._map.latLngToLayerPoint([lat, bounds.getWest()]).subtract(topLeft);
-      const end = this._map.latLngToLayerPoint([lat, bounds.getEast()]).subtract(topLeft);
-      this._drawLine(context, start, end);
-      this._drawLabel(context, formatDecimalDegrees(lat, true), { x: 8, y: start.y - 4 });
-    }
-
-    for (let lon = west; lon <= bounds.getEast(); lon += step) {
-      const start = this._map.latLngToLayerPoint([bounds.getSouth(), lon]).subtract(topLeft);
-      const end = this._map.latLngToLayerPoint([bounds.getNorth(), lon]).subtract(topLeft);
-      this._drawLine(context, start, end);
-      this._drawLabel(context, formatDecimalDegrees(lon, false), { x: start.x + 4, y: 14 });
+      this._drawMgrsGrid(ctx);
+    } else {
+      this._drawGeoGrid(ctx);
     }
   },
 
-  _drawMetricGrid(context, bounds, topLeft) {
-    const stepMeters = resolveMetricGridStep(this._map);
-    const prefixes = getMgrsSquarePrefixes(bounds);
-    const verticalKeys = new Set();
-    const horizontalKeys = new Set();
+  // Convert a lat/lng to canvas pixel coords (relative to canvas top-left).
+  _toCanvas(lat, lon) {
+    return this._map.latLngToLayerPoint([lat, lon]).subtract(this._topLeft);
+  },
 
-    prefixes.forEach((prefix) => {
-      for (let easting = 0; easting <= 100000; easting += stepMeters) {
-        const line = buildMgrsVerticalLine(prefix, easting);
-        if (!line) {
-          continue;
-        }
-        const key = `${prefix}:E:${easting}`;
-        if (verticalKeys.has(key)) {
-          continue;
-        }
-        verticalKeys.add(key);
-        const start = this._map.latLngToLayerPoint(line.points[0]).subtract(topLeft);
-        const end = this._map.latLngToLayerPoint(line.points[1]).subtract(topLeft);
-        this._drawLine(context, start, end);
-        const labelPoint = this._map.latLngToLayerPoint(line.labelLatLng).subtract(topLeft);
-        this._drawLabel(context, `${prefix} ${String(Math.floor(easting / 100)).padStart(3, "0")}`, { x: labelPoint.x + 4, y: 14 });
-      }
+  // Draw a clipped line segment between two lat/lon points.
+  // Returns the clipped screen segment or null.
+  _segment(ctx, lat0, lon0, lat1, lon1, alpha, width) {
+    const a = this._toCanvas(lat0, lon0);
+    const b = this._toCanvas(lat1, lon1);
+    const w = this._canvas.width, h = this._canvas.height;
+    const seg = csClipLine(a.x, a.y, b.x, b.y, w, h);
+    if (!seg) return null;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = width;
+    ctx.strokeStyle = this.options.color;
+    ctx.beginPath();
+    ctx.moveTo(seg[0], seg[1]);
+    ctx.lineTo(seg[2], seg[3]);
+    ctx.stroke();
+    ctx.restore();
+    return seg;
+  },
 
-      for (let northing = 0; northing <= 100000; northing += stepMeters) {
-        const line = buildMgrsHorizontalLine(prefix, northing);
-        if (!line) {
-          continue;
-        }
-        const key = `${prefix}:N:${northing}`;
-        if (horizontalKeys.has(key)) {
-          continue;
-        }
-        horizontalKeys.add(key);
-        const start = this._map.latLngToLayerPoint(line.points[0]).subtract(topLeft);
-        const end = this._map.latLngToLayerPoint(line.points[1]).subtract(topLeft);
-        this._drawLine(context, start, end);
-        const labelPoint = this._map.latLngToLayerPoint(line.labelLatLng).subtract(topLeft);
-        this._drawLabel(context, `${prefix} ${String(Math.floor(northing / 100)).padStart(3, "0")}`, { x: 8, y: labelPoint.y - 4 });
+  _drawLabel(ctx, text, x, y) {
+    const W = this._canvas.width, H = this._canvas.height;
+    const m = ctx.measureText(text);
+    const tw = m.width;
+    const th = 12;
+    const px = clamp(x, 2, W - tw - 6);
+    const py = clamp(y, th + 2, H - 4);
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "rgba(16,18,24,0.88)";
+    ctx.fillRect(px - 2, py - th, tw + 6, th + 2);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = this.options.color;
+    ctx.fillText(text, px + 1, py);
+    ctx.restore();
+  },
+
+  // ── Geographic grid (latlon / dms) ──────────────────────────────────────
+
+  _drawGeoGrid(ctx) {
+    const map = this._map;
+    const bounds = map.getBounds();
+    const system = this.options.coordinateSystem;
+    const step = resolveGeoStep(map);
+
+    // Expand bounds slightly to ensure lines cover full canvas edge to edge.
+    const south = alignFloor(bounds.getSouth() - step, step);
+    const north = alignCeil(bounds.getNorth() + step, step);
+    const west  = alignFloor(bounds.getWest()  - step, step);
+    const east  = alignCeil(bounds.getEast()  + step, step);
+
+    // Determine which lines get labels (aim for ~1 label per 120px).
+    const center = map.getCenter();
+    const cp = map.latLngToContainerPoint(center);
+    const np = map.latLngToContainerPoint([center.lat + step, center.lng]);
+    const ep = map.latLngToContainerPoint([center.lat, center.lng + step]);
+    const latPx = Math.max(1, Math.abs(cp.y - np.y));
+    const lonPx = Math.max(1, Math.abs(cp.x - ep.x));
+    const latStride = Math.max(1, Math.round(120 / latPx));
+    const lonStride = Math.max(1, Math.round(120 / lonPx));
+
+    const W = this._canvas.width, H = this._canvas.height;
+
+    // Latitude lines (horizontal) — label pinned to left edge
+    let latIdx = 0;
+    for (let lat = south; lat <= north + step * 0.01; lat = Math.round((lat + step) * 1e8) / 1e8) {
+      const seg = this._segment(ctx, lat, west, lat, east, 0.5, 1);
+      if (seg && latIdx % latStride === 0) {
+        // Pin label to left edge at the y where this line intersects x=0.
+        // The clipped segment runs from (seg[0],seg[1]) to (seg[2],seg[3]).
+        // Interpolate to x=0 (or use seg[1] if the line starts at x=0).
+        const dx = seg[2] - seg[0];
+        const labelY = dx === 0 ? seg[1] : seg[1] + (seg[3] - seg[1]) * (0 - seg[0]) / dx;
+        const clampedY = Math.max(14, Math.min(H - 4, labelY));
+        const label = formatGeoLabel(lat, true, system, step);
+        this._drawLabel(ctx, label, 6, clampedY + 10);
       }
+      latIdx++;
+    }
+
+    // Longitude lines (vertical) — label pinned to top edge
+    let lonIdx = 0;
+    for (let lon = west; lon <= east + step * 0.01; lon = Math.round((lon + step) * 1e8) / 1e8) {
+      const seg = this._segment(ctx, south, lon, north, lon, 0.5, 1);
+      if (seg && lonIdx % lonStride === 0) {
+        // Pin label to top edge at the x where this line intersects y=0.
+        const dy = seg[3] - seg[1];
+        const labelX = dy === 0 ? seg[0] : seg[0] + (seg[2] - seg[0]) * (0 - seg[1]) / dy;
+        const clampedX = Math.max(2, Math.min(W - 80, labelX));
+        const label = formatGeoLabel(lon, false, system, step);
+        this._drawLabel(ctx, label, clampedX, 14);
+      }
+      lonIdx++;
+    }
+  },
+
+  // ── MGRS grid ────────────────────────────────────────────────────────────
+  //
+  // Strategy: scan-line approach.
+  // For each screen column, sample MGRS at top and bottom → find easting
+  // boundaries crossed → draw a vertical line at the exact column where the
+  // easting crosses a step multiple.
+  // Same for rows / northing.
+  // This works at every zoom level and for any map rotation because we work
+  // entirely in screen space, never trying to reconstruct geographic lines
+  // from MGRS coordinates.
+
+  _drawMgrsGrid(ctx) {
+    const map = this._map;
+    const stepMeters = resolveMetricStep(map);
+    const W = this._canvas.width, H = this._canvas.height;
+
+    // Scan stride: sample every N pixels. Smaller = more accurate boundaries
+    // but more MGRS conversions. 4px is a good balance.
+    const STRIDE = 4;
+
+    // --- Build easting lines (vertical) by scanning columns ---
+    // For each column x, get MGRS at mid-height. Track prev easting bucket.
+    // When bucket changes, record the transition x.
+
+    // We collect line segments as {x1,y1,x2,y2,label,easting,prefix}
+    const vLines = []; // { screenX, label }
+    const hLines = []; // { screenY, label }
+
+    // Vertical scan: march across columns, sample at 3 rows to get a robust reading
+    let prevEBucket = null, prevEPrefix = null, prevEBucketX = 0;
+
+    for (let x = 0; x <= W; x += STRIDE) {
+      // Sample at vertical center; fall back to other rows if polar
+      const ll = map.containerPointToLatLng([x, H / 2]);
+      const parts = getMgrsComponents(ll.lat, ll.lng);
+      if (!parts) { prevEBucket = null; continue; }
+      const prefix = `${parts.zoneBand}${parts.square}`;
+      const e = Number(parts.easting);
+      const bucket = Math.floor(e / stepMeters);
+
+      if (prevEBucket !== null && (bucket !== prevEBucket || prefix !== prevEPrefix)) {
+        // Boundary crossed: record line at midpoint between prev and current x
+        const lineX = Math.round((prevEBucketX + x) / 2);
+        // The easting value at the boundary is bucket * stepMeters (the new bucket's floor)
+        const eastingVal = bucket * stepMeters;
+        vLines.push({ screenX: lineX, label: formatMgrsLabel(prefix, eastingVal, stepMeters) });
+      }
+      prevEBucket = bucket;
+      prevEPrefix = prefix;
+      prevEBucketX = x;
+    }
+
+    // Horizontal scan: march down rows, sample at horizontal center
+    let prevNBucket = null, prevNPrefix = null, prevNBucketY = 0;
+    let prevNEasting = null;
+
+    for (let y = 0; y <= H; y += STRIDE) {
+      const ll = map.containerPointToLatLng([W / 2, y]);
+      const parts = getMgrsComponents(ll.lat, ll.lng);
+      if (!parts) { prevNBucket = null; continue; }
+      const prefix = `${parts.zoneBand}${parts.square}`;
+      const n = Number(parts.northing);
+      const e = Number(parts.easting);
+      const bucket = Math.floor(n / stepMeters);
+
+      if (prevNBucket !== null && (bucket !== prevNBucket || prefix !== prevNPrefix)) {
+        const lineY = Math.round((prevNBucketY + y) / 2);
+        const northingVal = bucket * stepMeters;
+        hLines.push({ screenY: lineY, label: formatMgrsLabel(prefix, northingVal, stepMeters), easting: e, prefix });
+      }
+      prevNBucket = bucket;
+      prevNPrefix = prefix;
+      prevNBucketY = y;
+      prevNEasting = e;
+    }
+
+    // --- Draw ---
+    ctx.save();
+    ctx.strokeStyle = this.options.color;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.55;
+
+    // For label density, aim for one label per ~160px
+    const vStride = Math.max(1, Math.round(vLines.length / Math.max(1, W / 160)));
+    const hStride = Math.max(1, Math.round(hLines.length / Math.max(1, H / 120)));
+
+    vLines.forEach((line, i) => {
+      ctx.beginPath();
+      ctx.moveTo(line.screenX + 0.5, 0);
+      ctx.lineTo(line.screenX + 0.5, H);
+      ctx.stroke();
+      if (i % vStride === 0) {
+        ctx.restore();
+        this._drawLabel(ctx, line.label, line.screenX + 4, 14);
+        ctx.save();
+        ctx.strokeStyle = this.options.color;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.55;
+      }
+    });
+
+    hLines.forEach((line, i) => {
+      ctx.beginPath();
+      ctx.moveTo(0, line.screenY + 0.5);
+      ctx.lineTo(W, line.screenY + 0.5);
+      ctx.stroke();
+      if (i % hStride === 0) {
+        ctx.restore();
+        // Pin label to left edge, just below the horizontal line.
+        this._drawLabel(ctx, line.label, 6, line.screenY + 12);
+        ctx.save();
+        ctx.strokeStyle = this.options.color;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.55;
+      }
+    });
+
+    ctx.restore();
+
+    // --- Draw GZD (100km cell) boundaries at low zoom as heavier lines ---
+    // When stepMeters >= 100000, also draw the 100km square outlines
+    if (stepMeters >= 10000) {
+      this._drawMgrsGzdLines(ctx, W, H);
+    }
+  },
+
+  // Draw GZD (grid zone designation) heavy boundary lines using the same
+  // scan-line approach but detecting zone+square prefix changes.
+  _drawMgrsGzdLines(ctx, W, H) {
+    const map = this._map;
+    const STRIDE = 4;
+
+    ctx.save();
+    ctx.strokeStyle = this.options.color;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.75;
+    ctx.setLineDash([]);
+
+    // Vertical: detect zone boundary (zone number or square letter changes)
+    let prevZone = null, prevX = 0;
+    for (let x = 0; x <= W; x += STRIDE) {
+      const ll = map.containerPointToLatLng([x, H / 2]);
+      const parts = getMgrsComponents(ll.lat, ll.lng);
+      if (!parts) { prevZone = null; continue; }
+      const zone = parts.zoneBand; // e.g. "11S"
+      if (prevZone !== null && zone !== prevZone) {
+        const lx = Math.round((prevX + x) / 2) + 0.5;
+        ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, H); ctx.stroke();
+      }
+      prevZone = zone; prevX = x;
+    }
+
+    // Horizontal: detect latitude band change
+    let prevBand = null, prevY = 0;
+    for (let y = 0; y <= H; y += STRIDE) {
+      const ll = map.containerPointToLatLng([W / 2, y]);
+      const parts = getMgrsComponents(ll.lat, ll.lng);
+      if (!parts) { prevBand = null; continue; }
+      const band = parts.zoneBand.replace(/\d+/, ''); // just the letter
+      if (prevBand !== null && band !== prevBand) {
+        const ly = Math.round((prevY + y) / 2) + 0.5;
+        ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W, ly); ctx.stroke();
+      }
+      prevBand = band; prevY = y;
+    }
+
+    ctx.restore();
+
+    // Label GZD cells at their screen center
+    this._labelMgrsGzdCells(ctx, W, H);
+  },
+
+  _labelMgrsGzdCells(ctx, W, H) {
+    const map = this._map;
+    // Track the topmost-then-leftmost screen point seen for each GZD cell
+    // so labels are placed at the top-left corner of each visible cell.
+    const cellTopLeft = new Map();
+    const STRIDE = 8;
+    for (let y = 0; y <= H; y += STRIDE) {
+      for (let x = 0; x <= W; x += STRIDE) {
+        const ll = map.containerPointToLatLng([x, y]);
+        const parts = getMgrsComponents(ll.lat, ll.lng);
+        if (!parts) continue;
+        const key = `${parts.zoneBand}${parts.square}`;
+        if (!cellTopLeft.has(key)) {
+          cellTopLeft.set(key, { x, y });
+        }
+      }
+    }
+    cellTopLeft.forEach(({ x, y }, key) => {
+      const lx = Math.max(4, Math.min(x + 4, W - 60));
+      const ly = Math.max(14, Math.min(y + 14, H - 4));
+      this._drawLabel(ctx, key, lx, ly);
     });
   },
 
-  _drawLabel(context, text, point) {
-    const metrics = context.measureText(text);
-    const width = metrics.width + 8;
-    const x = clamp(point.x, 2, this._canvas.width - width - 2);
-    const y = clamp(point.y, 12, this._canvas.height - 4);
-
-    context.save();
-    context.globalAlpha = 0.95;
-    context.fillStyle = "rgba(22, 24, 29, 0.9)";
-    context.fillRect(x - 3, y - 10, width, 14);
-    context.fillStyle = this.options.color;
-    context.fillText(text, x, y);
-    context.restore();
-  },
-
-  _drawLine(context, start, end) {
-    context.beginPath();
-    context.moveTo(start.x, start.y);
-    context.lineTo(end.x, end.y);
-    context.stroke();
-  },
 });
 
 const CanvasViewshedLayer = L.Layer.extend({

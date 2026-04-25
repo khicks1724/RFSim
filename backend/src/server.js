@@ -5,7 +5,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { z } = require("zod");
 const { config } = require("./config");
-const { query } = require("./db");
+const { pool, query } = require("./db");
 
 const app = express();
 
@@ -57,6 +57,18 @@ const projectSchema = z.object({
 const snapshotSchema = z.object({
   label: z.string().min(1).max(120),
   state: z.any().optional()
+});
+
+const aiConfigItemSchema = z.object({
+  id: z.string().min(1).max(200),
+  label: z.string().max(120).optional().default(""),
+  provider: z.string().min(1).max(80),
+  apiKey: z.string().min(1).max(4096),
+  model: z.string().max(120).optional().default("")
+});
+
+const aiConfigListSchema = z.object({
+  configs: z.array(aiConfigItemSchema).default([])
 });
 
 app.get("/api/health", async (_request, response) => {
@@ -148,6 +160,59 @@ app.get("/api/auth/me", authRequired, async (request, response) => {
     response.json({ user: { id: user.id, email: user.email, fullName: user.full_name } });
   } catch (error) {
     response.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/user/ai-configs", authRequired, async (request, response) => {
+  try {
+    const result = await query(
+      `select id, label, provider, api_key as "apiKey", model
+       from user_ai_config
+       where owner_user_id = $1
+       order by position asc, updated_at desc`,
+      [request.user.sub]
+    );
+    response.json({ configs: result.rows });
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/api/user/ai-configs", authRequired, async (request, response) => {
+  const parsed = aiConfigListSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("delete from user_ai_config where owner_user_id = $1", [request.user.sub]);
+
+    for (const [index, configItem] of parsed.data.configs.entries()) {
+      await client.query(
+        `insert into user_ai_config (id, owner_user_id, label, provider, api_key, model, position)
+         values ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          configItem.id,
+          request.user.sub,
+          configItem.label ?? "",
+          configItem.provider,
+          configItem.apiKey,
+          configItem.model ?? "",
+          index,
+        ]
+      );
+    }
+
+    await client.query("commit");
+    response.json({ configs: parsed.data.configs });
+  } catch (error) {
+    await client.query("rollback");
+    response.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 
