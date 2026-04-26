@@ -1,216 +1,202 @@
-# EW / RF Propagation Simulator
+# RF Planner
 
-Browser-based RF planning and visualization for building scenarios, placing emitters, importing overlays, running coverage, and reviewing terrain-aware results in 2D and 3D.
+Browser-based RF planning and visualization for building scenarios, placing emitters, running coverage analysis, and reviewing terrain-aware results in 2D and 3D.
 
 ## What It Does
 
-- Build RF scenarios on a Leaflet map with synchronized Cesium 3D view
-- Place radios, jammers, relays, and receivers with terrain-aware heights
+- Build RF scenarios on a Leaflet map with a synchronized Cesium 3D view
+- Place radios, jammers, relays, and receivers with configurable heights and propagation properties
 - Import `GeoJSON`, `KML`, `KMZ`, and ATAK data package `ZIP` overlays as editable map content
-- Preserve imported names, folders, common line/polygon styles, and packaged KMZ point symbols where possible
-- Organize scenario data in `Map Contents` with folders, search, rename, hide, focus, drag/reorder, and bulk delete
-- Draw circles, rectangles, polylines, and polygons directly in the app
-- Run coverage with compact progress + cancel support using:
-  - `Free Space Path Loss`
-  - `Terrain`
-  - `Terrain and Weather`
-  - `Buildings and Weather`
-- Inspect generated coverage for RSSI, path loss, range, LOS, diffraction, and building loss
+- Organize everything in **Map Contents** with folders, search, rename, hide, reorder, and bulk delete
+- Draw circles, rectangles, polylines, and polygons directly on the map
+- Run coverage simulations with configurable propagation models and view the results as an overlay
+- Control how coverage is rendered — transparent, gradient, or shadowed no-LOS areas
 - Run terrain-aware Tx/Rx site planning inside a drawn region
-- Use streamed Cesium terrain, local DTED, Google Photorealistic 3D Tiles, and Cesium Ion OSM Buildings
-- Ask the AI assistant questions against live map content and scenario state
+- Use the **AI assistant** for PACE planning, SOI/CEOI drafting, spectrum documents, COA support, and live scenario queries
+- Save and switch between named projects with per-project autosave
 
 ## Architecture
 
-This app is primarily **client-side**.
+The app is primarily **client-side**.
 
-- `app.js`: UI, map state, imports, Cesium/Leaflet sync, persistence, AI integration
-- `simulation-worker.js`: coverage, inspection, and planning work off the main UI thread
-- `index.html` + `styles.css`: application shell and UI
-- `localStorage`: settings, map state, profiles, AI provider config, Cesium token
+| File | Purpose |
+|---|---|
+| `app.js` | UI, map state, imports, Cesium/Leaflet sync, persistence, AI integration |
+| `simulation-worker.js` | Coverage, inspection, and planning — runs off the main thread |
+| `index.html` + `styles.css` | Application shell and UI |
+| `localStorage` | Settings, map state, profiles, AI config, Cesium token, per-project KMZ geometry |
 
-The coverage math runs on the **user's machine in the browser worker**, not on the EC2 host. The server mainly serves the app and optional backend/API paths.
-
-## Core Workflows
-
-### Scenario Authoring
-
-- Place emitters on the map in 2D or 3D
-- Import mission graphics and overlays
-- Draw supporting geometry
-- Keep everything together in `Map Contents`
-
-### Terrain / 3D
-
-- `Cesium World Terrain` or custom Cesium terrain endpoint
-- Local DTED import for client-side terrain-backed analysis
-- `Google Photorealistic 3D Tiles` for visual city mesh
-- `Cesium Ion OSM Buildings` for RF obstruction modeling
-
-### Coverage / Planning
-
-- Generate coverage around a selected emitter
-- Inspect point results on the map
-- Run Tx/Rx recommendation planning inside a polygon
-- Review results in 2D and 3D
-
-### AI Assistant
-
-- Supports `GenAI.mil (STARK)` and `Anthropic (Claude)`
-- Can answer against live assets, imported items, shapes, viewsheds, planning regions, and recommendations
-- Includes local map lookup shortcuts for direct location/grid questions
+Coverage math runs **in the browser worker on the user's machine**, not on the server. The server handles auth and project storage only.
 
 ## Quick Start
 
-Serve the repo with a local web server.
+### Browser-only (no backend)
 
-```powershell
+Serve the repo with any local web server:
+
+```bash
 python -m http.server 8080
-```
-
-or
-
-```powershell
+# or
 npx serve .
 ```
 
-Open:
+Open `http://localhost:8080`.
 
-```text
-http://localhost:8080
+### Hosted multi-user
+
+See [deploy/](deploy/) and [docs/aws-ec2-production.md](docs/aws-ec2-production.md) for the full stack (Node backend + PostgreSQL + nginx on EC2).
+
+```bash
+docker compose up -d --build
 ```
 
-## Quick Use
+## Core Workflows
 
-1. Start the site.
-2. Add a Cesium Ion token if you want streamed terrain / 3D services.
-3. Place one or more emitters.
-4. Optionally import `GeoJSON`, `KML`, `KMZ`, or ATAK `ZIP`.
-5. Generate coverage.
-6. Inspect the layer on the map.
-7. Draw a planning region and run recommendations if needed.
-8. Switch to `3D View` for terrain / city review.
+### 1 — Place emitters
+
+Click the map to open the emitter placement tool. Configure:
+
+- Radio type (see [Radio Library](#radio-library) below)
+- Tx power, frequency, antenna gain, height
+- Propagation model and terrain/building settings
+
+### 2 — Import overlays
+
+Drop `GeoJSON`, `KML`, `KMZ`, or ATAK `ZIP` files onto the map. Folder hierarchy, styles, and item names are preserved. KMZ geometry is stored **per project** in browser storage so it survives project switches and page reloads without re-importing.
+
+### 3 — Run coverage
+
+Open the **Simulate** panel, select an emitter, configure the propagation options, and run. Results appear as a color-coded RSSI overlay. Use the render controls to set how no-LOS areas appear:
+
+- **Transparent** — blocked areas show nothing (default)
+- **Shadow** — blocked areas show a light gray tint
+- **Gradient** — full RSSI gradient regardless of LOS
+
+### 4 — Review in 3D
+
+Switch to **3D View** at any time to see terrain, city mesh, and coverage layers in context.
+
+### 5 — AI planning
+
+Open **AI Chat** and ask the assistant to help draft:
+
+- PACE plan
+- SOI / CEOI
+- Spectrum management document
+- After-action report
+- Route analysis narrative
+- COA support
+- Relay node placement
+
+The assistant has full read access to the current map state — assets, overlays, shapes, viewsheds, and planning regions.
+
+## Radio Library
+
+Includes the following emitter types:
+
+**Tactical Radios**
+- AN/PRC-163 Falcon IV — multiband wideband
+- AN/PRC-158 — multiband manpack
+- AN/PRC-152A — multiband handheld
+- AN/PRC-117G — manpack SATCOM/UHF
+- AN/PRC-160 HF — HF/NVIS manpack
+- Motorola XTS 2500 — P25 VHF/UHF
+
+**Vehicle / Elevated**
+- AN/VRC-110 — vehicle-mounted
+- WIN-T CPM-200 / PSE-5 — vehicle network node
+- CP Node — network infrastructure
+
+**Mesh / MANET**
+- Silvus StreamCaster 4200 / 4400 — MIMO mesh
+- Wave Relay MPU-5 — MANET
+
+**SATCOM**
+- Starlink / Starshield — LEO SATCOM
+- MUOS terminal — GEO UHF SATCOM
+
+**EW / ISR**
+- AN/MLQ-40 Prophet — EW/SIGINT
+- Generic jammer / generic receiver
 
 ## Cesium Setup
 
-If you want streamed terrain, photorealistic 3D tiles, or OSM buildings, configure a Cesium Ion token.
+A Cesium Ion token unlocks streamed terrain, Google Photorealistic 3D Tiles, and OSM building RF modeling.
 
-### Why
+**Without a token** — the app defaults to:
+- Ellipsoid terrain (flat earth in 3D)
+- Google Satellite basemap
+- Google Photorealistic 3D city mesh (visual only)
+- RF building model off
 
-Without a token:
+**With a token** — the app defaults to:
+- Cesium World Terrain
+- Esri World Imagery basemap
+- Esri World Imagery (3D)
+- Google Photorealistic 3D city mesh
+- Cesium Ion OSM Buildings (RF obstruction model)
+- Reinforced Concrete building material
 
-- 3D can still open
-- ellipsoid-only 3D still works
-- local DTED still works
-- Cesium World Terrain / Ion-backed services may not
+### Getting a token
 
-### Create A Token
+1. Go to [cesium.com/ion](https://cesium.com/ion) → **Access Tokens** → **Create token**
+2. Name it (e.g. `RFPlanner`), enable `assets:read`, restrict Allowed URLs if deploying publicly
+3. Copy the token and paste it into the app's **Imagery → Cesium Ion Token** field
 
-Use the `Access Tokens` page in Cesium Ion.
-
-![Cesium Ion Access Tokens page with the Create token button](./images/cesium-ion-access-tokens.svg)
-
-Recommended token setup:
-
-- name it something recognizable, e.g. `RFSim`
-- enable browser-safe read access such as `assets:read`
-- restrict `Allowed URLs` if deploying publicly
-- keep scopes narrow
-
-![Cesium Ion token settings form with the public-client configuration options](./images/cesium-ion-token-settings.svg)
-
-Copy the generated token:
-
-![Cesium Ion generated token value ready to copy](./images/cesium-ion-copy-token.svg)
-
-Paste it into the app's `Cesium Ion Token` field:
-
-![Imagery dropdown showing the Cesium Ion Token field at the bottom](./images/imagery-menu-cesium-token-field.svg)
-
-### Current 3D Modes
-
-- `3D Terrain Source`: ellipsoid, Cesium World Terrain, or custom Cesium terrain URL
-- `3D City Mesh`: Google Photorealistic 3D Tiles
-- `RF Building Model`: Cesium Ion OSM Buildings
-
-Recommended split:
-
-- use **Photorealistic 3D Tiles** for visual realism
-- use **OSM Buildings** for RF obstruction modeling
-
-## Map Contents / Import
-
-`Map Contents` is the scenario tree for:
-
-- emitters
-- imported overlays
-- drawn shapes
-- coverage layers
-- planning outputs
-- terrain items
-
-Import supports:
-
-- `GeoJSON`
-- `KML`
-- `KMZ`
-- ATAK data package `ZIP`
-
-Imported overlays are added as native editable map items. Folder hierarchy is preserved in a nested form, imports default to collapsed, and large imports show a progress UI.
+The app saves the token in browser storage. Clearing site data will remove it.
 
 ## Propagation Models
 
-The current coverage modes are:
+| Model | Description |
+|---|---|
+| Free Space Path Loss | Ideal free-space, no terrain |
+| Terrain | Terrain-aware LOS and diffraction |
+| Terrain and Weather | Adds atmospheric refraction |
+| Buildings and Weather | Adds OSM building obstruction (requires Cesium Ion) |
+| HF / NVIS | Short-range NVIS (2–12 MHz) and long-haul skywave (12–30 MHz) |
 
-- `Free Space Path Loss`
-- `Terrain`
-- `Terrain and Weather`
-- `Buildings and Weather`
+Only **Buildings and Weather** streams OSM building data — it is slower than terrain-only modes.
 
-Only `Buildings and Weather` uses the slower streamed OSM building sampling path.
+## Workspaces and Projects
+
+Sign in to enable named projects. The active project is shown in the top bar.
+
+- **Autosave** runs automatically after every map change and shows a ring/checkmark/error indicator
+- **KMZ geometry** is stored per project in browser storage — switching projects restores the correct overlays
+- Projects store assets, drawn shapes, and map state on the server; large KMZ files stay in browser storage only
+- **Snapshots** can be created from the workspace menu to preserve a point-in-time state
+
+Guest mode (no sign-in) works fully in browser storage only.
 
 ## Optional AI Proxy
 
-The main app does not require a backend, but `genai-proxy.js` is included for `GenAI.mil` environments where direct browser access is blocked.
+For `GenAI.mil (STARK)` environments where direct browser access is blocked, run the included proxy:
 
-Run:
-
-```powershell
+```bash
 node genai-proxy.js
 ```
 
-Default local endpoint:
-
-```text
-http://127.0.0.1:8787/v1/chat/completions
-```
-
-## Hosted / Multi-User Path
-
-This repo also includes a backend/deployment scaffold for a shared hosted deployment:
-
-- `backend/`: auth + project persistence API
-- `deploy/`: container / nginx assets
-- `docs/aws-ec2-production.md`: deployment notes
-
-Use that path if you want shared accounts and server-backed projects. The browser-only mode is still the main analysis path.
+Default endpoint: `http://127.0.0.1:8787/v1/chat/completions`
 
 ## Repository Layout
 
-- `index.html`: app shell and UI structure
-- `styles.css`: styling and layout
-- `app.js`: main application controller
-- `simulation-worker.js`: coverage / planning worker
-- `app-config.js`: frontend runtime config
-- `genai-proxy.js`: optional GenAI.mil helper
-- `backend/`: hosted persistence/auth scaffold
-- `deploy/`: EC2 / nginx deployment assets
-- `images/`: README support images
+```
+app.js                  Main application controller
+simulation-worker.js    Coverage and planning worker (runs off main thread)
+index.html              App shell and UI structure
+styles.css              Styling and layout
+app-config.js           Frontend runtime config (API base URL, feature flags)
+genai-proxy.js          Optional GenAI.mil CORS proxy
+backend/                Auth and project persistence API (Node + PostgreSQL)
+deploy/                 Docker Compose and nginx deployment assets
+docs/                   Deployment and operations notes
+images/                 README images
+```
 
-## Limits / Notes
+## Notes
 
-- This is a planning and exploration tool, not a certified engineering package.
-- OSM building obstruction and material loss are approximate.
-- Imported overlays should still be user-validated.
-- Browser support matters for Web Serial GPS, voice input, and some provider features.
-- External imagery / terrain / AI providers depend on network access and credentials.
+- This is a planning and exploration tool, not a certified RF engineering package.
+- OSM building obstruction and material loss values are approximate.
+- Imported overlays should be user-validated before operational use.
+- Web Serial GPS, voice input, and some AI provider features require a modern Chromium-based browser.
+- External imagery, terrain, and AI services depend on network access and valid credentials.
