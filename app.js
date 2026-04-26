@@ -3122,11 +3122,13 @@ function serializeCurrentMapState() {
   };
 }
 
-// Leaner version of serializeCurrentMapState for server saves — omits profiles
-// and settings (stored via their own API/localStorage keys) to keep payload small.
+// Leaner version of serializeCurrentMapState for server saves — omits profiles,
+// settings, and KMZ-imported geometry (stored localStorage-only) to keep payload
+// small. Only user-drawn shapes (item.drawn === true) go to the server.
 function serializeMapStateForServer() {
   const full = serializeCurrentMapState();
   const { profiles, settings, ...serverState } = full;
+  serverState.importedItems = (serverState.importedItems ?? []).filter((item) => item.drawn);
   return serverState;
 }
 
@@ -3250,11 +3252,23 @@ async function loadMapState() {
         serverState.mapView
       );
       if (serverHasContent) {
-        applySavedMapState(serverState);
-        // Keep localStorage in sync with whatever the server returned
+        // KMZ-imported items are stored localStorage-only (too large for server).
+        // Merge them back in from localStorage so they survive a refresh.
+        let mergedState = serverState;
         try {
-          window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(serverState));
-        } catch { /* quota */ }
+          const localRaw = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
+          if (localRaw) {
+            const localState = JSON.parse(localRaw);
+            const localImported = (localState.importedItems ?? []).filter((i) => !i.drawn);
+            if (localImported.length > 0) {
+              mergedState = {
+                ...serverState,
+                importedItems: [...localImported, ...(serverState.importedItems ?? [])],
+              };
+            }
+          }
+        } catch { /* ignore localStorage errors */ }
+        applySavedMapState(mergedState);
         return;
       }
       if (serverState && !serverHasContent) {
