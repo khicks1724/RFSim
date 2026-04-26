@@ -563,6 +563,7 @@ const dom = {
   workspaceProjectName: document.querySelector("#workspaceProjectName"),
   workspaceProjectCreateBtn: document.querySelector("#workspaceProjectCreateBtn"),
   workspaceProjectSaveBtn: document.querySelector("#workspaceProjectSaveBtn"),
+  autosaveIndicator: document.querySelector("#autosaveIndicator"),
   workspaceProjectReloadBtn: document.querySelector("#workspaceProjectReloadBtn"),
   workspaceProjectSnapshotBtn: document.querySelector("#workspaceProjectSnapshotBtn"),
   workspaceProjectDeleteBtn: document.querySelector("#workspaceProjectDeleteBtn"),
@@ -1607,11 +1608,13 @@ function syncWorkspaceUi() {
     dom.workspaceMenuHeadline.textContent = "Account & Projects";
     dom.workspaceStatus.textContent = "Sign in to enter RF Sim and access server-backed projects, or use guest mode for an in-memory session.";
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
+    setAutosaveIndicator("hidden");
     syncAuthScreenUi();
     return;
   }
 
   if (guest) {
+    setAutosaveIndicator("hidden");
     dom.workspaceSignOutBtn.textContent = "Exit Guest";
     dom.workspaceMenuValue.textContent = "Guest";
     dom.workspaceMenuHeadline.textContent = "Guest Workspace";
@@ -1770,6 +1773,7 @@ async function saveActiveProjectNow({ silent = false } = {}) {
     return false;
   }
 
+  setAutosaveIndicator("saving");
   await apiFetch(`/projects/${state.session.activeProjectId}`, {
     method: "PUT",
     body: JSON.stringify({ state: serializeCurrentMapState() }),
@@ -1779,7 +1783,28 @@ async function saveActiveProjectNow({ silent = false } = {}) {
   if (!silent) {
     setStatus("Project saved to server.");
   }
+  setAutosaveIndicator("saved");
+  if (_autosaveSavedTimerId) window.clearTimeout(_autosaveSavedTimerId);
+  _autosaveSavedTimerId = window.setTimeout(() => {
+    _autosaveSavedTimerId = null;
+    if (!state.session.autosavePending) setAutosaveIndicator("hidden");
+  }, 2500);
   return true;
+}
+
+let _autosaveSavedTimerId = null;
+
+function setAutosaveIndicator(state_) {
+  const el = dom.autosaveIndicator;
+  if (!el) return;
+  el.classList.remove("hidden", "is-pending", "is-saving", "is-saved");
+  if (state_ === "hidden") {
+    el.classList.add("hidden");
+  } else {
+    el.classList.add(`is-${state_}`);
+    const labels = { pending: "Autosave pending…", saving: "Saving…", saved: "Saved" };
+    el.setAttribute("aria-label", labels[state_] ?? "");
+  }
 }
 
 function queueActiveProjectAutosave() {
@@ -1788,6 +1813,11 @@ function queueActiveProjectAutosave() {
   }
   state.session.autosavePending = true;
   syncWorkspaceUi();
+  setAutosaveIndicator("pending");
+  if (_autosaveSavedTimerId) {
+    window.clearTimeout(_autosaveSavedTimerId);
+    _autosaveSavedTimerId = null;
+  }
   if (state.session.autosaveTimerId) {
     window.clearTimeout(state.session.autosaveTimerId);
   }
@@ -1797,6 +1827,7 @@ function queueActiveProjectAutosave() {
       await saveActiveProjectNow({ silent: true });
     } catch (error) {
       setStatus(`Autosave failed: ${error.message}`, true);
+      setAutosaveIndicator("hidden");
     }
   }, 900);
 }
