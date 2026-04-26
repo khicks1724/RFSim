@@ -2987,7 +2987,7 @@ async function init() {
   state.map.on("mousemove", onMapMouseMove);
   state.map.on("contextmenu", onMapContextMenu);
   state.map.on("moveend zoomend resize", updateMapOverlayMetrics);
-  state.map.on("moveend zoomend", saveMapState);
+  state.map.on("moveend zoomend", saveMapViewPosition);
   window.addEventListener("beforeunload", flushPendingAutosave);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flushPendingAutosave();
@@ -3517,22 +3517,67 @@ function serializeMapStateForServer() {
   return serverState;
 }
 
+// Cheap map-view-only save triggered on every pan/zoom. Only patches the
+// mapView key in the existing localStorage blob — never re-serializes KMZ
+// geometry or queues an autosave, so large overlays don't cause lag.
+function saveMapViewPosition() {
+  try {
+    const raw = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
+    const existing = raw ? JSON.parse(raw) : null;
+    if (!existing) return; // nothing saved yet; full saveMapState will run at next real change
+    const center = state.map.getCenter();
+    existing.mapView = { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() };
+    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(existing));
+  } catch {
+    // quota or parse error — skip silently
+  }
+}
+
 function saveMapState() {
   const payload = serializeCurrentMapState();
+
+  // Split KMZ (non-drawn) items into their own project-scoped key so the main
+  // blob stays small enough to fit in localStorage quota. Large KMZ files
+  // previously caused the full-blob write to silently fail, leaving nothing to
+  // restore on the next page load.
+  const kmzItems = (payload.importedItems ?? []).filter((i) => !i.drawn);
+  const drawnItems = (payload.importedItems ?? []).filter((i) => i.drawn);
+  const compactPayload = { ...payload, importedItems: drawnItems };
+
   try {
-    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(compactPayload));
   } catch {
-    // localStorage quota exceeded — fail silently
+    // Still over quota even without KMZ — store minimal envelope so view
+    // position and folder structure survive.
+    try {
+      const minimalPayload = {
+        schemaVersion: compactPayload.schemaVersion,
+        savedAt: compactPayload.savedAt,
+        mapView: compactPayload.mapView,
+        mapContentFolders: compactPayload.mapContentFolders,
+        mapContentOrder: compactPayload.mapContentOrder,
+        mapContentAssignments: compactPayload.mapContentAssignments,
+        hiddenContentIds: compactPayload.hiddenContentIds,
+        activeTerrainId: compactPayload.activeTerrainId,
+        activeProjectId: compactPayload.activeProjectId,
+        importedItems: [],
+        assets: compactPayload.assets,
+      };
+      window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(minimalPayload));
+    } catch { /* truly out of space */ }
   }
 
-  // Persist KMZ items (non-drawn) separately under a project-scoped key so that
-  // switching projects restores the correct KMZ data instead of a stale one.
+  // Write KMZ items to the separate project-scoped key.
+  const kmzKey = getKmzStorageKey(state.session.activeProjectId);
   try {
-    const kmzKey = getKmzStorageKey(state.session.activeProjectId);
-    const kmzItems = (payload.importedItems ?? []).filter((i) => !i.drawn);
     window.localStorage.setItem(kmzKey, JSON.stringify(kmzItems));
   } catch {
-    // quota — fail silently
+    // KMZ payload itself is too large — try without coordinates as a last
+    // resort so at least folder/name metadata survives (geometry won't restore).
+    try {
+      const slim = kmzItems.map(({ coordinates: _c, ...rest }) => rest);
+      window.localStorage.setItem(kmzKey, JSON.stringify(slim));
+    } catch { /* truly out of space */ }
   }
 
   queueActiveProjectAutosave();
@@ -3686,7 +3731,19 @@ async function loadMapState() {
   }
 
   if (localState) {
-    applySavedMapState(localState);
+    // Merge in KMZ items from the project-scoped key (same as the authenticated
+    // path does) so the guest path also benefits from the split storage layout.
+    const kmzKey = getKmzStorageKey(localState.activeProjectId ?? null);
+    let guestKmzItems = [];
+    try {
+      const raw = window.localStorage.getItem(kmzKey);
+      if (raw) guestKmzItems = JSON.parse(raw);
+    } catch {}
+    const drawnItems = (localState.importedItems ?? []).filter((i) => i.drawn);
+    applySavedMapState({
+      ...localState,
+      importedItems: [...guestKmzItems, ...drawnItems],
+    });
   }
 }
 
