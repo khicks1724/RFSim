@@ -22,7 +22,12 @@ self.addEventListener("message", (event) => {
     }
 
     if (type === "simulation:start") {
-      const result = runSimulation(payload);
+      const result = runSimulation(payload, (progress) => {
+        self.postMessage({
+          type: "simulation:progress",
+          payload: progress,
+        });
+      });
       self.postMessage(
         {
           type: "simulation:complete",
@@ -64,7 +69,7 @@ self.addEventListener("message", (event) => {
 
 const terrainCache = new Map();
 
-function runSimulation(payload) {
+function runSimulation(payload, reportProgress = () => {}) {
   const {
     requestId,
     asset,
@@ -84,8 +89,16 @@ function runSimulation(payload) {
   const longitudes = new Float64Array(estimatedCells);
   const rssi = new Float32Array(estimatedCells);
   const lineOfSight = new Uint8Array(estimatedCells);
+  const totalRows = Math.max(1, Math.floor((radiusMeters * 2) / gridMeters) + 1);
 
   let count = 0;
+  let processedRows = 0;
+  reportProgress({
+    requestId,
+    fraction: 0,
+    stage: "Tracing RF paths...",
+    detail: "0%",
+  });
   for (let northMeters = -radiusMeters; northMeters <= radiusMeters; northMeters += gridMeters) {
     const lat = asset.lat + metersToLatitudeDegrees(northMeters);
     for (let eastMeters = -radiusMeters; eastMeters <= radiusMeters; eastMeters += gridMeters) {
@@ -114,6 +127,16 @@ function runSimulation(payload) {
       rssi[count] = result.rssiDbm;
       lineOfSight[count] = result.lineOfSight ? 1 : 0;
       count += 1;
+    }
+    processedRows += 1;
+    if (processedRows === totalRows || processedRows === 1 || processedRows % 4 === 0) {
+      const fraction = clamp(processedRows / totalRows, 0, 1);
+      reportProgress({
+        requestId,
+        fraction,
+        stage: "Tracing RF paths...",
+        detail: `${Math.round(fraction * 100)}%`,
+      });
     }
   }
 
@@ -307,22 +330,36 @@ function planSites(payload) {
 
 function simulateLink(txAsset, rxTarget, terrain, weather, propagationModel) {
   const distanceKm = haversineKm(txAsset.lat, txAsset.lon, rxTarget.lat, rxTarget.lon);
-  const terrainProfile = traceTerrain(
-    txAsset,
-    rxTarget,
-    txAsset.antennaHeightM ?? 0,
-    rxTarget.antennaHeightM ?? 0,
-    terrain,
-  );
+  const includeTerrain = usesTerrainEffects(propagationModel);
+  const includeAtmosphere = usesAtmosphericEffects(propagationModel);
+  const includeBuildings = usesBuildingEffects(propagationModel);
+  const terrainProfile = includeTerrain
+    ? traceTerrain(
+      txAsset,
+      rxTarget,
+      txAsset.antennaHeightM ?? 0,
+      rxTarget.antennaHeightM ?? 0,
+      terrain,
+    )
+    : { lineOfSight: true, maxObstructionM: 0, buildingPathMeters: 0, buildingHitSamples: 0 };
   const freeSpaceDb = freeSpacePathLoss(distanceKm, txAsset.frequencyMHz);
-  const atmosphericDb = atmosphericAttenuation(txAsset.frequencyMHz, weather, distanceKm);
-  const diffractionDb = diffractionPenalty(terrainProfile.maxObstructionM, distanceKm, txAsset.frequencyMHz);
+  const atmosphericDb = includeAtmosphere
+    ? atmosphericAttenuation(txAsset.frequencyMHz, weather, distanceKm)
+    : 0;
+  const diffractionDb = includeTerrain
+    ? diffractionPenalty(terrainProfile.maxObstructionM, distanceKm, txAsset.frequencyMHz)
+    : 0;
+  const buildingLossDb = includeBuildings
+    ? buildingStructurePenalty(terrainProfile, txAsset.frequencyMHz, terrain)
+    : 0;
 
   let pathLossDb = freeSpaceDb;
   if (propagationModel === "itu-p526") {
     pathLossDb += diffractionDb;
   } else if (propagationModel === "itu-hybrid") {
     pathLossDb += atmosphericDb + diffractionDb;
+  } else if (propagationModel === "itu-buildings-weather") {
+    pathLossDb += atmosphericDb + diffractionDb + buildingLossDb;
   }
 
   const txPowerDbm = wattsToDbm(txAsset.powerW);
@@ -337,13 +374,30 @@ function simulateLink(txAsset, rxTarget, terrain, weather, propagationModel) {
     pathLossDb,
     lineOfSight: terrainProfile.lineOfSight,
     maxObstructionM: terrainProfile.maxObstructionM,
+    buildingLossDb,
+    buildingPathMeters: terrainProfile.buildingPathMeters,
+    buildingHitSamples: terrainProfile.buildingHitSamples,
     rssiDbm,
   };
 }
 
+function usesTerrainEffects(propagationModel) {
+  return propagationModel === "itu-p526"
+    || propagationModel === "itu-hybrid"
+    || propagationModel === "itu-buildings-weather";
+}
+
+function usesAtmosphericEffects(propagationModel) {
+  return propagationModel === "itu-hybrid" || propagationModel === "itu-buildings-weather";
+}
+
+function usesBuildingEffects(propagationModel) {
+  return propagationModel === "itu-buildings-weather";
+}
+
 function traceTerrain(source, target, txHeightM, rxHeightM, terrain) {
   if (!terrain) {
-    return { lineOfSight: true, maxObstructionM: 0 };
+    return { lineOfSight: true, maxObstructionM: 0, buildingPathMeters: 0, buildingHitSamples: 0 };
   }
 
   const totalDistanceKm = haversineKm(source.lat, source.lon, target.lat, target.lon);
@@ -353,27 +407,49 @@ function traceTerrain(source, target, txHeightM, rxHeightM, terrain) {
   const sourceAlt = sourceGround + txHeightM;
   const targetAlt = targetGround + rxHeightM;
   let maxObstructionM = 0;
+  let buildingPathMeters = 0;
+  let buildingHitSamples = 0;
+  let maxBuildingObstructionM = 0;
+  const stepDistanceMeters = (totalDistanceKm * 1000) / steps;
 
   for (let step = 1; step < steps; step += 1) {
     const t = step / steps;
     const lat = lerp(source.lat, target.lat, t);
     const lon = lerp(source.lon, target.lon, t);
     const terrainHeight = sampleTerrain(lat, lon, terrain);
+    const baseTerrainHeight = sampleTerrainBase(lat, lon, terrain);
     const losHeight = lerp(sourceAlt, targetAlt, t);
     const earthCurveDrop = earthCurvatureDropMeters(totalDistanceKm * t);
     const obstruction = terrainHeight - (losHeight - earthCurveDrop);
     if (obstruction > maxObstructionM) {
       maxObstructionM = obstruction;
     }
+    const buildingHeight = Math.max(0, terrainHeight - baseTerrainHeight);
+    if (buildingHeight > 2 && obstruction > 0) {
+      buildingPathMeters += stepDistanceMeters;
+      buildingHitSamples += 1;
+      maxBuildingObstructionM = Math.max(maxBuildingObstructionM, Math.min(obstruction, buildingHeight));
+    }
   }
 
   return {
     lineOfSight: maxObstructionM <= 0,
     maxObstructionM: Math.max(0, maxObstructionM),
+    buildingPathMeters,
+    buildingHitSamples,
+    maxBuildingObstructionM,
   };
 }
 
 function sampleTerrain(lat, lon, terrain) {
+  return sampleTerrainField(lat, lon, terrain, "elevations");
+}
+
+function sampleTerrainBase(lat, lon, terrain) {
+  return sampleTerrainField(lat, lon, terrain, "baseElevations");
+}
+
+function sampleTerrainField(lat, lon, terrain, fieldName) {
   const rowFloat = (lat - terrain.origin.lat) / terrain.latStepDeg;
   const colFloat = (lon - terrain.origin.lon) / terrain.lonStepDeg;
   const row = Math.floor(rowFloat);
@@ -385,11 +461,33 @@ function sampleTerrain(lat, lon, terrain) {
 
   const rowRatio = rowFloat - row;
   const colRatio = colFloat - col;
-  const q11 = terrain.elevations[row * terrain.cols + col];
-  const q21 = terrain.elevations[row * terrain.cols + col + 1];
-  const q12 = terrain.elevations[(row + 1) * terrain.cols + col];
-  const q22 = terrain.elevations[(row + 1) * terrain.cols + col + 1];
+  const source = terrain[fieldName] ?? terrain.elevations;
+  const q11 = source[row * terrain.cols + col];
+  const q21 = source[row * terrain.cols + col + 1];
+  const q12 = source[(row + 1) * terrain.cols + col];
+  const q22 = source[(row + 1) * terrain.cols + col + 1];
   return bilinear(q11, q21, q12, q22, colRatio, rowRatio);
+}
+
+function buildingStructurePenalty(terrainProfile, frequencyMHz, terrain) {
+  if (!terrain?.osmBuildingsEnabled || frequencyMHz < 100) {
+    return 0;
+  }
+  if (!terrainProfile || terrainProfile.buildingHitSamples <= 0 || terrainProfile.buildingPathMeters <= 0) {
+    return 0;
+  }
+
+  const presets = {
+    "light-frame": { entryLossDb: 6, lossPerMeterDb: 0.8, maxAdditionalLossDb: 18 },
+    brick: { entryLossDb: 10, lossPerMeterDb: 1.3, maxAdditionalLossDb: 24 },
+    "reinforced-concrete": { entryLossDb: 16, lossPerMeterDb: 2.1, maxAdditionalLossDb: 34 },
+    "steel-glass": { entryLossDb: 18, lossPerMeterDb: 2.6, maxAdditionalLossDb: 38 },
+  };
+  const preset = presets[terrain.buildingMaterialPreset] ?? presets["reinforced-concrete"];
+  const effectivePathMeters = Math.min(terrainProfile.buildingPathMeters, 12);
+  const obstructionFactor = clamp(terrainProfile.maxBuildingObstructionM / 10, 0.35, 1);
+  const lossDb = (preset.entryLossDb + effectivePathMeters * preset.lossPerMeterDb) * obstructionFactor;
+  return Math.min(lossDb, preset.maxAdditionalLossDb);
 }
 
 function diffractionPenalty(maxObstructionM, distanceKm, frequencyMHz) {

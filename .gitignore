@@ -4,3 +4,12 @@ backend/node_modules/
 deploy/.env
 backend/.env
 *.log
+.vscode
+.DS_Store
+.idea
+*.pyc
+__pycache__/
+dist/
+build/
+.codex
+.claude

@@ -21,6 +21,18 @@ const BASEMAPS = {
     attribution: "Tiles &copy; Esri",
     maxZoom: 19,
   },
+  "google-satellite": {
+    label: "Google Satellite",
+    url: "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+    attribution: "Google",
+    maxZoom: 20,
+  },
+  "google-hybrid": {
+    label: "Google Hybrid",
+    url: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+    attribution: "Google",
+    maxZoom: 20,
+  },
   "carto-dark": {
     label: "CARTO Dark Matter",
     url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
@@ -32,6 +44,33 @@ const BASEMAPS = {
     url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     attribution: "&copy; OpenStreetMap contributors",
     maxZoom: 19,
+  },
+};
+
+const BUILDING_MATERIAL_MODELS = {
+  "light-frame": {
+    label: "Light Frame",
+    entryLossDb: 6,
+    lossPerMeterDb: 0.8,
+    maxAdditionalLossDb: 18,
+  },
+  brick: {
+    label: "Brick / Masonry",
+    entryLossDb: 10,
+    lossPerMeterDb: 1.3,
+    maxAdditionalLossDb: 24,
+  },
+  "reinforced-concrete": {
+    label: "Reinforced Concrete",
+    entryLossDb: 16,
+    lossPerMeterDb: 2.1,
+    maxAdditionalLossDb: 34,
+  },
+  "steel-glass": {
+    label: "Steel / Glass High-Rise",
+    entryLossDb: 18,
+    lossPerMeterDb: 2.6,
+    maxAdditionalLossDb: 38,
   },
 };
 
@@ -556,6 +595,9 @@ const dom = {
   imagerySourceSelect: document.querySelector("#imagerySourceSelect"),
   customTerrainUrl: document.querySelector("#customTerrainUrl"),
   cesiumIonToken: document.querySelector("#cesiumIonToken"),
+  cesiumPhotorealisticTilesToggle: document.querySelector("#cesiumPhotorealisticTilesToggle"),
+  cesiumOsmBuildingsToggle: document.querySelector("#cesiumOsmBuildingsToggle"),
+  buildingMaterialPreset: document.querySelector("#buildingMaterialPreset"),
   dtedInput: document.querySelector("#dtedInput"),
   clearTerrainBtn: document.querySelector("#clearTerrainBtn"),
   terrainSummary: document.querySelector("#terrainSummary"),
@@ -563,6 +605,8 @@ const dom = {
   terrainSection: document.querySelector("#terrainSection"),
   mapContentsCard: document.querySelector("#mapContentsCard"),
   mapContentsList: document.querySelector("#mapContentsList"),
+  mapContentsSearchInput: document.querySelector("#mapContentsSearchInput"),
+  mapContentsSearchClearBtn: document.querySelector("#mapContentsSearchClearBtn"),
   addMapFolderBtn: document.querySelector("#addMapFolderBtn"),
   drawShapeBtn: document.querySelector("#drawShapeBtn"),
   drawDropdown: document.querySelector("#drawDropdown"),
@@ -631,6 +675,22 @@ const dom = {
   simulationModal: document.querySelector("#simulationModal"),
   simulationModalCloseBtn: document.querySelector("#simulationModalCloseBtn"),
   simulationAssetSummary: document.querySelector("#simulationAssetSummary"),
+  importProgressModal: document.querySelector("#importProgressModal"),
+  importProgressFileName: document.querySelector("#importProgressFileName"),
+  importProgressStage: document.querySelector("#importProgressStage"),
+  importProgressDetail: document.querySelector("#importProgressDetail"),
+  importProgressBar: document.querySelector("#importProgressBar"),
+  deleteProgressModal: document.querySelector("#deleteProgressModal"),
+  deleteProgressSummary: document.querySelector("#deleteProgressSummary"),
+  deleteProgressStage: document.querySelector("#deleteProgressStage"),
+  deleteProgressDetail: document.querySelector("#deleteProgressDetail"),
+  deleteProgressBar: document.querySelector("#deleteProgressBar"),
+  simulationProgressModal: document.querySelector("#simulationProgressModal"),
+  simulationProgressSummary: document.querySelector("#simulationProgressSummary"),
+  simulationProgressStage: document.querySelector("#simulationProgressStage"),
+  simulationProgressDetail: document.querySelector("#simulationProgressDetail"),
+  simulationProgressBar: document.querySelector("#simulationProgressBar"),
+  simulationProgressCancelBtn: document.querySelector("#simulationProgressCancelBtn"),
   coverageMetric: document.querySelector("#coverageMetric"),
   minRssiMetric: document.querySelector("#minRssiMetric"),
   maxRssiMetric: document.querySelector("#maxRssiMetric"),
@@ -655,6 +715,8 @@ const dom = {
   centerCoordinateValue: document.querySelector("#centerCoordinateValue"),
   centerElevationValue: document.querySelector("#centerElevationValue"),
   centerGridCrosshair: document.querySelector("#centerGridCrosshair"),
+  mapStage: document.querySelector(".map-stage"),
+  emitterModal: document.querySelector("#emitterModal"),
   cesiumCompassBtn: document.querySelector("#cesiumCompassBtn"),
   cesiumCompassRose: document.querySelector("#cesiumCompassRose"),
   aiPanel: document.querySelector("#aiPanel"),
@@ -697,6 +759,22 @@ const state = {
   assetMarkers: new Map(),
   assets: [],
   importedItems: [],
+  importProgress: {
+    active: false,
+    fileName: "",
+    percent: 0,
+  },
+  deleteProgress: {
+    active: false,
+    percent: 0,
+  },
+  simulationProgress: {
+    active: false,
+    requestId: null,
+    percent: 0,
+    workerDispatched: false,
+    cancelRequested: false,
+  },
   terrains: [],
   activeTerrainId: null,
   terrainCoverageLayers: new Map(),
@@ -706,6 +784,10 @@ const state = {
   view3dEnabled: false,
   cesiumViewer: null,
   cesiumTerrainProvider: null,
+  cesiumPhotorealisticTileset: null,
+  cesiumPhotorealisticKey: "",
+  cesiumOsmBuildingsTileset: null,
+  cesiumOsmBuildingsKey: "",
   gridLayer: null,
   terrainReadyIds: new Set(),
   terrainCacheResolvers: new Map(),
@@ -713,7 +795,7 @@ const state = {
   cesiumPointElevationCache: new Map(),
   centerElevationRequestId: null,
   cesiumTerrainProviderKey: null,
-  worker: new Worker("./simulation-worker.js?v=20260424-2", { type: "module" }),
+  worker: createSimulationWorker(),
   pendingInspection: null,
   pendingPlanningRequestId: null,
   editingAssetId: null,
@@ -730,6 +812,7 @@ const state = {
   activeMapContentMenuId: null,
   renamingMapContentId: null,
   workspaceMenuOpen: false,
+  mapContentsSearch: "",
   imageryMenuOpen: false,
   terrainMenuOpen: false,
   weatherMenuOpen: false,
@@ -743,6 +826,9 @@ const state = {
     gridLinesEnabled: false,
     centerGridEnabled: false,
     gridColor: "#ffffff",
+    cesiumPhotorealisticTilesEnabled: false,
+    cesiumOsmBuildingsEnabled: false,
+    buildingMaterialPreset: "reinforced-concrete",
   },
   weather: {
     temperatureC: 20,
@@ -778,6 +864,7 @@ const state = {
     aiResizeActive: false,
     aiPanelWidth: 400,
     panelMode: "edit",
+    lastPlacementEventKey: "",
   },
   session: {
     token: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
@@ -805,7 +892,255 @@ const state = {
     messages: [],
     requestInFlight: false,
   },
+  canceledSimulationRequestIds: new Set(),
 };
+
+function updateModalBodyState() {
+  const emitterBackdrop = dom.emitterModal ?? document.querySelector("#emitterModal");
+  const hasOpenModal = Boolean(
+    (dom.simulationModal && !dom.simulationModal.classList.contains("hidden"))
+    || (dom.importProgressModal && !dom.importProgressModal.classList.contains("hidden"))
+    || (dom.deleteProgressModal && !dom.deleteProgressModal.classList.contains("hidden"))
+    || (emitterBackdrop && !emitterBackdrop.classList.contains("hidden"))
+  );
+  document.body.classList.toggle("emitter-modal-open", hasOpenModal);
+}
+
+function yieldToMainThread() {
+  return new Promise((resolve) => {
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+    window.setTimeout(resolve, 0);
+  });
+}
+
+function timeoutAfter(ms, message = "Operation timed out") {
+  return new Promise((_, reject) => {
+    window.setTimeout(() => reject(new Error(message)), ms);
+  });
+}
+
+async function sampleCesiumSurfaceBatch(scene, batch, options = {}) {
+  const timeoutMs = Math.max(250, Number(options.timeoutMs) || 2500);
+  const allowDetailed = options.allowDetailed !== false;
+
+  if (allowDetailed && typeof scene.sampleHeightMostDetailed === "function") {
+    try {
+      const detailedSamples = await Promise.race([
+        scene.sampleHeightMostDetailed(batch),
+        timeoutAfter(timeoutMs, "Cesium detailed surface sampling timed out"),
+      ]);
+      if (Array.isArray(detailedSamples) && detailedSamples.length === batch.length) {
+        return {
+          samples: detailedSamples,
+          usedDetailed: true,
+          timedOut: false,
+        };
+      }
+    } catch {}
+  }
+
+  if (typeof scene.sampleHeight === "function") {
+    const fallbackSamples = batch.map((position) => {
+      const fallbackPosition = window.Cesium.Cartographic.clone(position);
+      const sampledHeight = scene.sampleHeight(position);
+      if (Number.isFinite(sampledHeight)) {
+        fallbackPosition.height = sampledHeight;
+      }
+      return fallbackPosition;
+    });
+    return {
+      samples: fallbackSamples,
+      usedDetailed: false,
+      timedOut: true,
+    };
+  }
+
+  return {
+    samples: batch,
+    usedDetailed: false,
+    timedOut: true,
+  };
+}
+
+function openImportProgress(fileName) {
+  state.importProgress.active = true;
+  state.importProgress.fileName = fileName;
+  state.importProgress.percent = 0;
+  dom.importProgressFileName.textContent = fileName;
+  dom.importProgressStage.textContent = "Reading source package...";
+  dom.importProgressDetail.textContent = "0%";
+  dom.importProgressBar.style.width = "0%";
+  dom.importProgressModal?.classList.remove("hidden");
+  updateModalBodyState();
+}
+
+function updateImportProgress(percent, stage, detail = "") {
+  const clampedPercent = clamp(Number(percent) || 0, 0, 100);
+  state.importProgress.percent = clampedPercent;
+  if (stage) {
+    dom.importProgressStage.textContent = stage;
+  }
+  dom.importProgressDetail.textContent = detail || `${Math.round(clampedPercent)}%`;
+  dom.importProgressBar.style.width = `${clampedPercent}%`;
+}
+
+function closeImportProgress() {
+  state.importProgress.active = false;
+  dom.importProgressModal?.classList.add("hidden");
+  updateModalBodyState();
+}
+
+function openDeleteProgress(summary) {
+  state.deleteProgress.active = true;
+  state.deleteProgress.percent = 0;
+  dom.deleteProgressSummary.textContent = summary;
+  dom.deleteProgressStage.textContent = "Removing selected map items...";
+  dom.deleteProgressDetail.textContent = "0%";
+  dom.deleteProgressBar.style.width = "0%";
+  dom.deleteProgressModal?.classList.remove("hidden");
+  updateModalBodyState();
+}
+
+function updateDeleteProgress(percent, stage, detail = "") {
+  const clampedPercent = clamp(Number(percent) || 0, 0, 100);
+  state.deleteProgress.percent = clampedPercent;
+  if (stage) {
+    dom.deleteProgressStage.textContent = stage;
+  }
+  dom.deleteProgressDetail.textContent = detail || `${Math.round(clampedPercent)}%`;
+  dom.deleteProgressBar.style.width = `${clampedPercent}%`;
+}
+
+function closeDeleteProgress() {
+  state.deleteProgress.active = false;
+  dom.deleteProgressModal?.classList.add("hidden");
+  updateModalBodyState();
+}
+
+function openSimulationProgress(requestId, summary) {
+  state.simulationProgress.active = true;
+  state.simulationProgress.requestId = requestId;
+  state.simulationProgress.percent = 0;
+  state.simulationProgress.workerDispatched = false;
+  state.simulationProgress.cancelRequested = false;
+  state.canceledSimulationRequestIds.delete(requestId);
+  dom.simulationProgressSummary.textContent = summary;
+  dom.simulationProgressStage.textContent = "Preparing RF simulation...";
+  dom.simulationProgressDetail.textContent = "0%";
+  dom.simulationProgressBar.style.width = "0%";
+  dom.simulationProgressCancelBtn?.removeAttribute("disabled");
+  dom.simulationProgressModal?.classList.remove("hidden");
+  updateModalBodyState();
+}
+
+function updateSimulationProgress(percent, stage, detail = "") {
+  if (!state.simulationProgress.active) {
+    return;
+  }
+  const clampedPercent = clamp(Number(percent) || 0, 0, 100);
+  state.simulationProgress.percent = clampedPercent;
+  if (stage) {
+    dom.simulationProgressStage.textContent = stage;
+  }
+  dom.simulationProgressDetail.textContent = detail || `${Math.round(clampedPercent)}%`;
+  dom.simulationProgressBar.style.width = `${clampedPercent}%`;
+}
+
+function closeSimulationProgress() {
+  state.simulationProgress.active = false;
+  state.simulationProgress.requestId = null;
+  state.simulationProgress.percent = 0;
+  state.simulationProgress.workerDispatched = false;
+  state.simulationProgress.cancelRequested = false;
+  dom.simulationProgressCancelBtn?.removeAttribute("disabled");
+  dom.simulationProgressModal?.classList.add("hidden");
+  updateModalBodyState();
+}
+
+function updateSimulationTerrainPrepProgress(fraction, stage, detail = "") {
+  if (!state.simulationProgress.active) {
+    return;
+  }
+  const scaledPercent = 8 + clamp(fraction ?? 0, 0, 1) * 24;
+  updateSimulationProgress(scaledPercent, stage, detail || `${Math.round(scaledPercent)}%`);
+}
+
+function isSimulationCanceled(requestId) {
+  return state.canceledSimulationRequestIds.has(requestId);
+}
+
+function throwIfSimulationCanceled(requestId) {
+  if (requestId && isSimulationCanceled(requestId)) {
+    throw new Error("SIMULATION_CANCELED");
+  }
+}
+
+function createSimulationWorker() {
+  return new Worker("./simulation-worker.js?v=20260425-5", { type: "module" });
+}
+
+function attachSimulationWorkerListener() {
+  state.worker.addEventListener("message", onWorkerMessage);
+}
+
+function hydrateWorkerTerrainCaches() {
+  const terrains = [
+    ...state.terrains,
+    ...state.ionTerrainCache.values(),
+  ];
+  terrains.forEach((terrain) => {
+    cacheTerrainInWorker(terrain).catch(() => {});
+  });
+}
+
+function recreateSimulationWorker() {
+  try {
+    state.worker?.terminate();
+  } catch {}
+  state.terrainReadyIds.clear();
+  state.terrainCacheResolvers.forEach((resolve) => resolve());
+  state.terrainCacheResolvers.clear();
+  state.worker = createSimulationWorker();
+  attachSimulationWorkerListener();
+  hydrateWorkerTerrainCaches();
+}
+
+function cancelSimulationProgress() {
+  if (!state.simulationProgress.active || !state.simulationProgress.requestId) {
+    return;
+  }
+  const requestId = state.simulationProgress.requestId;
+  state.canceledSimulationRequestIds.add(requestId);
+  state.simulationProgress.cancelRequested = true;
+  dom.simulationProgressCancelBtn?.setAttribute("disabled", "true");
+  updateSimulationProgress(
+    state.simulationProgress.percent,
+    "Canceling simulation...",
+    "Canceling",
+  );
+  if (state.simulationProgress.workerDispatched) {
+    recreateSimulationWorker();
+  }
+  closeSimulationProgress();
+  setStatus("Coverage generation canceled.");
+}
+
+function simulationUsesTerrainModel(propagationModel) {
+  return propagationModel === "itu-p526"
+    || propagationModel === "itu-hybrid"
+    || propagationModel === "itu-buildings-weather";
+}
+
+function simulationUsesAtmosphericModel(propagationModel) {
+  return propagationModel === "itu-hybrid" || propagationModel === "itu-buildings-weather";
+}
+
+function simulationUsesBuildingModel(propagationModel) {
+  return propagationModel === "itu-buildings-weather";
+}
 
 async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers ?? {});
@@ -1370,7 +1705,7 @@ const emitterModal = {
 
   open(prefill = null) {
     this.backdrop.classList.remove("hidden");
-    document.body.classList.add("emitter-modal-open");
+    updateModalBodyState();
     setAssetPlacementMode(false);
     this.switchTab("rf");
     const isEditing = prefill && prefill.lat !== undefined;
@@ -1411,7 +1746,7 @@ const emitterModal = {
 
   close() {
     this.backdrop.classList.add("hidden");
-    document.body.classList.remove("emitter-modal-open");
+    updateModalBodyState();
     document.querySelector("#emitterValidation").textContent = "";
     const placeBtn = document.querySelector("#emitterPlaceBtn");
     if (placeBtn) placeBtn.textContent = "Place on Map";
@@ -1764,7 +2099,7 @@ const emitterModal = {
     state.pendingEmitterData = data;
     this.close();
     setAssetPlacementMode(true);
-    setStatus("Click on the map to place the emitter.");
+    setStatus(state.view3dEnabled ? "Click in the 3D scene to place the emitter." : "Click on the map to place the emitter.");
   },
 
   saveCustomProfile() {
@@ -1858,6 +2193,16 @@ async function init() {
   state.map.on("contextmenu", onMapContextMenu);
   state.map.on("moveend zoomend resize", updateMapOverlayMetrics);
   state.map.on("moveend zoomend", saveMapState);
+  dom.map.addEventListener("click", (event) => {
+    if (!state.placingAsset || state.view3dEnabled) {
+      return;
+    }
+    if (event.target.closest(".leaflet-control, .leaflet-popup, .map-overlay, .map-view-toggle")) {
+      return;
+    }
+    const latlng = state.map.mouseEventToLatLng(event);
+    placePendingAssetAt(latlng, "2D map");
+  }, true);
 
   // Middle-mouse click on Leaflet map: switch to 3D with a tilted perspective
   dom.map.addEventListener("mousedown", async (e) => {
@@ -1889,7 +2234,7 @@ async function init() {
     updateCesiumCompass();
   });
   state.map.on(L.Draw.Event.CREATED, onPlanningRegionCreated);
-  state.worker.addEventListener("message", onWorkerMessage);
+  attachSimulationWorkerListener();
   state.planning.markersLayer.addTo(state.map);
 }
 
@@ -2063,6 +2408,15 @@ function wireEvents() {
       }
     });
   }
+  dom.mapContentsSearchInput?.addEventListener("input", onMapContentsSearchInput);
+  dom.mapContentsSearchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      clearMapContentsSearch();
+      dom.mapContentsSearchInput.blur();
+    }
+  });
+  dom.mapContentsSearchClearBtn?.addEventListener("click", clearMapContentsSearch);
+  updateMapContentsSearchUi();
 
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
   dom.drawCircleBtn.addEventListener("click", () => startDrawing("circle"));
@@ -2122,6 +2476,9 @@ function wireEvents() {
   dom.imagerySourceSelect.addEventListener("change", syncCesiumScene);
   dom.customTerrainUrl.addEventListener("change", onTerrainSourceSettingsChanged);
   dom.cesiumIonToken.addEventListener("change", onCesiumIonTokenChanged);
+  dom.cesiumPhotorealisticTilesToggle.addEventListener("change", onCesium3dVisualSettingsChanged);
+  dom.cesiumOsmBuildingsToggle.addEventListener("change", onCesiumOsmBuildingsSettingsChanged);
+  dom.buildingMaterialPreset.addEventListener("change", onCesiumOsmBuildingsSettingsChanged);
   dom.aiProviderSelect.addEventListener("change", onAiProviderChanged);
   dom.aiSavedConfigSelect.addEventListener("change", onAiSavedConfigChanged);
   dom.aiSavedConfigLabelInput.addEventListener("change", onAiSavedConfigLabelChanged);
@@ -2188,6 +2545,7 @@ function wireEvents() {
   dom.clearViewshedsBtn.addEventListener("click", clearViewsheds);
   dom.runSimulationBtn.addEventListener("click", runSimulation);
   dom.simulationModalCloseBtn?.addEventListener("click", closeSimulationModal);
+  dom.simulationProgressCancelBtn?.addEventListener("click", cancelSimulationProgress);
   dom.simulationModal?.addEventListener("click", (event) => {
     if (event.target === dom.simulationModal) {
       closeSimulationModal();
@@ -2228,6 +2586,11 @@ function loadSettings() {
     state.settings.gridLinesEnabled = Boolean(parsed.gridLinesEnabled);
     state.settings.centerGridEnabled = Boolean(parsed.centerGridEnabled);
     state.settings.gridColor = typeof parsed.gridColor === "string" ? parsed.gridColor : state.settings.gridColor;
+    state.settings.cesiumPhotorealisticTilesEnabled = Boolean(parsed.cesiumPhotorealisticTilesEnabled);
+    state.settings.cesiumOsmBuildingsEnabled = Boolean(parsed.cesiumOsmBuildingsEnabled);
+    state.settings.buildingMaterialPreset = BUILDING_MATERIAL_MODELS[parsed.buildingMaterialPreset]
+      ? parsed.buildingMaterialPreset
+      : state.settings.buildingMaterialPreset;
   } catch {
     window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
   }
@@ -2260,6 +2623,7 @@ function serializeCurrentMapState() {
       properties: item.properties,
       drawn: item.drawn ?? false,
       shapeStyle: item.shapeStyle ?? null,
+      markerStyle: item.markerStyle ?? null,
       coordinates,
     };
   });
@@ -2300,7 +2664,11 @@ function applySavedMapState(saved) {
 
   // Restore folders
   if (Array.isArray(saved.mapContentFolders)) {
-    state.mapContentFolders = saved.mapContentFolders;
+    state.mapContentFolders = saved.mapContentFolders.map((folder) => ({
+      ...folder,
+      parentId: normalizeFolderContentId(folder.parentId),
+      collapsed: Boolean(folder.collapsed),
+    }));
   }
 
   // Restore content order and assignments (will be extended as items are restored below)
@@ -2347,43 +2715,26 @@ function applySavedMapState(saved) {
         geometryType: saved.geometryType,
         properties: saved.properties ?? {},
         drawn: saved.drawn ?? false,
-        shapeStyle: saved.shapeStyle ?? null,
+        shapeStyle: normalizeImportedShapeStyle(saved.geometryType, saved.shapeStyle),
+        markerStyle: normalizeImportedMarkerStyle(saved.markerStyle),
         layer: null,
       };
       const contentId = `imported:${item.id}`;
-      const pane = getMapContentPaneName(contentId);
-      if (saved.geometryType === "Point") {
-        item.layer = L.marker(saved.coordinates, { pane, draggable: false });
-      } else if (saved.shapeStyle) {
-        const s = saved.shapeStyle;
-        if (saved.geometryType === "Polygon") {
-          item.layer = L.polygon(saved.coordinates, {
-            pane,
-            color: s.color,
-            fillColor: s.color,
-            fillOpacity: s.fillOpacity,
-            weight: s.weight,
-            dashArray: getLeafletDashArray(s.lineStyle),
-          });
-        } else {
-          item.layer = L.polyline(saved.coordinates, {
-            pane,
-            color: s.color,
-            weight: s.weight,
-            dashArray: getLeafletDashArray(s.lineStyle),
-          });
-        }
-      } else if (saved.geometryType === "LineString") {
-        item.layer = L.polyline(saved.coordinates, { pane, color: "#f7b955", weight: 3 });
-      } else {
-        item.layer = L.polygon(saved.coordinates, { pane, color: "#34d399", weight: 2, fillOpacity: 0.12 });
-      }
+      item.layer = createImportedLayer({
+        contentId,
+        geometryType: saved.geometryType,
+        coordinates: saved.coordinates,
+        shapeStyle: item.shapeStyle,
+        markerStyle: item.markerStyle,
+      });
       item.layer.addTo(state.map);
       item.layer.bindPopup(renderImportedItemPopup(item));
       item.layer.on?.("click", () => focusMapContent(contentId));
       item.layer.on?.("dragend edit", () => {
+        item.layer.setPopupContent(renderImportedItemPopup(item));
         renderMapContents();
         saveMapState();
+        syncCesiumEntities();
         syncShapeVertexEditUi(item);
       });
       state.importedItems.push(item);
@@ -2623,7 +2974,10 @@ function applySettings() {
   dom.gridlinesToggle.checked = state.settings.gridLinesEnabled;
   dom.centerGridToggle.checked = state.settings.centerGridEnabled;
   dom.gridlinesColor.value = state.settings.gridColor;
-  dom.centerGridCrosshair.classList.toggle("hidden", !state.settings.centerGridEnabled);
+  dom.cesiumPhotorealisticTilesToggle.value = state.settings.cesiumPhotorealisticTilesEnabled ? "on" : "off";
+  dom.cesiumOsmBuildingsToggle.value = state.settings.cesiumOsmBuildingsEnabled ? "on" : "off";
+  dom.buildingMaterialPreset.value = state.settings.buildingMaterialPreset;
+  updateCenterCrosshairVisibility();
   document.body.classList.toggle("theme-light", state.settings.theme === "light");
   dom.coordsLabel.textContent = coordinateSystemStatusLabel(state.settings.coordinateSystem);
   updateWeatherUnitLabels();
@@ -2634,6 +2988,12 @@ function applySettings() {
   renderViewsheds();
   renderPlanningResults();
   syncCesiumEntities();
+}
+
+function updateCenterCrosshairVisibility() {
+  const shouldShow = Boolean(state.settings.centerGridEnabled || state.placingAsset);
+  dom.centerGridCrosshair?.classList.toggle("hidden", !shouldShow);
+  dom.centerGridCrosshair?.classList.toggle("placement-crosshair-active", state.placingAsset);
 }
 
 function updateWeatherUnitLabels() {
@@ -2728,7 +3088,7 @@ async function sampleTerrainElevationAsync(lat, lon) {
     return null;
   }
 
-  return await sampleCesiumPointElevation(lat, lon);
+  return await sampleCesiumTerrainElevation(lat, lon);
 }
 
 function sampleTerrainElevationForTerrainId(lat, lon, terrainId) {
@@ -2766,6 +3126,22 @@ function usesConfiguredCesiumTerrain() {
   return dom.terrainSourceSelect.value === "cesium-world" || dom.terrainSourceSelect.value === "custom";
 }
 
+function usesCesiumPhotorealisticTiles() {
+  return Boolean(state.settings.cesiumPhotorealisticTilesEnabled && dom.cesiumIonToken.value.trim());
+}
+
+function usesCesiumOsmBuildings() {
+  return Boolean(state.settings.cesiumOsmBuildingsEnabled && dom.cesiumIonToken.value.trim());
+}
+
+function usesCesiumBuildingsInPropagation(propagationModel = dom.propagationModel.value) {
+  return simulationUsesBuildingModel(propagationModel) && usesConfiguredCesiumTerrain() && usesCesiumOsmBuildings();
+}
+
+function getBuildingMaterialModel() {
+  return BUILDING_MATERIAL_MODELS[state.settings.buildingMaterialPreset] ?? BUILDING_MATERIAL_MODELS["reinforced-concrete"];
+}
+
 function buildCesiumTerrainProviderKey() {
   if (dom.terrainSourceSelect.value === "cesium-world") {
     return `world:${dom.cesiumIonToken.value.trim()}`;
@@ -2776,8 +3152,8 @@ function buildCesiumTerrainProviderKey() {
   return "ellipsoid";
 }
 
-async function sampleCesiumPointElevation(lat, lon) {
-  const cacheKey = `${buildCesiumTerrainProviderKey()}:${lat.toFixed(6)},${lon.toFixed(6)}`;
+async function sampleCesiumTerrainElevation(lat, lon) {
+  const cacheKey = `${buildCesiumTerrainProviderKey()}:terrain:${lat.toFixed(6)},${lon.toFixed(6)}`;
   const cached = state.cesiumPointElevationCache.get(cacheKey);
   if (cached !== undefined) {
     return cached;
@@ -2797,12 +3173,79 @@ async function sampleCesiumPointElevation(lat, lon) {
   return elevation;
 }
 
+async function sampleCesiumSceneSurfaceElevation(lat, lon) {
+  await initCesiumIfNeeded();
+  const needsSceneSync = !state.cesiumTerrainProvider
+    || state.cesiumTerrainProviderKey !== buildCesiumTerrainProviderKey()
+    || (usesCesiumOsmBuildings() && !state.cesiumOsmBuildingsTileset);
+  if (needsSceneSync) {
+    await syncCesiumScene();
+  }
+  const scene = state.cesiumViewer?.scene;
+  if (!scene) {
+    return null;
+  }
+  const cartographic = window.Cesium.Cartographic.fromDegrees(lon, lat);
+  return await withCesiumPropagationSamplingScene(async () => {
+    if (typeof scene.sampleHeightMostDetailed === "function") {
+      const [sampled] = await scene.sampleHeightMostDetailed([cartographic]);
+      return Number.isFinite(sampled?.height) ? sampled.height : null;
+    }
+    if (typeof scene.sampleHeight === "function") {
+      const height = scene.sampleHeight(cartographic);
+      return Number.isFinite(height) ? height : null;
+    }
+    return null;
+  });
+}
+
+async function withCesiumPropagationSamplingScene(callback) {
+  const viewer = state.cesiumViewer;
+  if (!viewer) {
+    return await callback();
+  }
+
+  const photoTileset = state.cesiumPhotorealisticTileset;
+  const osmTileset = state.cesiumOsmBuildingsTileset;
+  const previousPhotoShow = photoTileset?.show;
+  const previousOsmShow = osmTileset?.show;
+
+  if (photoTileset) {
+    photoTileset.show = false;
+  }
+  if (osmTileset && usesCesiumOsmBuildings()) {
+    osmTileset.show = true;
+  }
+  viewer.scene.requestRender();
+
+  try {
+    return await callback();
+  } finally {
+    if (photoTileset) {
+      photoTileset.show = previousPhotoShow;
+    }
+    if (osmTileset) {
+      osmTileset.show = previousOsmShow;
+    }
+    viewer.scene.requestRender();
+  }
+}
+
 async function refreshAssetGroundElevation(asset) {
   const groundElevationM = await sampleTerrainElevationAsync(asset.lat, asset.lon);
   asset.groundElevationM = groundElevationM;
   updateAssetMarker(asset);
   syncCesiumEntities();
   return groundElevationM;
+}
+
+function refreshAllAssetGroundElevations() {
+  if (!usesConfiguredCesiumTerrain() || state.activeTerrainId) {
+    return;
+  }
+  state.assets.forEach((asset) => {
+    refreshAssetGroundElevation(asset).catch(() => {});
+  });
 }
 
 function resolveAbsoluteHeight(position, terrainId = null) {
@@ -2864,11 +3307,26 @@ function onWorkerMessage(event) {
       resolver();
       state.terrainCacheResolvers.delete(payload.id);
     }
+    if (state.simulationProgress.active) {
+      updateSimulationProgress(30, "Terrain cache ready. Dispatching RF sweep...", "30%");
+    }
     return;
   }
 
   if (type === "simulation:complete") {
     consumeSimulationResult(payload);
+    return;
+  }
+
+  if (type === "simulation:progress") {
+    if (payload.requestId === state.simulationProgress.requestId) {
+      const scaledPercent = 32 + clamp(payload.fraction ?? 0, 0, 1) * 60;
+      updateSimulationProgress(
+        scaledPercent,
+        payload.stage || "Tracing RF paths...",
+        payload.detail || `${Math.round(scaledPercent)}%`,
+      );
+    }
     return;
   }
 
@@ -2883,6 +3341,7 @@ function onWorkerMessage(event) {
   }
 
   if (type === "engine:error") {
+    closeSimulationProgress();
     setStatus(payload.message, true);
   }
 }
@@ -2895,6 +3354,18 @@ function loadCesiumIonToken() {
       dom.terrainSourceSelect.value = "cesium-world";
     }
   }
+}
+
+function clearIonTerrainCaches() {
+  state.ionTerrainCache.forEach((terrain) => {
+    state.worker.postMessage({
+      type: "terrain:remove",
+      payload: { id: terrain.id },
+    });
+    state.terrainReadyIds.delete(terrain.id);
+  });
+  state.ionTerrainCache.clear();
+  state.cesiumPointElevationCache.clear();
 }
 
 function onCesiumIonTokenChanged() {
@@ -2912,19 +3383,55 @@ function onCesiumIonTokenChanged() {
   }
   state.cesiumTerrainProvider = null;
   state.cesiumTerrainProviderKey = null;
-  state.ionTerrainCache.clear();
-  state.cesiumPointElevationCache.clear();
+  state.cesiumPhotorealisticKey = "";
+  state.cesiumOsmBuildingsKey = "";
+  clearIonTerrainCaches();
   syncCesiumScene();
+  refreshAllAssetGroundElevations();
   updateMapOverlayMetrics();
+  updateTerrainSummary();
   updateTerrainMenuValue();
 }
 
 function onTerrainSourceSettingsChanged() {
   state.cesiumTerrainProvider = null;
   state.cesiumTerrainProviderKey = null;
-  state.cesiumPointElevationCache.clear();
+  clearIonTerrainCaches();
   syncCesiumScene();
+  refreshAllAssetGroundElevations();
   updateMapOverlayMetrics();
+  updateTerrainSummary();
+}
+
+function onCesium3dVisualSettingsChanged() {
+  state.settings.cesiumPhotorealisticTilesEnabled = dom.cesiumPhotorealisticTilesToggle.value === "on";
+  persistSettings();
+  syncCesiumScene();
+  updateTerrainSummary();
+  if (state.settings.cesiumPhotorealisticTilesEnabled && !dom.cesiumIonToken.value.trim()) {
+    setStatus("Add a Cesium Ion token to load Google Photorealistic 3D Tiles.", true);
+  } else if (state.settings.cesiumPhotorealisticTilesEnabled) {
+    setStatus("Google Photorealistic 3D Tiles enabled for 3D rendering. RF modeling still uses the selected terrain and OSM building model.");
+  }
+}
+
+function onCesiumOsmBuildingsSettingsChanged() {
+  state.settings.cesiumOsmBuildingsEnabled = dom.cesiumOsmBuildingsToggle.value === "on";
+  state.settings.buildingMaterialPreset = BUILDING_MATERIAL_MODELS[dom.buildingMaterialPreset.value]
+    ? dom.buildingMaterialPreset.value
+    : "reinforced-concrete";
+  clearIonTerrainCaches();
+  persistSettings();
+  syncCesiumScene();
+  refreshAllAssetGroundElevations();
+  syncCesiumEntities();
+  updateMapOverlayMetrics();
+  updateTerrainSummary();
+  if (state.settings.cesiumOsmBuildingsEnabled && !dom.cesiumIonToken.value.trim()) {
+    setStatus("Add a Cesium Ion token to load OSM buildings.", true);
+  } else if (state.settings.cesiumOsmBuildingsEnabled) {
+    setStatus("OSM buildings enabled for RF obstruction modeling.");
+  }
 }
 
 function togglePanelCollapse() {
@@ -3984,6 +4491,322 @@ function buildContextDetail(contextIds) {
   return JSON.stringify(details, null, 2);
 }
 
+function getMapContentPathSegments(contentId) {
+  const ancestors = getMapContentAncestorNames(contentId);
+  const entry = getMapContentEntries().find((item) => item.id === contentId);
+  if (entry?.kind === "folder") {
+    return [...ancestors, entry.name];
+  }
+  return ancestors;
+}
+
+function getMapContentPathLabel(contentId) {
+  const segments = getMapContentPathSegments(contentId);
+  return segments.length ? segments.join(" / ") : "Top level";
+}
+
+function buildCompactMapContentRecord(contentId) {
+  const entry = getMapContentEntries().find((item) => item.id === contentId);
+  const detail = serializeMapContentForAi(contentId);
+  if (!entry || !detail) {
+    return null;
+  }
+  const aliases = collectMapLookupAliases(entry, detail);
+  return {
+    id: contentId,
+    name: getPreferredMapLookupName(entry, detail),
+    subtitle: entry.subtitle,
+    kind: entry.kind,
+    path: getMapContentPathLabel(contentId),
+    aliases,
+    hidden: state.hiddenContentIds.has(contentId),
+    lat: detail.lat ?? detail.geometry?.coordinates?.lat ?? detail.bounds?.southWest?.lat ?? null,
+    lon: detail.lon ?? detail.geometry?.coordinates?.lon ?? detail.bounds?.southWest?.lon ?? null,
+    bounds: detail.bounds ?? null,
+  };
+}
+
+function buildCompactAiScenarioSummary(contextIds = []) {
+  const center = state.map.getCenter();
+  const terrain = getActiveTerrain();
+  const activeContext = serializeMapContentForAi(state.ai.activeContextId);
+  const explicitContext = contextIds
+    .map((contentId) => serializeMapContentForAi(contentId))
+    .filter(Boolean)
+    .slice(0, 8);
+
+  return JSON.stringify({
+    map: {
+      center: { lat: Number(center.lat.toFixed(6)), lon: Number(center.lng.toFixed(6)) },
+      zoom: state.map.getZoom(),
+      view3dEnabled: state.view3dEnabled,
+      basemap: dom.basemapSelect.value,
+      terrainSource: dom.terrainSourceSelect.value,
+      imagerySource: dom.imagerySourceSelect.value,
+    },
+    counts: {
+      assets: state.assets.length,
+      importedItems: state.importedItems.length,
+      viewsheds: state.viewsheds.length,
+      terrains: state.terrains.length,
+    },
+    assets: state.assets.slice(0, 40).map((asset) => ({
+      id: asset.id,
+      name: asset.name,
+      unit: asset.unit ?? "",
+      force: asset.force ?? "",
+      lat: roundAiNumber(asset.lat),
+      lon: roundAiNumber(asset.lon),
+      frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
+      powerW: roundAiNumber(asset.powerW, 3),
+    })),
+    viewsheds: state.viewsheds.slice(0, 20).map((viewshed) => ({
+      id: viewshed.id,
+      name: viewshed.name ?? `${viewshed.asset.name} Coverage`,
+      assetId: viewshed.asset.id,
+      propagationModel: viewshed.propagationModel,
+      radiusMeters: roundAiNumber(viewshed.radiusMeters, 1),
+    })),
+    terrain: terrain ? {
+      id: terrain.id,
+      name: terrain.name,
+      rows: terrain.rows,
+      cols: terrain.cols,
+      extentVisible: Boolean(terrain.extentVisible),
+    } : null,
+    planning: {
+      hasRegion: Boolean(state.planning.regionLayer),
+      recommendationCount: state.planning.recommendations.length,
+    },
+    activeContext,
+    explicitContext,
+    terrainLosMatrix: state.assets.length <= 10 ? buildLosMatrix(state.assets) : [],
+  }, null, 2);
+}
+
+function tokenizeLookupPrompt(prompt) {
+  const raw = String(prompt ?? "").trim();
+  if (!raw) {
+    return [];
+  }
+  const quoted = [...raw.matchAll(/"([^"]+)"|'([^']+)'/g)]
+    .map((match) => (match[1] || match[2] || "").trim())
+    .filter(Boolean);
+  if (quoted.length) {
+    return quoted;
+  }
+
+  const leadMatch = raw.match(/(?:where\s+(?:is|are)|what(?:'s| is| are)?\s+(?:the\s+)?(?:grid\s+location|mgrs|coords?|coordinates|location|locations)\s+(?:is|are|of|for)?|locations?\s+of|locate|find)\s+(.+)/i);
+  const subject = (leadMatch?.[1] ?? raw)
+    .replace(/[?]+$/g, "")
+    .replace(/\bplease\b/gi, "")
+    .trim();
+
+  return subject
+    .split(/\s*(?:,|\band\b|&)\s*/i)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2);
+}
+
+function computeMapLookupMatchScore(term, contentId, record) {
+  const normalizedTerm = normalizeMapContentsSearchText(term);
+  const aliasText = Array.isArray(record.aliases) ? record.aliases.join(" ") : "";
+  const fields = [record.name, record.subtitle, record.path, aliasText];
+  const combined = normalizeMapContentsSearchText(fields.join(" "));
+  const acronym = buildSearchAcronym(fields.join(" "));
+  if (!normalizedTerm) {
+    return -1;
+  }
+  if (normalizeMapContentsSearchText(record.name) === normalizedTerm) {
+    return 120;
+  }
+  if (combined.startsWith(normalizedTerm)) {
+    return 100;
+  }
+  if (combined.includes(normalizedTerm)) {
+    return 80;
+  }
+  if (acronym.includes(normalizedTerm)) {
+    return 65;
+  }
+  if (smartMapContentsMatch(term, fields)) {
+    return 50;
+  }
+  return -1;
+}
+
+function findMapContentLookupMatches(term, limit = 6) {
+  const candidates = getMapContentEntries()
+    .filter((entry) => entry.id && !entry.id.startsWith("folder:"))
+    .map((entry) => buildCompactMapContentRecord(entry.id))
+    .filter(Boolean)
+    .map((record) => ({
+      record,
+      score: computeMapLookupMatchScore(term, record.id, record),
+    }))
+    .filter((entry) => entry.score >= 0)
+    .sort((left, right) => right.score - left.score || left.record.name.localeCompare(right.record.name))
+    .slice(0, limit)
+    .map((entry) => entry.record);
+  return candidates;
+}
+
+function formatLookupLocation(record) {
+  if (Number.isFinite(record.lat) && Number.isFinite(record.lon)) {
+    return `${record.lat.toFixed(6)}, ${record.lon.toFixed(6)} | ${toMgrs(record.lat, record.lon)}`;
+  }
+  if (record.bounds?.southWest && record.bounds?.northEast) {
+    const centerLat = (record.bounds.southWest.lat + record.bounds.northEast.lat) / 2;
+    const centerLon = (record.bounds.southWest.lon + record.bounds.northEast.lon) / 2;
+    return `center ${centerLat.toFixed(6)}, ${centerLon.toFixed(6)} | ${toMgrs(centerLat, centerLon)}`;
+  }
+  return "No point location available";
+}
+
+function wantsMgrsLookup(rawPrompt) {
+  const raw = String(rawPrompt ?? "");
+  return /\b(mgrs|grid)\b/i.test(raw) || /\bgrid\s+location\b/i.test(raw);
+}
+
+function isLookupPrompt(rawPrompt) {
+  return /\b(where|location|locations|locate|find|coords|coordinates|grid|mgrs)\b/i.test(String(rawPrompt ?? ""));
+}
+
+function formatLookupCoordinateOnly(record, preferMgrs = false) {
+  if (Number.isFinite(record.lat) && Number.isFinite(record.lon)) {
+    const mgrs = toMgrs(record.lat, record.lon);
+    return preferMgrs ? mgrs : `${mgrs} (${record.lat.toFixed(6)}, ${record.lon.toFixed(6)})`;
+  }
+  if (record.bounds?.southWest && record.bounds?.northEast) {
+    const centerLat = (record.bounds.southWest.lat + record.bounds.northEast.lat) / 2;
+    const centerLon = (record.bounds.southWest.lon + record.bounds.northEast.lon) / 2;
+    const mgrs = toMgrs(centerLat, centerLon);
+    return preferMgrs ? mgrs : `${mgrs} (${centerLat.toFixed(6)}, ${centerLon.toFixed(6)})`;
+  }
+  return "No point location available";
+}
+
+function collectMapLookupAliases(entry, detail) {
+  const aliases = new Set();
+  const addAlias = (value) => {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (!text || text.length < 2 || text.length > 120) {
+      return;
+    }
+    aliases.add(text);
+  };
+  addAlias(entry?.name);
+  addAlias(entry?.subtitle);
+  const props = detail?.properties && typeof detail.properties === "object" ? detail.properties : {};
+  [
+    "name",
+    "title",
+    "label",
+    "displayName",
+    "display_name",
+    "featureName",
+    "feature_name",
+    "featname",
+    "roadname",
+    "altname",
+    "rangeno",
+    "instlnid",
+    "facilid",
+  ].forEach((key) => addAlias(props[key]));
+  const parsedName = extractImportedMetadataName(entry?.name);
+  if (parsedName) {
+    addAlias(parsedName);
+  }
+  return [...aliases];
+}
+
+function getPreferredMapLookupName(entry, detail) {
+  const aliases = collectMapLookupAliases(entry, detail);
+  const bestAlias = aliases.find((alias) => !looksLikeImportedMetadataBlob(alias));
+  return bestAlias || entry?.name || "Map Item";
+}
+
+function looksLikeImportedMetadataBlob(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return false;
+  }
+  const metadataFieldHits = (text.match(/\b(?:fid|subtypeid|clineid|mapid|metaid|coordid|coordx|coordy|coordz|frcoordx|tocoordx|featname|roadname|altname|globalid|shapelen|shapearea|datalink)\b/gi) || []).length;
+  return text.length > 120 || metadataFieldHits >= 4;
+}
+
+function extractImportedMetadataName(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!looksLikeImportedMetadataBlob(text)) {
+    return "";
+  }
+  const patterns = [
+    /\bfeatname\s+(.+?)\s+(?:dualflgd|usetypd|datalink|globalid|shape(?:len|area)|$)/i,
+    /\broadname\s+(.+?)\s+(?:altname|rou1typd|datalink|globalid|shape(?:len|area)|$)/i,
+    /\baltname\s+(.+?)\s+(?:rou1typd|datalink|globalid|shape(?:len|area)|$)/i,
+    /\brangeno\s+(.+?)\s+(?:featname|datalink|globalid|shape(?:len|area)|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const candidate = match?.[1]?.replace(/\s+/g, " ").trim();
+    if (candidate && candidate.length <= 120 && !looksLikeImportedMetadataBlob(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+function tryResolveAiMapLookup(prompt) {
+  const raw = String(prompt ?? "").trim();
+  if (!raw || !isLookupPrompt(raw)) {
+    return null;
+  }
+
+  const terms = tokenizeLookupPrompt(raw);
+  if (!terms.length) {
+    return null;
+  }
+
+  const sections = terms.map((term) => ({
+    term,
+    matches: findMapContentLookupMatches(term),
+  }));
+
+  if (!sections.some((section) => section.matches.length)) {
+    return {
+      assistantMessage: `I couldn't find a map-contents match for: ${terms.join(", ")}.`,
+      actions: [],
+    };
+  }
+
+  const preferMgrs = wantsMgrsLookup(raw);
+  if (sections.length === 1 && sections[0].matches.length) {
+    const best = sections[0].matches[0];
+    return {
+      assistantMessage: formatLookupCoordinateOnly(best, preferMgrs),
+      actions: [],
+    };
+  }
+
+  const lines = [];
+  sections.forEach((section) => {
+    if (!section.matches.length) {
+      lines.push(`- ${section.term}: no match found`);
+      return;
+    }
+    section.matches.slice(0, 3).forEach((record, index) => {
+      const prefix = index === 0 ? `- ${section.term}:` : "  alt:";
+      const locationText = preferMgrs ? formatLookupCoordinateOnly(record, true) : formatLookupLocation(record);
+      lines.push(`${prefix} ${record.name} | ${locationText}${preferMgrs ? "" : ` | ${record.path}`}`);
+    });
+  });
+
+  return {
+    assistantMessage: `Map lookup results:\n${lines.join("\n")}`,
+    actions: [],
+  };
+}
+
 function buildFileContextDetail(files) {
   if (!files.length) return "";
   return files.map((file) => {
@@ -4176,6 +4999,7 @@ function serializeImportedItemForAi(item) {
     coordinateCount,
     properties: item.properties ?? {},
     shapeStyle: item.shapeStyle ?? null,
+    markerStyle: item.markerStyle ?? null,
     geometry,
     bounds: typeof item.layer?.getBounds === "function"
       ? serializeBoundsForAi(item.layer.getBounds())
@@ -4374,13 +5198,22 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
 }
 
 async function callAiPlanningAssistant(prompt, images = [], files = [], contextIds = [], { onStatus } = {}) {
-  const scenarioSummary = buildAiScenarioSummary();
+  const localLookup = images.length === 0 && files.length === 0 ? tryResolveAiMapLookup(prompt) : null;
+  if (localLookup) {
+    onStatus?.("Searching map contents");
+    return localLookup;
+  }
+
+  const scenarioSummary = buildCompactAiScenarioSummary(contextIds);
   const contextDetail = buildContextDetail(contextIds);
   const fileDetail = buildFileContextDetail(files);
 
-  const systemText = [
+  let systemText = [
     "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
     "You have deep knowledge of military and civilian radio systems, link budget analysis, antenna theory, terrain effects on propagation, and spectrum management.",
+    "For direct map-item location, coordinate, MGRS, or grid questions, answer with the single best coordinate result first. If the user asks for grid or MGRS, prefer returning just the MGRS unless ambiguity requires a short clarification.",
+    "Keep responses terse by default. Do not preface simple answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
+    "For a single direct factual answer, respond in one line. For ambiguous map lookups, list at most 3 short candidates.",
     "",
     "You are given the full current scenario state. You can answer questions AND execute actions that manipulate the live map and simulation.",
     "Return ONLY valid JSON with this schema:",
@@ -4509,6 +5342,24 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     prompt || "(see attached image)",
   ].filter(Boolean).join("\n\n");
 
+  systemText = [
+    "You are an RF planning assistant embedded in a live map-based RF simulator.",
+    "Answer briefly and precisely.",
+    "If no map or simulation changes are needed, reply in plain text.",
+    "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
+    "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los.",
+    "Use exact ids from the scenario summary.",
+    "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
+    "Do not invent tools, URLs, or ids.",
+    "If terrainLosMatrix is present, use it when discussing LOS or relay placement.",
+    "SCENARIO SUMMARY:",
+    scenarioSummary,
+    contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
+    fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
+    "USER REQUEST:",
+    prompt || "(see attached image)",
+  ].filter(Boolean).join("\n\n");
+
   // Build multimodal content for Anthropic; text-only fallback for GenAI.mil
   let messages;
   if (state.ai.provider === "anthropic" && images.length > 0) {
@@ -4526,10 +5377,10 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
 
   onStatus?.("Contacting provider");
   const raw = state.ai.provider === "anthropic"
-    ? await callAnthropic(messages, 4096, 0.2)
-    : await callGenAiMil(messages, 4096, 0.2);
+    ? await callAnthropic(messages, 1200, 0.2)
+    : await callGenAiMil(messages, 1200, 0.2);
   onStatus?.("Parsing response");
-  const parsed = parseAiAssistantResponse(raw);
+  const parsed = parseAiAssistantResponse(raw, prompt);
   return {
     assistantMessage: typeof parsed.assistantMessage === "string" && parsed.assistantMessage.trim()
       ? parsed.assistantMessage.trim()
@@ -4652,33 +5503,72 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
   return content;
 }
 
-function parseAiAssistantResponse(text) {
+function extractMgrsTokens(text) {
+  return [...String(text ?? "").matchAll(/\b\d{1,2}[C-HJ-NP-X][A-HJ-NP-Z]{2}\d{2,10}\b/gi)]
+    .map((match) => match[0].toUpperCase());
+}
+
+function normalizeAssistantMessageForPrompt(prompt, message) {
+  const rawPrompt = String(prompt ?? "").trim();
+  const rawMessage = String(message ?? "").trim();
+  if (!rawMessage) {
+    return rawMessage;
+  }
+
+  if (wantsMgrsLookup(rawPrompt)) {
+    const mgrsTokens = extractMgrsTokens(rawMessage);
+    if (mgrsTokens.length) {
+      return mgrsTokens[0];
+    }
+  }
+
+  if (isLookupPrompt(rawPrompt)) {
+    const stripped = rawMessage
+      .replace(/^map lookup results:\s*/i, "")
+      .replace(/^result:\s*/i, "")
+      .trim();
+    const lines = stripped
+      .split(/\r?\n+/)
+      .map((line) => line.replace(/^[\-\*\u2022]\s*/, "").trim())
+      .filter(Boolean);
+    if (lines.length === 1) {
+      return lines[0];
+    }
+    return lines.slice(0, 3).join("\n");
+  }
+
+  return rawMessage
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function parseAiAssistantResponse(text, prompt = "") {
   const normalized = typeof text === "string" ? text.trim() : "";
   if (!normalized) {
     return { assistantMessage: "", actions: [] };
   }
 
   try {
-    return normalizeAiAssistantPayload(JSON.parse(normalized), normalized);
+    return normalizeAiAssistantPayload(JSON.parse(normalized), normalized, prompt);
   } catch {
     const match = normalized.match(/\{[\s\S]*\}/);
     if (!match) {
-      return { assistantMessage: normalized, actions: [] };
+      return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, normalized), actions: [] };
     }
     try {
-      return normalizeAiAssistantPayload(JSON.parse(match[0]), normalized);
+      return normalizeAiAssistantPayload(JSON.parse(match[0]), normalized, prompt);
     } catch {
-      return { assistantMessage: normalized, actions: [] };
+      return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, normalized), actions: [] };
     }
   }
 }
 
-function normalizeAiAssistantPayload(payload, rawText = "") {
+function normalizeAiAssistantPayload(payload, rawText = "", prompt = "") {
   if (typeof payload === "string") {
-    return { assistantMessage: payload, actions: [] };
+    return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, payload), actions: [] };
   }
   if (!payload || typeof payload !== "object") {
-    return { assistantMessage: rawText, actions: [] };
+    return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, rawText), actions: [] };
   }
 
   const assistantMessage = typeof payload.assistantMessage === "string"
@@ -4688,7 +5578,7 @@ function normalizeAiAssistantPayload(payload, rawText = "") {
       : rawText;
 
   return {
-    assistantMessage,
+    assistantMessage: normalizeAssistantMessageForPrompt(prompt, assistantMessage),
     actions: Array.isArray(payload.actions) ? payload.actions : [],
   };
 }
@@ -5215,6 +6105,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const toLatLng = (c) => ({ lat: Number(c.lat ?? c[0]), lng: Number(c.lon ?? c.lng ?? c[1]) });
     const shapeStyle = {
       color: typeof action.color === "string" ? action.color : DRAW_DEFAULTS.color,
+      fillColor: typeof action.color === "string" ? action.color : DRAW_DEFAULTS.color,
       lineStyle: ["solid", "dashed", "dotted"].includes(action.lineStyle) ? action.lineStyle : DRAW_DEFAULTS.lineStyle,
       fillOpacity: Number.isFinite(Number(action.fillOpacity)) ? Number(action.fillOpacity) : DRAW_DEFAULTS.fillOpacity,
       weight: Number.isFinite(Number(action.weight)) ? Number(action.weight) : DRAW_DEFAULTS.weight,
@@ -5259,7 +6150,10 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const ref = action.shapeId ?? action.name;
     const item = state.importedItems.find((i) => i.drawn && (i.id === ref || i.name === ref));
     if (!item) return `Skipped update-shape: shape "${ref}" not found.`;
-    if (typeof action.color === "string") item.shapeStyle.color = action.color;
+    if (typeof action.color === "string") {
+      item.shapeStyle.color = action.color;
+      item.shapeStyle.fillColor = action.color;
+    }
     if (["solid", "dashed", "dotted"].includes(action.lineStyle)) item.shapeStyle.lineStyle = action.lineStyle;
     if (Number.isFinite(Number(action.fillOpacity))) item.shapeStyle.fillOpacity = Number(action.fillOpacity);
     if (Number.isFinite(Number(action.weight))) item.shapeStyle.weight = Number(action.weight);
@@ -5451,9 +6345,7 @@ function onMapClick(event) {
     return;
   }
   if (state.placingAsset) {
-    addAsset(event.latlng);
-    setAssetPlacementMode(false);
-    setStatus("Emitter placed.");
+    placePendingAssetAt(event.latlng, "2D map");
     return;
   }
 
@@ -5464,8 +6356,69 @@ function onMapClick(event) {
 
 function setAssetPlacementMode(enabled) {
   state.placingAsset = Boolean(enabled);
+  state.ui.lastPlacementEventKey = "";
   dom.map?.classList.toggle("asset-placement-active", state.placingAsset);
   dom.cesiumContainer?.classList.toggle("asset-placement-active", state.placingAsset);
+  dom.mapStage?.classList.toggle("asset-placement-active", state.placingAsset);
+  updatePlacementInteractionState();
+  updateCenterCrosshairVisibility();
+}
+
+function updatePlacementInteractionState() {
+  if (state.map) {
+    if (state.placingAsset) {
+      state.map.dragging?.disable();
+      state.map.doubleClickZoom?.disable();
+      state.map.boxZoom?.disable();
+      state.map.keyboard?.disable();
+      state.map.getContainer().style.cursor = "crosshair";
+    } else {
+      state.map.dragging?.enable();
+      state.map.doubleClickZoom?.enable();
+      state.map.boxZoom?.enable();
+      state.map.keyboard?.enable();
+      state.map.getContainer().style.cursor = "";
+    }
+  }
+
+  const controller = state.cesiumViewer?.scene?.screenSpaceCameraController;
+  if (controller) {
+    controller.enableRotate = !state.placingAsset;
+    controller.enableTranslate = !state.placingAsset;
+    controller.enableTilt = !state.placingAsset;
+    controller.enableLook = !state.placingAsset;
+  }
+}
+
+function buildPlacementEventKey(lat, lon) {
+  return `${Number(lat).toFixed(6)},${Number(lon).toFixed(6)}`;
+}
+
+function shouldIgnoreDuplicatePlacement(lat, lon) {
+  const nextKey = buildPlacementEventKey(lat, lon);
+  if (state.ui.lastPlacementEventKey === nextKey) {
+    return true;
+  }
+  state.ui.lastPlacementEventKey = nextKey;
+  window.setTimeout(() => {
+    if (state.ui.lastPlacementEventKey === nextKey) {
+      state.ui.lastPlacementEventKey = "";
+    }
+  }, 250);
+  return false;
+}
+
+function placePendingAssetAt(latlng, sourceLabel = "map") {
+  if (!state.placingAsset || !latlng) {
+    return false;
+  }
+  if (shouldIgnoreDuplicatePlacement(latlng.lat, latlng.lng)) {
+    return true;
+  }
+  addAsset(latlng);
+  setAssetPlacementMode(false);
+  setStatus(`Emitter placed from ${sourceLabel}.`);
+  return true;
 }
 
 function onMapContextMenu(event) {
@@ -5527,18 +6480,37 @@ function addAsset(latlng) {
   state.assetMarkers.set(asset.id, marker);
   state.assets.push(asset);
   renderAssets();
-  marker.openPopup();
   syncCesiumEntities();
 
   saveMapState();
   if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
     refreshAssetGroundElevation(asset).catch(() => {});
   }
+  focusPlacedAsset(asset, marker);
+}
+
+function focusPlacedAsset(asset, marker) {
+  if (state.view3dEnabled && state.cesiumViewer) {
+    const viewer = state.cesiumViewer;
+    const height = Math.max(180, zoomToAltitude(Math.max(state.map.getZoom(), 17)) * 0.18);
+    viewer.camera.flyTo({
+      destination: window.Cesium.Cartesian3.fromDegrees(asset.lon, asset.lat, height),
+      orientation: {
+        heading: viewer.camera.heading,
+        pitch: Math.min(viewer.camera.pitch, window.Cesium.Math.toRadians(-35)),
+        roll: 0,
+      },
+      duration: 0.55,
+    });
+  } else {
+    state.map.setView([asset.lat, asset.lon], Math.max(state.map.getZoom(), 16));
+  }
+  marker.openPopup();
 }
 
 const EMITTER_ICONS = {
   // Antenna mast with two signal arcs — clearly a radio transmitter
-  radio:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="22"/><path d="M8 9c0-2.2 1.8-4 4-4s4 1.8 4 4"/><path d="M5 6c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>`,
+  radio:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="9" width="12" height="13" rx="1"/><line x1="9" y1="9" x2="9" y2="5"/><line x1="14" y1="9" x2="14" y2="2"/><rect x="8" y="12" width="8" height="4" rx="0.5"/></svg>`,
   // Lightning bolt — jammer/disruptor
   jammer:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
   // Two-headed arrow — relay/repeater
@@ -5559,12 +6531,19 @@ function createEmitterIcon(asset) {
   const markerColor = asset.color || FORCE_COLORS[asset.force] || FORCE_COLORS.friendly;
   const type = EMITTER_ICONS[asset.type] ? asset.type : "radio";
   const svg = EMITTER_ICONS[type];
+  const isRadio = type === "radio";
+  const iconSize = isRadio ? [34, 34] : [28, 28];
+  const iconAnchor = isRadio ? [17, 17] : [14, 14];
+  const popupAnchor = isRadio ? [0, -17] : [0, -14];
+  const markerStyle = isRadio
+    ? `--marker-color:${escapeHtml(markerColor)};`
+    : `background:${escapeHtml(markerColor)}`;
   return L.divIcon({
     className: "emitter-divicon-wrapper",
-    html: `<div class="emitter-marker ${type}" style="background:${escapeHtml(markerColor)}">${svg}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    popupAnchor: [0, -14],
+    html: `<div class="emitter-marker ${type}" style="${markerStyle}">${svg}</div>`,
+    iconSize,
+    iconAnchor,
+    popupAnchor,
   });
 }
 
@@ -5705,6 +6684,18 @@ function renderTerrains() {
 function updateTerrainMenuValue() {
   if (!state.terrains.length) {
     const hasCesiumToken = dom.cesiumIonToken.value.trim().length > 0;
+    if (hasCesiumToken && usesCesiumPhotorealisticTiles() && usesCesiumOsmBuildings()) {
+      dom.terrainMenuValue.textContent = "Photo 3D + RF Buildings";
+      return;
+    }
+    if (hasCesiumToken && usesCesiumPhotorealisticTiles()) {
+      dom.terrainMenuValue.textContent = "Photo 3D";
+      return;
+    }
+    if (hasCesiumToken && usesCesiumOsmBuildings()) {
+      dom.terrainMenuValue.textContent = "Terrain + RF Buildings";
+      return;
+    }
     dom.terrainMenuValue.textContent = hasCesiumToken ? "Cesium Terrain" : "No DTED";
     return;
   }
@@ -5833,7 +6824,7 @@ function onViewshedAction(event) {
   }
 }
 
-function removeViewshed(viewshedId) {
+function removeViewshed(viewshedId, options = {}) {
   const index = state.viewsheds.findIndex((entry) => entry.id === viewshedId);
   if (index === -1) {
     return;
@@ -5850,13 +6841,19 @@ function removeViewshed(viewshedId) {
 
   if (state.editingViewshedId === viewshedId) {
     state.editingViewshedId = null;
-    refreshActionButtons();
+    if (!options.deferFinalize) {
+      refreshActionButtons();
+    }
   }
 
-  renderViewsheds();
-  renderMapContents();
-  syncCesiumEntities();
-  setStatus(`Removed ${viewshed.asset.name} coverage layer.`);
+  if (!options.deferFinalize) {
+    renderViewsheds();
+    renderMapContents();
+    syncCesiumEntities();
+  }
+  if (!options.silent) {
+    setStatus(`Removed ${viewshed.asset.name} coverage layer.`);
+  }
 }
 
 function clearViewsheds() {
@@ -5924,7 +6921,7 @@ function showTerrainCoverage(terrain) {
   syncCesiumEntities();
 }
 
-function hideTerrainCoverage(terrainId) {
+function hideTerrainCoverage(terrainId, options = {}) {
   const layer = state.terrainCoverageLayers.get(terrainId);
   if (layer) {
     layer.remove();
@@ -5935,21 +6932,36 @@ function hideTerrainCoverage(terrainId) {
   if (terrain) {
     terrain.extentVisible = false;
   }
-  renderMapContents();
-  syncCesiumEntities();
+  if (!options.deferFinalize) {
+    renderMapContents();
+    syncCesiumEntities();
+  }
 }
 
 function updateTerrainSummary() {
   const terrain = getActiveTerrain();
   if (!terrain) {
-    dom.terrainSummary.textContent = "No terrain loaded. Propagation uses free-space or terrain diffraction only.";
+    const propagationModel = dom.propagationModel.value;
+    const propagationSummary = usesCesiumBuildingsInPropagation(propagationModel)
+      ? `Propagation can sample streamed Cesium terrain plus OSM buildings using the ${getBuildingMaterialModel().label} material preset.`
+      : simulationUsesTerrainModel(propagationModel)
+        ? (simulationUsesAtmosphericModel(propagationModel)
+          ? "Propagation uses streamed Cesium terrain plus weather attenuation."
+          : "Propagation uses streamed Cesium terrain only.")
+        : "Propagation uses free-space path loss only.";
+    const visualSummary = usesCesiumPhotorealisticTiles()
+      ? " 3D view uses Google Photorealistic 3D Tiles for visual rendering."
+      : "";
+    dom.terrainSummary.textContent = `No local DTED loaded. ${propagationSummary}${visualSummary}`;
     updateTerrainMenuValue();
     return;
   }
 
   dom.terrainSummary.textContent =
     `Active terrain: ${terrain.name}. ${terrain.rows} x ${terrain.cols} posts with ` +
-    `${terrain.latStepDeg.toFixed(6)} x ${terrain.lonStepDeg.toFixed(6)} degree spacing.`;
+    `${terrain.latStepDeg.toFixed(6)} x ${terrain.lonStepDeg.toFixed(6)} degree spacing.` +
+    (terrain.osmBuildingsEnabled ? ` OSM building obstructions enabled with ${getBuildingMaterialModel().label} loss model.` : "") +
+    (usesCesiumPhotorealisticTiles() ? " 3D view uses Google Photorealistic 3D Tiles for visual rendering." : "");
   updateTerrainMenuValue();
 }
 
@@ -6055,6 +7067,7 @@ async function onTerrainImport(event) {
 
 function cacheTerrainInWorker(terrain) {
   const elevations = terrain.elevations.slice(0);
+  const baseElevations = terrain.baseElevations?.slice?.(0) ?? null;
   return new Promise((resolve) => {
     state.terrainCacheResolvers.set(terrain.id, resolve);
     state.worker.postMessage(
@@ -6070,9 +7083,12 @@ function cacheTerrainInWorker(terrain) {
           latStepDeg: terrain.latStepDeg,
           lonStepDeg: terrain.lonStepDeg,
           elevations,
+          baseElevations,
+          osmBuildingsEnabled: Boolean(terrain.osmBuildingsEnabled),
+          buildingMaterialPreset: terrain.buildingMaterialPreset ?? state.settings.buildingMaterialPreset,
         },
       },
-      [elevations.buffer],
+      baseElevations ? [elevations.buffer, baseElevations.buffer] : [elevations.buffer],
     );
   });
 }
@@ -6083,6 +7099,7 @@ function clearTerrain() {
   state.activeTerrainId = null;
   state.terrainReadyIds.clear();
   state.ionTerrainCache.clear();
+  state.cesiumPointElevationCache.clear();
   state.worker.postMessage({ type: "terrain:clear" });
   renderTerrains();
   updateTerrainSummary();
@@ -6102,12 +7119,31 @@ async function runSimulation() {
 
   try {
     const existingViewshed = state.viewsheds.find((entry) => entry.id === state.editingViewshedId);
+    const requestId = state.editingViewshedId ?? generateId();
+    openSimulationProgress(
+      requestId,
+      state.editingViewshedId ? `Updating ${existingViewshed?.name ?? "coverage layer"}...` : `Generating ${selected.name} coverage...`,
+    );
+    await yieldToMainThread();
+    throwIfSimulationCanceled(requestId);
     setStatus(state.editingViewshedId ? `Updating ${existingViewshed?.name ?? "coverage layer"}...` : "Generating coverage layer...");
+    updateSimulationProgress(
+      8,
+      simulationUsesTerrainModel(dom.propagationModel.value) ? "Preparing terrain inputs..." : "Preparing RF simulation...",
+      "8%",
+    );
     const terrainId = await resolveTerrainIdForSimulation(selected);
+    throwIfSimulationCanceled(requestId);
+    updateSimulationProgress(
+      24,
+      simulationUsesTerrainModel(dom.propagationModel.value) ? "Terrain ready. Dispatching RF sweep..." : "Dispatching RF sweep...",
+      "24%",
+    );
+    state.simulationProgress.workerDispatched = true;
     state.worker.postMessage({
       type: "simulation:start",
       payload: {
-        requestId: state.editingViewshedId ?? generateId(),
+        requestId,
         asset: selected,
         weather: state.weather,
         terrainId,
@@ -6120,11 +7156,22 @@ async function runSimulation() {
       },
     });
   } catch (error) {
+    closeSimulationProgress();
+    if (error instanceof Error && error.message === "SIMULATION_CANCELED") {
+      return;
+    }
     setStatus(error.message, true);
   }
 }
 
 function consumeSimulationResult(payload) {
+  if (isSimulationCanceled(payload.requestId)) {
+    state.canceledSimulationRequestIds.delete(payload.requestId);
+    return;
+  }
+  if (payload.requestId === state.simulationProgress.requestId) {
+    updateSimulationProgress(96, "Rendering coverage layer...", "96%");
+  }
   const latitudes = new Float64Array(payload.latitudes);
   const longitudes = new Float64Array(payload.longitudes);
   const rssi = new Float32Array(payload.rssi);
@@ -6184,6 +7231,10 @@ function consumeSimulationResult(payload) {
   renderViewsheds();
   renderMapContents();
   syncCesiumEntities();
+  if (payload.requestId === state.simulationProgress.requestId) {
+    updateSimulationProgress(100, "Coverage ready.", "100%");
+    window.setTimeout(() => closeSimulationProgress(), 180);
+  }
   setStatus(`Coverage complete for ${payload.asset.name}.`);
 }
 
@@ -6225,7 +7276,8 @@ function consumeInspectionResult(payload) {
     Path Loss: ${payload.pathLossDb.toFixed(1)} dB<br>
     Range: ${formatDistance(payload.distanceKm * 1000)}<br>
     Line of Sight: ${payload.lineOfSight ? "Yes" : "Blocked"}<br>
-    Terrain Blockage: ${formatElevation(payload.maxObstructionM)}
+    Terrain / Surface Blockage: ${formatElevation(payload.maxObstructionM)}<br>
+    Building Loss: ${payload.buildingLossDb ? `${payload.buildingLossDb.toFixed(1)} dB` : "0.0 dB"}
   `;
 
   L.popup()
@@ -6865,11 +7917,13 @@ async function toggle3dView() {
       state.map.setView([lat, lng], Math.min(Math.max(zoom, 2), 18), { animate: false });
     }
   }
+  updatePlacementInteractionState();
 }
 
 async function initCesiumIfNeeded() {
   if (state.cesiumViewer) {
     state.cesiumViewer.resize();
+    updatePlacementInteractionState();
     return;
   }
 
@@ -6886,9 +7940,15 @@ async function initCesiumIfNeeded() {
     selectionIndicator: false,
     terrainProvider: new window.Cesium.EllipsoidTerrainProvider(),
   });
+  state.cesiumViewer.scene.globe.depthTestAgainstTerrain = true;
+  updatePlacementInteractionState();
 
   state.cesiumViewer.camera.percentageChanged = 0.05;
-  state.cesiumViewer.camera.changed.addEventListener(updateCesiumCompass);
+  state.cesiumViewer.camera.changed.addEventListener(() => {
+    updateCesiumCompass();
+    updateCesiumPhotorealisticTilesVisibility();
+    updateCesiumOsmBuildingsVisibility();
+  });
 
   // Redraw terrain-clamped gridlines when the 3D camera moves.
   let _gridRafId = null;
@@ -6899,29 +7959,67 @@ async function initCesiumIfNeeded() {
   });
 
   const handler = new window.Cesium.ScreenSpaceEventHandler(state.cesiumViewer.scene.canvas);
-  handler.setInputAction((click) => {
+  handler.setInputAction(async (click) => {
     removeCesium3dTerrainPopup();
     if (!state.placingAsset) return;
-    const ray = state.cesiumViewer.camera.getPickRay(click.position);
-    const cartesian = state.cesiumViewer.scene.globe.pick(ray, state.cesiumViewer.scene);
-    if (!cartesian) return;
+    const cartesian = await pickCesiumScenePosition(click.position);
+    if (!cartesian) {
+      setStatus("3D placement pick failed. Zoom closer or click directly on the terrain/building surface.", true);
+      return;
+    }
     const carto = window.Cesium.Cartographic.fromCartesian(cartesian);
     const lat = window.Cesium.Math.toDegrees(carto.latitude);
     const lon = window.Cesium.Math.toDegrees(carto.longitude);
-    addAsset({ lat, lng: lon });
-    setAssetPlacementMode(false);
-    setStatus("Emitter placed.");
+    placePendingAssetAt({ lat, lng: lon }, "3D scene");
   }, window.Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-  handler.setInputAction((click) => {
-    const ray = state.cesiumViewer.camera.getPickRay(click.position);
-    const cartesian = state.cesiumViewer.scene.globe.pick(ray, state.cesiumViewer.scene);
+  handler.setInputAction(async (click) => {
+    const cartesian = await pickCesiumScenePosition(click.position);
     if (!cartesian) return;
     const carto = window.Cesium.Cartographic.fromCartesian(cartesian);
     const lat = window.Cesium.Math.toDegrees(carto.latitude);
     const lon = window.Cesium.Math.toDegrees(carto.longitude);
     showCesium3dTerrainPopup(lat, lon, click.position);
   }, window.Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+}
+
+async function pickCesiumScenePosition(screenPosition) {
+  if (!state.cesiumViewer) {
+    return null;
+  }
+  const scene = state.cesiumViewer.scene;
+  scene.requestRender?.();
+  if (scene.pickPositionSupported) {
+    const picked = scene.pickPosition(screenPosition);
+    if (picked) {
+      return picked;
+    }
+  }
+  const ray = state.cesiumViewer.camera.getPickRay(screenPosition);
+  if (!ray) {
+    return state.cesiumViewer.camera.pickEllipsoid(screenPosition, scene.globe.ellipsoid);
+  }
+  if (ray && typeof scene.pickFromRayMostDetailed === "function") {
+    try {
+      const detailedHit = await scene.pickFromRayMostDetailed(ray);
+      if (detailedHit?.position) {
+        return detailedHit.position;
+      }
+    } catch {
+      // Fall through to less detailed pick methods.
+    }
+  }
+  const pickedFromScene = typeof scene.pickFromRay === "function"
+    ? scene.pickFromRay(ray)
+    : null;
+  if (pickedFromScene?.position) {
+    return pickedFromScene.position;
+  }
+  const globePicked = scene.globe.pick(ray, scene);
+  if (globePicked) {
+    return globePicked;
+  }
+  return state.cesiumViewer.camera.pickEllipsoid(screenPosition, scene.globe.ellipsoid);
 }
 
 function showCesium3dTerrainPopup(lat, lon, screenPos) {
@@ -6996,6 +8094,8 @@ async function syncCesiumScene() {
     viewer.imageryLayers.removeAll();
     viewer.imageryLayers.addImageryProvider(buildImageryProvider());
     viewer.terrainProvider = await buildTerrainProvider();
+    await syncCesiumPhotorealisticTiles(viewer);
+    await syncCesiumOsmBuildings(viewer);
 
     const mapCenter = state.map.getCenter();
     const zoom = state.map.getZoom();
@@ -7016,9 +8116,137 @@ async function syncCesiumScene() {
   }
 }
 
+async function syncCesiumPhotorealisticTiles(viewer = state.cesiumViewer) {
+  if (!viewer) {
+    return;
+  }
+  const C = window.Cesium;
+  const token = dom.cesiumIonToken.value.trim();
+  const shouldShowTiles = usesCesiumPhotorealisticTiles() && Boolean(token);
+  const desiredKey = shouldShowTiles ? `ion-photo:${token}` : "";
+
+  if (!shouldShowTiles) {
+    if (state.cesiumPhotorealisticTileset) {
+      viewer.scene.primitives.remove(state.cesiumPhotorealisticTileset);
+      state.cesiumPhotorealisticTileset = null;
+    }
+    state.cesiumPhotorealisticKey = "";
+    return;
+  }
+
+  if (state.cesiumPhotorealisticTileset && state.cesiumPhotorealisticKey === desiredKey) {
+    updateCesiumPhotorealisticTilesVisibility(viewer);
+    return;
+  }
+
+  if (state.cesiumPhotorealisticTileset) {
+    viewer.scene.primitives.remove(state.cesiumPhotorealisticTileset);
+    state.cesiumPhotorealisticTileset = null;
+  }
+
+  if (typeof C.createGooglePhotorealistic3DTileset !== "function") {
+    state.settings.cesiumPhotorealisticTilesEnabled = false;
+    dom.cesiumPhotorealisticTilesToggle.value = "off";
+    persistSettings();
+    throw new Error("This CesiumJS build does not support Google Photorealistic 3D Tiles.");
+  }
+
+  C.Ion.defaultAccessToken = token;
+  const tileset = await C.createGooglePhotorealistic3DTileset();
+  tileset.maximumScreenSpaceError = 10;
+  tileset.dynamicScreenSpaceError = true;
+  tileset.preferLeaves = true;
+  tileset.skipLevelOfDetail = true;
+  tileset.shadows = C.ShadowMode.DISABLED;
+  viewer.scene.primitives.add(tileset);
+  state.cesiumPhotorealisticTileset = tileset;
+  state.cesiumPhotorealisticKey = desiredKey;
+  updateCesiumPhotorealisticTilesVisibility(viewer);
+}
+
+function shouldDisplayCesiumPhotorealisticTiles(viewer = state.cesiumViewer) {
+  if (!viewer || !state.cesiumPhotorealisticTileset || !usesCesiumPhotorealisticTiles()) {
+    return false;
+  }
+  return true;
+}
+
+function updateCesiumPhotorealisticTilesVisibility(viewer = state.cesiumViewer) {
+  if (!state.cesiumPhotorealisticTileset) {
+    return;
+  }
+  state.cesiumPhotorealisticTileset.show = shouldDisplayCesiumPhotorealisticTiles(viewer);
+}
+
+async function syncCesiumOsmBuildings(viewer = state.cesiumViewer) {
+  if (!viewer) {
+    return;
+  }
+  const C = window.Cesium;
+
+  const token = dom.cesiumIonToken.value.trim();
+  const shouldShowBuildings = usesCesiumOsmBuildings() && Boolean(token);
+  const desiredKey = shouldShowBuildings ? `ion-osm:${token}` : "";
+
+  if (!shouldShowBuildings) {
+    if (state.cesiumOsmBuildingsTileset) {
+      viewer.scene.primitives.remove(state.cesiumOsmBuildingsTileset);
+      state.cesiumOsmBuildingsTileset = null;
+    }
+    state.cesiumOsmBuildingsKey = "";
+    return;
+  }
+
+  if (state.cesiumOsmBuildingsTileset && state.cesiumOsmBuildingsKey === desiredKey) {
+    updateCesiumOsmBuildingsVisibility(viewer);
+    return;
+  }
+
+  if (state.cesiumOsmBuildingsTileset) {
+    viewer.scene.primitives.remove(state.cesiumOsmBuildingsTileset);
+    state.cesiumOsmBuildingsTileset = null;
+  }
+
+  C.Ion.defaultAccessToken = token;
+  const tileset = await C.createOsmBuildingsAsync();
+  tileset.style = new C.Cesium3DTileStyle({
+    color: "color('white', 0.72)",
+  });
+  tileset.maximumScreenSpaceError = 6;
+  tileset.dynamicScreenSpaceError = true;
+  tileset.skipLevelOfDetail = true;
+  tileset.preferLeaves = true;
+  tileset.shadows = C.ShadowMode.DISABLED;
+  viewer.scene.primitives.add(tileset);
+  state.cesiumOsmBuildingsTileset = tileset;
+  state.cesiumOsmBuildingsKey = desiredKey;
+  updateCesiumOsmBuildingsVisibility(viewer);
+}
+
 function zoomToAltitude(zoom) {
   // Approximate altitude in meters for a given Leaflet zoom level (top-down view)
   return 40000000 / Math.pow(2, zoom);
+}
+
+function shouldDisplayCesiumOsmBuildings(viewer = state.cesiumViewer) {
+  if (!viewer || !state.cesiumOsmBuildingsTileset || !usesCesiumOsmBuildings()) {
+    return false;
+  }
+  if (usesCesiumPhotorealisticTiles()) {
+    return false;
+  }
+  const height = viewer.camera?.positionCartographic?.height;
+  if (!Number.isFinite(height)) {
+    return true;
+  }
+  return height <= 25000;
+}
+
+function updateCesiumOsmBuildingsVisibility(viewer = state.cesiumViewer) {
+  if (!state.cesiumOsmBuildingsTileset) {
+    return;
+  }
+  state.cesiumOsmBuildingsTileset.show = shouldDisplayCesiumOsmBuildings(viewer);
 }
 
 function updateCesiumCompass() {
@@ -7071,6 +8299,7 @@ async function buildTerrainProvider() {
   const selection = dom.terrainSourceSelect.value;
   if (selection === "ellipsoid") {
     state.cesiumTerrainProvider = null;
+    state.cesiumTerrainProviderKey = "ellipsoid";
     return new window.Cesium.EllipsoidTerrainProvider();
   }
   if (selection === "custom") {
@@ -7078,8 +8307,12 @@ async function buildTerrainProvider() {
     if (!url) {
       throw new Error("Enter a custom terrain URL first.");
     }
-    state.cesiumTerrainProvider = null;
-    return await window.Cesium.CesiumTerrainProvider.fromUrl(url);
+    const providerKey = buildCesiumTerrainProviderKey();
+    if (!state.cesiumTerrainProvider || state.cesiumTerrainProviderKey !== providerKey) {
+      state.cesiumTerrainProvider = await window.Cesium.CesiumTerrainProvider.fromUrl(url);
+      state.cesiumTerrainProviderKey = providerKey;
+    }
+    return state.cesiumTerrainProvider;
   }
   return await getCesiumWorldTerrainProvider();
 }
@@ -7091,13 +8324,19 @@ async function getCesiumWorldTerrainProvider() {
   }
 
   window.Cesium.Ion.defaultAccessToken = token;
-  if (!state.cesiumTerrainProvider) {
+  const providerKey = buildCesiumTerrainProviderKey();
+  if (!state.cesiumTerrainProvider || state.cesiumTerrainProviderKey !== providerKey) {
     state.cesiumTerrainProvider = await window.Cesium.createWorldTerrainAsync();
+    state.cesiumTerrainProviderKey = providerKey;
   }
   return state.cesiumTerrainProvider;
 }
 
 async function resolveTerrainIdForSimulation(asset) {
+  const propagationModel = dom.propagationModel.value;
+  if (!simulationUsesTerrainModel(propagationModel)) {
+    return null;
+  }
   if (state.activeTerrainId) {
     await ensureTerrainReady(state.activeTerrainId);
     return state.activeTerrainId;
@@ -7109,7 +8348,11 @@ async function resolveTerrainIdForSimulation(asset) {
 
   const radiusMeters = getSimulationRadiusMeters();
   const bounds = boundsFromCenter(asset.lat, asset.lon, radiusMeters);
-  return await ensureIonTerrainGrid(bounds, Number(dom.gridMeters.value), `sim:${asset.id}:${radiusMeters}:${dom.gridMeters.value}`);
+  return await ensureIonTerrainGrid(
+    bounds,
+    Number(dom.gridMeters.value),
+    `sim:${asset.id}:${radiusMeters}:${dom.gridMeters.value}:${propagationModel}:${usesCesiumBuildingsInPropagation(propagationModel) ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}`,
+  );
 }
 
 async function resolveTerrainIdForPlanning(polygon, gridMeters) {
@@ -7123,7 +8366,8 @@ async function resolveTerrainIdForPlanning(polygon, gridMeters) {
   }
 
   const bounds = boundsFromPolygon(polygon);
-  const key = `plan:${polygon.map((point) => `${point.lat.toFixed(4)},${point.lon.toFixed(4)}`).join("|")}:${gridMeters}`;
+  const propagationModel = dom.propagationModel.value;
+  const key = `plan:${polygon.map((point) => `${point.lat.toFixed(4)},${point.lon.toFixed(4)}`).join("|")}:${gridMeters}:${propagationModel}:${usesCesiumBuildingsInPropagation(propagationModel) ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}`;
   return await ensureIonTerrainGrid(bounds, gridMeters, key);
 }
 
@@ -7137,20 +8381,31 @@ async function ensureTerrainReady(terrainId) {
 }
 
 async function ensureIonTerrainGrid(bounds, gridMeters, cacheKey) {
+  throwIfSimulationCanceled(state.simulationProgress.requestId);
   const cached = state.ionTerrainCache.get(cacheKey);
   if (cached) {
     await ensureTerrainReady(cached.id);
     return cached.id;
   }
 
-  setStatus("Sampling Cesium terrain for propagation...");
+  setStatus(usesCesiumBuildingsInPropagation()
+    ? "Sampling Cesium terrain and OSM buildings for propagation..."
+    : "Sampling Cesium terrain for propagation...");
+  updateSimulationTerrainPrepProgress(0.02, "Resolving terrain source...", "9%");
   const terrain = await sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey);
+  throwIfSimulationCanceled(state.simulationProgress.requestId);
   state.ionTerrainCache.set(cacheKey, terrain);
+  updateSimulationTerrainPrepProgress(0.96, "Caching sampled terrain...", "31%");
   await cacheTerrainInWorker(terrain);
   return terrain.id;
 }
 
 async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
+  const requestId = state.simulationProgress.requestId;
+  const propagationModel = dom.propagationModel.value;
+  const includeBuildings = usesCesiumBuildingsInPropagation(propagationModel);
+  throwIfSimulationCanceled(requestId);
+  updateSimulationTerrainPrepProgress(0.08, "Resolving terrain source...", "10%");
   const provider = await getConfiguredCesiumTerrainProvider();
   const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
   const latStepDeg = metersToLatitudeDegrees(gridMeters);
@@ -7167,15 +8422,121 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
     }
   }
 
-  const sampled = await window.Cesium.sampleTerrainMostDetailed(provider, positions);
-  const elevations = new Float32Array(rows * cols);
-  sampled.forEach((position, index) => {
-    elevations[index] = Number.isFinite(position.height) ? position.height : 0;
-  });
+  const baseElevations = new Float32Array(rows * cols);
+  updateSimulationTerrainPrepProgress(0.2, "Sampling Cesium terrain...", `${rows} x ${cols} grid`);
+  const terrainBatchSize = Math.max(256, Math.min(2048, cols * 6));
+  for (let start = 0; start < positions.length; start += terrainBatchSize) {
+    throwIfSimulationCanceled(requestId);
+    const batch = positions.slice(start, start + terrainBatchSize);
+    const terrainSamples = await window.Cesium.sampleTerrainMostDetailed(provider, batch);
+    terrainSamples.forEach((position, index) => {
+      baseElevations[start + index] = Number.isFinite(position.height) ? position.height : 0;
+    });
+    const fraction = (start + batch.length) / positions.length;
+    updateSimulationTerrainPrepProgress(
+      0.2 + fraction * 0.38,
+      "Sampling Cesium terrain...",
+      `${Math.round(fraction * 100)}% of terrain grid`,
+    );
+    await yieldToMainThread();
+  }
+
+  const elevations = new Float32Array(baseElevations);
+  let sampledSurfaceType = "terrain";
+
+  if (includeBuildings) {
+    updateSimulationTerrainPrepProgress(0.62, "Sampling OSM building surface...", "62%");
+    await initCesiumIfNeeded();
+    await syncCesiumScene();
+    const scene = state.cesiumViewer?.scene;
+    if (scene && typeof scene.sampleHeightMostDetailed === "function") {
+      try {
+        const centerLon = (bounds.sw.lon + bounds.ne.lon) / 2;
+        const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
+        state.cesiumViewer.camera.setView({
+          destination: window.Cesium.Cartesian3.fromDegrees(centerLon, centerLat, Math.max(2000, zoomToAltitude(state.map.getZoom()))),
+        });
+        const latProbeOffset = latStepDeg * 0.35;
+        const lonProbeOffset = lonStepDeg * 0.35;
+        const surfaceProbePositions = [];
+        const probeIndexMap = [];
+
+        positions.forEach((position, index) => {
+          const lonDeg = window.Cesium.Math.toDegrees(position.longitude);
+          const latDeg = window.Cesium.Math.toDegrees(position.latitude);
+          const probes = [
+            [lonDeg, latDeg],
+            [lonDeg - lonProbeOffset, latDeg],
+            [lonDeg + lonProbeOffset, latDeg],
+            [lonDeg, latDeg - latProbeOffset],
+            [lonDeg, latDeg + latProbeOffset],
+          ];
+          probes.forEach(([probeLon, probeLat]) => {
+            surfaceProbePositions.push(window.Cesium.Cartographic.fromDegrees(probeLon, probeLat));
+            probeIndexMap.push(index);
+          });
+        });
+
+        const maxSurfaceHeights = new Float32Array(rows * cols);
+        maxSurfaceHeights.fill(Number.NEGATIVE_INFINITY);
+        let useDetailedSurfaceSampling = true;
+        let usedSurfaceFallback = false;
+        await withCesiumPropagationSamplingScene(async () => {
+          const surfaceBatchSize = Math.max(128, Math.min(768, cols * 4));
+          for (let start = 0; start < surfaceProbePositions.length; start += surfaceBatchSize) {
+            throwIfSimulationCanceled(requestId);
+            const batch = surfaceProbePositions.slice(start, start + surfaceBatchSize);
+            const { samples: surfaceSamples, usedDetailed } = await sampleCesiumSurfaceBatch(scene, batch, {
+              allowDetailed: useDetailedSurfaceSampling,
+              timeoutMs: 2200,
+            });
+            if (!usedDetailed) {
+              useDetailedSurfaceSampling = false;
+              usedSurfaceFallback = true;
+            }
+            surfaceSamples.forEach((position, batchIndex) => {
+              const probeIndex = start + batchIndex;
+              const cellIndex = probeIndexMap[probeIndex];
+              if (!Number.isFinite(position?.height)) {
+                return;
+              }
+              maxSurfaceHeights[cellIndex] = Math.max(maxSurfaceHeights[cellIndex], position.height);
+            });
+            const fraction = (start + batch.length) / surfaceProbePositions.length;
+            updateSimulationTerrainPrepProgress(
+              0.62 + fraction * 0.26,
+              "Sampling OSM building surface...",
+              usedSurfaceFallback
+                ? `${Math.round(fraction * 100)}% of building probes (fast fallback)`
+                : `${Math.round(fraction * 100)}% of building probes`,
+            );
+            await yieldToMainThread();
+          }
+        });
+
+        maxSurfaceHeights.forEach((height, index) => {
+          if (Number.isFinite(height)) {
+            elevations[index] = Math.max(elevations[index], height);
+          }
+        });
+        sampledSurfaceType = "terrain+buildings";
+      } catch {
+        sampledSurfaceType = "terrain";
+      }
+    }
+  }
+
+  updateSimulationTerrainPrepProgress(
+    includeBuildings ? 0.92 : 0.86,
+    includeBuildings ? "Finalizing terrain + building grid..." : "Finalizing terrain grid...",
+    includeBuildings ? "30%" : "29%",
+  );
 
   return {
-    id: `ion:${cacheKey}`,
-    name: dom.terrainSourceSelect.value === "custom" ? "Custom Cesium Terrain" : "Cesium World Terrain",
+    id: `ion:${cacheKey}:${includeBuildings ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}`,
+    name: includeBuildings
+      ? "Cesium Terrain + OSM Buildings"
+      : (dom.terrainSourceSelect.value === "custom" ? "Custom Cesium Terrain" : "Cesium World Terrain"),
     origin: { lat: bounds.sw.lat, lon: bounds.sw.lon },
     bounds,
     rows,
@@ -7183,6 +8544,10 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
     latStepDeg,
     lonStepDeg,
     elevations,
+    baseElevations,
+    sampledSurfaceType,
+    buildingMaterialPreset: state.settings.buildingMaterialPreset,
+    osmBuildingsEnabled: includeBuildings,
   };
 }
 
@@ -7308,7 +8673,7 @@ function getMapContentEntries() {
 
   state.mapContentFolders.forEach((folder) => {
     const folderContentId = `folder:${folder.id}`;
-    const childCount = state.mapContentOrder.filter((entryId) => state.mapContentAssignments.get(entryId) === folderContentId).length;
+    const childCount = countFolderDescendantItems(folderContentId);
     entries.push({
       id: folderContentId,
       kind: "folder",
@@ -7394,6 +8759,161 @@ function getMapContentFolderId(contentId) {
   return state.mapContentAssignments.get(contentId) ?? null;
 }
 
+function normalizeFolderContentId(folderId) {
+  if (!folderId) {
+    return null;
+  }
+  return String(folderId).startsWith("folder:") ? String(folderId).slice("folder:".length) : String(folderId);
+}
+
+function getMapContentFolderEntry(folderId) {
+  const normalizedId = normalizeFolderContentId(folderId);
+  if (!normalizedId) {
+    return null;
+  }
+  return state.mapContentFolders.find((folder) => folder.id === normalizedId) ?? null;
+}
+
+function getFolderParentContentId(folderId) {
+  const folder = getMapContentFolderEntry(folderId);
+  return folder?.parentId ? `folder:${folder.parentId}` : null;
+}
+
+function setFolderParentId(folderId, parentFolderId = null) {
+  const folder = getMapContentFolderEntry(folderId);
+  if (!folder) {
+    return;
+  }
+  folder.parentId = normalizeFolderContentId(parentFolderId);
+}
+
+function getFolderChildEntryIds(folderContentId, orderToUse, entryMap, folderIds) {
+  return orderToUse.filter((entryId) => {
+    if (!entryMap.has(entryId)) {
+      return false;
+    }
+    if (folderIds.has(entryId)) {
+      return getFolderParentContentId(entryId) === folderContentId;
+    }
+    return getMapContentFolderId(entryId) === folderContentId;
+  });
+}
+
+function countFolderDescendantItems(folderContentId) {
+  let total = 0;
+  state.mapContentAssignments.forEach((assignedFolderId, contentId) => {
+    if (assignedFolderId === folderContentId && !contentId.startsWith("folder:")) {
+      total += 1;
+    }
+  });
+  state.mapContentFolders.forEach((folder) => {
+    if (`folder:${folder.parentId}` === folderContentId) {
+      total += countFolderDescendantItems(`folder:${folder.id}`);
+    }
+  });
+  return total;
+}
+
+function wouldCreateFolderCycle(folderId, parentFolderId) {
+  const draggedFolderId = normalizeFolderContentId(folderId);
+  let currentParentId = normalizeFolderContentId(parentFolderId);
+  while (currentParentId) {
+    if (currentParentId === draggedFolderId) {
+      return true;
+    }
+    currentParentId = getMapContentFolderEntry(currentParentId)?.parentId ?? null;
+  }
+  return false;
+}
+
+function normalizeMapContentsSearchText(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[_|/\\>]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildSearchAcronym(value) {
+  return normalizeMapContentsSearchText(value)
+    .split(" ")
+    .map((part) => part[0] ?? "")
+    .join("");
+}
+
+function isSubsequenceMatch(needle, haystack) {
+  if (!needle) {
+    return true;
+  }
+  let needleIndex = 0;
+  for (const char of haystack) {
+    if (char === needle[needleIndex]) {
+      needleIndex += 1;
+      if (needleIndex >= needle.length) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function smartMapContentsMatch(query, fields) {
+  const normalizedQuery = normalizeMapContentsSearchText(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+  const tokens = normalizedQuery.split(" ").filter(Boolean);
+  if (!tokens.length) {
+    return true;
+  }
+  const normalizedFields = fields
+    .map((field) => normalizeMapContentsSearchText(field))
+    .filter(Boolean);
+  const combined = normalizedFields.join(" ");
+  const acronym = buildSearchAcronym(normalizedFields.join(" "));
+  return tokens.every((token) => (
+    combined.includes(token)
+    || acronym.includes(token)
+    || normalizedFields.some((field) => isSubsequenceMatch(token, field))
+  ));
+}
+
+function getMapContentAncestorNames(contentId) {
+  const names = [];
+  let folderId = contentId.startsWith("folder:")
+    ? getFolderParentContentId(contentId)
+    : getMapContentFolderId(contentId);
+  while (folderId) {
+    const folder = getMapContentFolderEntry(folderId);
+    if (!folder) {
+      break;
+    }
+    names.unshift(folder.name);
+    folderId = folder.parentId ? `folder:${folder.parentId}` : null;
+  }
+  return names;
+}
+
+function updateMapContentsSearchUi() {
+  const hasValue = Boolean(state.mapContentsSearch.trim());
+  dom.mapContentsSearchClearBtn?.classList.toggle("hidden", !hasValue);
+}
+
+function onMapContentsSearchInput() {
+  state.mapContentsSearch = dom.mapContentsSearchInput?.value ?? "";
+  updateMapContentsSearchUi();
+  renderMapContents();
+}
+
+function clearMapContentsSearch() {
+  state.mapContentsSearch = "";
+  if (dom.mapContentsSearchInput) {
+    dom.mapContentsSearchInput.value = "";
+  }
+  updateMapContentsSearchUi();
+  renderMapContents();
+}
+
 function setMapContentFolderId(contentId, folderId) {
   if (!folderId) {
     state.mapContentAssignments.delete(contentId);
@@ -7442,6 +8962,7 @@ function buildMapContentRow(entry, isChild = false) {
   const isHidden = state.hiddenContentIds.has(entry.id);
   if (isHidden) row.dataset.hidden = "true";
   if (state.mcSelectMode && state.mcSelectedIds.has(entry.id)) row.classList.add("mc-selected");
+  if (entry.searchMatch) row.classList.add("search-match");
 
   const folder = isFolder ? state.mapContentFolders.find((f) => `folder:${f.id}` === entry.id) : null;
   const isCollapsed = folder?.collapsed ?? false;
@@ -7525,56 +9046,119 @@ function renderMapContents() {
   const entryMap = new Map(entries.map((entry) => [entry.id, entry]));
   const folderIds = new Set(state.mapContentFolders.map((folder) => `folder:${folder.id}`));
   const rendered = new Set();
+  const searchQuery = state.mapContentsSearch.trim();
+  const searchActive = Boolean(searchQuery);
 
   // Render in order; fall back to entry order if mapContentOrder is empty
   const orderToUse = state.mapContentOrder.length ? state.mapContentOrder : entryIds;
+  const searchMatchCache = new Map();
 
-  orderToUse.forEach((contentId) => {
+  const hasExistingParentContainer = (contentId) => {
+    if (folderIds.has(contentId)) {
+      const parentFolderId = getFolderParentContentId(contentId);
+      return !parentFolderId || entryMap.has(parentFolderId);
+    }
+    const folderId = getMapContentFolderId(contentId);
+    return !folderId || entryMap.has(folderId);
+  };
+
+  const entrySelfMatchesSearch = (entryId) => {
+    const entry = entryMap.get(entryId);
+    if (!entry) {
+      return false;
+    }
+    return smartMapContentsMatch(searchQuery, [
+      entry.name,
+      entry.subtitle,
+      ...getMapContentAncestorNames(entryId),
+    ]);
+  };
+
+  const entryMatchesSearch = (entryId) => {
+    if (!searchActive) {
+      return true;
+    }
+    if (searchMatchCache.has(entryId)) {
+      return searchMatchCache.get(entryId);
+    }
+    const selfMatch = entrySelfMatchesSearch(entryId);
+    if (!folderIds.has(entryId)) {
+      searchMatchCache.set(entryId, selfMatch);
+      return selfMatch;
+    }
+    const descendantMatch = getFolderChildEntryIds(entryId, orderToUse, entryMap, folderIds).some((childId) => entryMatchesSearch(childId));
+    const result = selfMatch || descendantMatch;
+    searchMatchCache.set(entryId, result);
+    return result;
+  };
+
+  const renderBranch = (contentId, container, depth = 0) => {
     if (rendered.has(contentId)) {
       return;
     }
-
     const entry = entryMap.get(contentId);
-    if (!entry) {
+    if (!entry || (searchActive && !entryMatchesSearch(contentId))) {
       return;
     }
 
-    if (folderIds.has(contentId)) {
-      const folder = state.mapContentFolders.find((f) => `folder:${f.id}` === contentId);
-      const isCollapsed = folder?.collapsed ?? false;
-      const folderRow = buildMapContentRow(entry);
-      dom.mapContentsList.appendChild(folderRow);
-      rendered.add(contentId);
-
-      const childIds = state.mapContentOrder.filter((id) => getMapContentFolderId(id) === contentId && entryMap.has(id));
-      childIds.forEach((childId) => rendered.add(childId));
-      if (childIds.length && !isCollapsed) {
-        const childWrap = document.createElement("div");
-        childWrap.className = "map-content-folder-children";
-        childIds.forEach((childId) => {
-          const childEntry = entryMap.get(childId);
-          childWrap.appendChild(buildMapContentRow(childEntry, true));
-        });
-        dom.mapContentsList.appendChild(childWrap);
-      }
-      return;
-    }
-
-    if (getMapContentFolderId(contentId)) {
-      return;
-    }
-
-    dom.mapContentsList.appendChild(buildMapContentRow(entry));
+    container.appendChild(buildMapContentRow({
+      ...entry,
+      searchMatch: searchActive ? entrySelfMatchesSearch(contentId) : false,
+    }, depth > 0));
     rendered.add(contentId);
+
+    if (!folderIds.has(contentId)) {
+      return;
+    }
+
+    const folder = getMapContentFolderEntry(contentId);
+    const isCollapsed = folder?.collapsed ?? false;
+    if (isCollapsed && !searchActive) {
+      return;
+    }
+
+    const childIds = getFolderChildEntryIds(contentId, orderToUse, entryMap, folderIds)
+      .filter((childId) => !searchActive || entryMatchesSearch(childId));
+    if (!childIds.length) {
+      return;
+    }
+
+    const childWrap = document.createElement("div");
+    childWrap.className = "map-content-folder-children";
+    childIds.forEach((childId) => renderBranch(childId, childWrap, depth + 1));
+    container.appendChild(childWrap);
+  };
+
+  const topLevelIds = orderToUse.filter((contentId) => {
+    if (!entryMap.has(contentId)) {
+      return false;
+    }
+    if (searchActive && !entryMatchesSearch(contentId)) {
+      return false;
+    }
+    if (folderIds.has(contentId)) {
+      return !getFolderParentContentId(contentId);
+    }
+    return !getMapContentFolderId(contentId);
   });
+
+  topLevelIds.forEach((contentId) => renderBranch(contentId, dom.mapContentsList));
 
   // Safety net: render any entries that slipped through (e.g. order/ID mismatch from old saves)
   entries.forEach((entry) => {
+    if (hasExistingParentContainer(entry.id)) {
+      return;
+    }
     if (!rendered.has(entry.id)) {
-      dom.mapContentsList.appendChild(buildMapContentRow(entry));
-      rendered.add(entry.id);
+      renderBranch(entry.id, dom.mapContentsList);
     }
   });
+
+  if (searchActive && !rendered.size) {
+    dom.mapContentsList.innerHTML = '<div class="map-contents-empty">No map contents matched your search.</div>';
+    updateMcSelectToolbar();
+    return;
+  }
 
   applyMapContentOrder();
   updateMcSelectToolbar();
@@ -7608,7 +9192,12 @@ function onMapContentDrop(event) {
   const draggedIsFolder = draggedId.startsWith("folder:");
   const targetIsFolder = targetId.startsWith("folder:");
   if (draggedIsFolder) {
-    state.mapContentAssignments.delete(draggedId);
+    const nextParentFolderId = targetIsFolder ? targetId : getMapContentFolderId(targetId);
+    if (wouldCreateFolderCycle(draggedId, nextParentFolderId)) {
+      setStatus("Cannot move a folder into itself or one of its descendants.", true);
+      return;
+    }
+    setFolderParentId(draggedId, nextParentFolderId);
   } else if (targetIsFolder) {
     setMapContentFolderId(draggedId, targetId);
   } else {
@@ -7760,12 +9349,12 @@ function openSimulationModal() {
     dom.radiusUnit.dataset.previousUnit = dom.radiusUnit.value || getDefaultCoverageRadiusUnit();
   }
   dom.simulationModal?.classList.remove("hidden");
-  document.body.classList.add("emitter-modal-open");
+  updateModalBodyState();
 }
 
 function closeSimulationModal() {
   dom.simulationModal?.classList.add("hidden");
-  document.body.classList.remove("emitter-modal-open");
+  updateModalBodyState();
   state.editingViewshedId = null;
   refreshActionButtons();
 }
@@ -7926,11 +9515,11 @@ function editMapContent(contentId) {
   if (contentId.startsWith("imported:")) {
     const item = state.importedItems.find((entry) => `imported:${entry.id}` === contentId);
     if (!item) return;
-    if (item.drawn) {
+    if (item.geometryType === "Point") {
+      toggleImportedItemEditing(item);
+    } else {
       const menuEl = dom.mapContentsMenu;
       openShapeStylePanel(item, menuEl);
-    } else {
-      toggleImportedItemEditing(item);
     }
   }
 }
@@ -7939,6 +9528,7 @@ function addMapContentFolder() {
   const folder = {
     id: generateId(),
     name: `Folder ${state.mapContentFolders.length + 1}`,
+    parentId: null,
     collapsed: false,
   };
   state.mapContentFolders.push(folder);
@@ -8030,14 +9620,46 @@ function onMcItemClick(event, contentId, allIds) {
   updateMcSelectToolbar();
 }
 
-function deleteSelectedMcItems() {
+async function deleteSelectedMcItems() {
   if (state.mcSelectedIds.size === 0) return;
   const ids = [...state.mcSelectedIds];
   const label = `Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}`;
   pushUndoSnapshot(ids, label);
   state.mcSelectedIds.clear();
   state.mcLastClickedId = null;
-  ids.forEach((id) => deleteMapContent(id));
+  const useProgressModal = ids.length >= LARGE_DELETE_PROGRESS_THRESHOLD;
+
+  if (useProgressModal) {
+    openDeleteProgress(`${ids.length} item${ids.length === 1 ? "" : "s"} selected`);
+    updateDeleteProgress(4, "Removing selected map items...", `0 / ${ids.length} items`);
+    await yieldToMainThread();
+  }
+
+  try {
+    for (let index = 0; index < ids.length; index += 1) {
+      deleteMapContent(ids[index], { deferFinalize: useProgressModal, silent: useProgressModal });
+      if (useProgressModal && (index === ids.length - 1 || (index + 1) % 20 === 0)) {
+        updateDeleteProgress(
+          6 + (((index + 1) / ids.length) * 90),
+          "Removing selected map items...",
+          `${index + 1} / ${ids.length} items`,
+        );
+        await yieldToMainThread();
+      }
+    }
+
+    if (useProgressModal) {
+      updateDeleteProgress(98, "Finalizing map state...", "Refreshing map contents");
+      await yieldToMainThread();
+      finalizeMapDeletionBatch();
+      updateDeleteProgress(100, "Deletion complete.", `${ids.length} item${ids.length === 1 ? "" : "s"} removed`);
+      await yieldToMainThread();
+    }
+  } finally {
+    if (useProgressModal) {
+      closeDeleteProgress();
+    }
+  }
   updateMcSelectToolbar();
   showUndoBanner(`${label} — Undo?`);
 }
@@ -8152,9 +9774,23 @@ function dismissUndoBanner() {
   dom.undoBanner.classList.add("hidden");
 }
 
+const LARGE_DELETE_PROGRESS_THRESHOLD = 25;
+
+function finalizeMapDeletionBatch() {
+  renderAssets();
+  renderViewsheds();
+  renderTerrains();
+  renderPlanningResults();
+  renderMapContents();
+  refreshActionButtons();
+  updateTerrainSummary();
+  syncCesiumEntities();
+  saveMapState();
+}
+
 // ── deleteMapContent (with undo) ──────────────────────────────────────────────
 
-function deleteMapContent(contentId) {
+function deleteMapContent(contentId, options = {}) {
   if (contentId.startsWith("folder:")) {
     state.mapContentFolders = state.mapContentFolders.filter((entry) => `folder:${entry.id}` !== contentId);
     Array.from(state.mapContentAssignments.entries()).forEach(([itemId, folderId]) => {
@@ -8163,49 +9799,57 @@ function deleteMapContent(contentId) {
       }
     });
     state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== contentId);
-    renderMapContents();
-    saveMapState();
+    if (!options.deferFinalize) {
+      renderMapContents();
+      saveMapState();
+    }
     return;
   }
 
   if (contentId.startsWith("asset:")) {
-    removeAsset(contentId.slice("asset:".length));
+    removeAsset(contentId.slice("asset:".length), options);
     return;
   }
 
   if (contentId.startsWith("viewshed:")) {
-    removeViewshed(contentId.slice("viewshed:".length));
+    removeViewshed(contentId.slice("viewshed:".length), options);
     return;
   }
 
   if (contentId.startsWith("terrain:")) {
-    hideTerrainCoverage(contentId.slice("terrain:".length));
-    renderTerrains();
+    hideTerrainCoverage(contentId.slice("terrain:".length), options);
+    if (!options.deferFinalize) {
+      renderTerrains();
+    }
     return;
   }
 
   if (contentId === "planning-region") {
     state.planning.regionLayer?.remove();
     state.planning.regionLayer = null;
-    renderMapContents();
-    syncCesiumEntities();
+    if (!options.deferFinalize) {
+      renderMapContents();
+      syncCesiumEntities();
+    }
     return;
   }
 
   if (contentId === "planning-results") {
     state.planning.markersLayer.clearLayers();
     state.planning.recommendations = [];
-    renderPlanningResults();
-    syncCesiumEntities();
+    if (!options.deferFinalize) {
+      renderPlanningResults();
+      syncCesiumEntities();
+    }
     return;
   }
 
   if (contentId.startsWith("imported:")) {
-    removeImportedItem(contentId.slice("imported:".length));
+    removeImportedItem(contentId.slice("imported:".length), options);
   }
 }
 
-function removeAsset(assetId) {
+function removeAsset(assetId, options = {}) {
   const asset = state.assets.find((entry) => entry.id === assetId);
   const marker = state.assetMarkers.get(assetId);
   marker?.remove();
@@ -8214,17 +9858,21 @@ function removeAsset(assetId) {
   state.viewsheds
     .filter((entry) => entry.asset.id === assetId)
     .map((entry) => entry.id)
-    .forEach((viewshedId) => removeViewshed(viewshedId));
+    .forEach((viewshedId) => removeViewshed(viewshedId, options));
   state.mapContentAssignments.delete(`asset:${assetId}`);
   if (state.editingAssetId === assetId) {
     state.editingAssetId = null;
-    refreshActionButtons();
+    if (!options.deferFinalize) {
+      refreshActionButtons();
+    }
   }
-  renderAssets();
-  renderMapContents();
-  syncCesiumEntities();
-  saveMapState();
-  if (asset) {
+  if (!options.deferFinalize) {
+    renderAssets();
+    renderMapContents();
+    syncCesiumEntities();
+    saveMapState();
+  }
+  if (asset && !options.silent) {
     setStatus(`Removed ${asset.name}.`);
   }
 }
@@ -8333,6 +9981,114 @@ function closeDrawDropdown() {
 }
 
 const DRAW_DEFAULTS = { color: "#3b82f6", fillOpacity: 0.25, weight: 2, lineStyle: "solid" };
+const IMPORTED_VECTOR_DEFAULTS = {
+  LineString: { color: "#f7b955", fillColor: "#f7b955", fillOpacity: 0, opacity: 1, weight: 3, lineStyle: "solid" },
+  Polygon: { color: "#34d399", fillColor: "#34d399", fillOpacity: 0.12, opacity: 1, weight: 2, lineStyle: "solid" },
+};
+
+function getDefaultImportedShapeStyle(geometryType) {
+  return geometryType === "Polygon"
+    ? { ...IMPORTED_VECTOR_DEFAULTS.Polygon }
+    : { ...IMPORTED_VECTOR_DEFAULTS.LineString };
+}
+
+function normalizeImportedShapeStyle(geometryType, shapeStyle = null) {
+  if (geometryType === "Point") {
+    return null;
+  }
+  const defaults = getDefaultImportedShapeStyle(geometryType);
+  const color = typeof shapeStyle?.color === "string" && shapeStyle.color ? shapeStyle.color : defaults.color;
+  const fillColor = typeof shapeStyle?.fillColor === "string" && shapeStyle.fillColor ? shapeStyle.fillColor : color;
+  const fillOpacity = Number.isFinite(Number(shapeStyle?.fillOpacity)) ? clamp(Number(shapeStyle.fillOpacity), 0, 1) : defaults.fillOpacity;
+  const opacity = Number.isFinite(Number(shapeStyle?.opacity)) ? clamp(Number(shapeStyle.opacity), 0, 1) : defaults.opacity;
+  const rawWeight = Number.isFinite(Number(shapeStyle?.weight)) ? Number(shapeStyle.weight) : defaults.weight;
+  const weight = geometryType === "LineString" ? Math.max(1, rawWeight) : Math.max(0, rawWeight);
+  const lineStyle = ["solid", "dashed", "dotted"].includes(shapeStyle?.lineStyle) ? shapeStyle.lineStyle : defaults.lineStyle;
+  return { color, fillColor, fillOpacity, opacity, weight, lineStyle };
+}
+
+function normalizeImportedMarkerStyle(markerStyle = null) {
+  if (!markerStyle || typeof markerStyle !== "object") {
+    return null;
+  }
+  const size = Number.isFinite(Number(markerStyle.size)) ? clamp(Number(markerStyle.size), 10, 64) : null;
+  const scale = Number.isFinite(Number(markerStyle.scale)) ? clamp(Number(markerStyle.scale), 0.4, 4) : 1;
+  return {
+    iconUrl: typeof markerStyle.iconUrl === "string" && markerStyle.iconUrl ? markerStyle.iconUrl : "",
+    color: typeof markerStyle.color === "string" && markerStyle.color ? markerStyle.color : "#f7b955",
+    labelColor: typeof markerStyle.labelColor === "string" && markerStyle.labelColor ? markerStyle.labelColor : "#ffffff",
+    size,
+    scale,
+  };
+}
+
+function buildImportedPointIcon(markerStyle) {
+  const style = normalizeImportedMarkerStyle(markerStyle);
+  if (!style) {
+    return null;
+  }
+
+  const size = style.size ?? Math.round(22 * style.scale);
+  if (style.iconUrl) {
+    return L.divIcon({
+      className: "imported-point-marker",
+      html: `<img src="${escapeHtml(style.iconUrl)}" alt="" style="display:block;width:${size}px;height:${size}px;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      popupAnchor: [0, -Math.max(12, size / 2)],
+    });
+  }
+
+  const inner = Math.max(6, size - 6);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1}" fill="rgba(17,24,39,0.9)"/>
+      <circle cx="${size / 2}" cy="${size / 2}" r="${inner / 2}" fill="${escapeHtml(style.color)}" stroke="white" stroke-width="1.5"/>
+    </svg>
+  `.trim();
+
+  return L.divIcon({
+    className: "imported-point-marker",
+    html: svg,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -Math.max(12, size / 2)],
+  });
+}
+
+function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle = null, markerStyle = null }) {
+  const pane = getMapContentPaneName(contentId);
+  if (geometryType === "Point") {
+    const icon = buildImportedPointIcon(markerStyle);
+    return L.marker(coordinates, {
+      pane,
+      draggable: false,
+      ...(icon ? { icon } : {}),
+    });
+  }
+
+  const style = normalizeImportedShapeStyle(geometryType, shapeStyle);
+  const dashArray = getLeafletDashArray(style.lineStyle);
+  if (geometryType === "LineString") {
+    return L.polyline(coordinates, {
+      pane,
+      color: style.color,
+      opacity: style.opacity,
+      weight: style.weight,
+      dashArray,
+    });
+  }
+
+  return L.polygon(coordinates, {
+    pane,
+    color: style.color,
+    opacity: style.opacity,
+    fillColor: style.fillColor ?? style.color,
+    fillOpacity: style.fillOpacity,
+    weight: style.weight,
+    dashArray,
+  });
+}
 
 function startDrawing(mode) {
   closeDrawDropdown();
@@ -8448,7 +10204,7 @@ function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
     },
     sourceLabel: "Drawn",
     drawn: true,
-    shapeStyle: { color: DRAW_DEFAULTS.color, fillOpacity: DRAW_DEFAULTS.fillOpacity, weight: DRAW_DEFAULTS.weight, lineStyle: DRAW_DEFAULTS.lineStyle },
+    shapeStyle: { color: DRAW_DEFAULTS.color, fillColor: DRAW_DEFAULTS.color, fillOpacity: DRAW_DEFAULTS.fillOpacity, weight: DRAW_DEFAULTS.weight, lineStyle: DRAW_DEFAULTS.lineStyle },
     ...extra,
   };
   addDrawnFeature(feature);
@@ -8464,20 +10220,18 @@ function addDrawnFeature(feature, folderId = null) {
     geometryType: feature.geometryType,
     properties: feature.properties ?? {},
     drawn: true,
-    shapeStyle: feature.shapeStyle ?? { ...DRAW_DEFAULTS },
+    shapeStyle: normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle ?? { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color }),
+    markerStyle: null,
     layer: null,
   };
 
   const contentId = `imported:${item.id}`;
-  const pane = getMapContentPaneName(contentId);
-  const s = item.shapeStyle;
-  const dashArray = getLeafletDashArray(s.lineStyle);
-
-  if (feature.geometryType === "Polygon") {
-    item.layer = L.polygon(feature.coordinates, { pane, color: s.color, weight: s.weight, fillOpacity: s.fillOpacity, fillColor: s.color, dashArray });
-  } else {
-    item.layer = L.polyline(feature.coordinates, { pane, color: s.color, weight: s.weight, dashArray });
-  }
+  item.layer = createImportedLayer({
+    contentId,
+    geometryType: feature.geometryType,
+    coordinates: feature.coordinates,
+    shapeStyle: item.shapeStyle,
+  });
 
   item.layer.addTo(state.map);
   item.layer.bindPopup(renderImportedItemPopup(item));
@@ -8500,7 +10254,7 @@ function addDrawnFeature(feature, folderId = null) {
 
 function openShapeStylePanel(item, anchorEl) {
   state.draw.editingItemId = item.id;
-  const s = item.shapeStyle ?? { ...DRAW_DEFAULTS };
+  const s = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType, { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color });
   dom.shapeColorInput.value = s.color;
   dom.shapeLineStyleSelect.value = s.lineStyle ?? "solid";
   dom.shapeOpacityInput.value = s.fillOpacity;
@@ -8511,7 +10265,7 @@ function openShapeStylePanel(item, anchorEl) {
   updateRangeTrack(dom.shapeWeightInput);
 
   // Hide vertex button for pure polylines
-  dom.shapeStyleEditVerticesBtn.style.display = item.geometryType === "LineString" || item.layer?.editing ? "" : "";
+  dom.shapeStyleEditVerticesBtn.style.display = item.geometryType === "Point" ? "none" : "";
 
   // Position to the right of the left panel, aligned to the item's row
   const contentId = `imported:${item.id}`;
@@ -8563,7 +10317,9 @@ function onShapeStyleChanged() {
   const weight = parseInt(dom.shapeWeightInput.value, 10);
   dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}%`;
   dom.shapeWeightValue.textContent = weight;
-  item.shapeStyle = { color, lineStyle, fillOpacity, weight };
+  const previous = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType);
+  const fillColor = previous.color === color ? (previous.fillColor ?? color) : color;
+  item.shapeStyle = { color, fillColor, lineStyle, fillOpacity, weight };
   applyShapeStyleToLayer(item);
   item.layer.setPopupContent(renderImportedItemPopup(item));
   saveMapState();
@@ -8585,12 +10341,12 @@ function applyShapeStyleToLayer(item) {
     return;
   }
 
-  const { color, fillOpacity, weight, lineStyle } = item.shapeStyle;
+  const { color, fillColor, fillOpacity, opacity, weight, lineStyle } = item.shapeStyle;
   const dashArray = getLeafletDashArray(lineStyle);
   if (item.geometryType === "Polygon" || item.geometryType === "MultiPolygon") {
-    item.layer.setStyle({ color, fillColor: color, fillOpacity, weight, dashArray });
+    item.layer.setStyle({ color, opacity, fillColor: fillColor ?? color, fillOpacity, weight, dashArray });
   } else {
-    item.layer.setStyle({ color, weight, dashArray });
+    item.layer.setStyle({ color, opacity, weight, dashArray });
   }
 }
 
@@ -8656,7 +10412,7 @@ function toggleImportedItemEditing(item) {
   }
 }
 
-function removeImportedItem(itemId) {
+function removeImportedItem(itemId, options = {}) {
   const item = state.importedItems.find((entry) => entry.id === itemId);
   if (!item) {
     return;
@@ -8665,16 +10421,20 @@ function removeImportedItem(itemId) {
   state.importedItems = state.importedItems.filter((entry) => entry.id !== itemId);
   state.mapContentAssignments.delete(`imported:${itemId}`);
   state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== `imported:${itemId}`);
-  renderMapContents();
-  syncCesiumEntities();
-  saveMapState();
-  setStatus(`Removed ${item.name}.`);
+  if (!options.deferFinalize) {
+    renderMapContents();
+    syncCesiumEntities();
+    saveMapState();
+  }
+  if (!options.silent) {
+    setStatus(`Removed ${item.name}.`);
+  }
 }
 
 function onMapFileDragOver(event) {
   event.preventDefault();
   event.dataTransfer.dropEffect = "copy";
-  setStatus("Drop GeoJSON, KML, or KMZ files onto the map to import them.");
+  setStatus("Drop GeoJSON, KML, KMZ, or ATAK ZIP files onto the map to import them.");
 }
 
 function onMapFileDragLeave(event) {
@@ -8701,35 +10461,90 @@ async function onMapFileDrop(event) {
 async function importMapFile(file) {
   const lowerName = file.name.toLowerCase();
   let features = [];
+  openImportProgress(file.name);
+  await yieldToMainThread();
 
-  if (lowerName.endsWith(".geojson") || lowerName.endsWith(".json")) {
-    features = parseGeoJsonFeatures(await file.text(), file.name);
-  } else if (lowerName.endsWith(".kml")) {
-    features = parseKmlFeatures(await file.text(), file.name);
-  } else if (lowerName.endsWith(".kmz")) {
-    features = await parseKmzFeatures(await file.arrayBuffer(), file.name);
-  } else {
-    throw new Error(`Unsupported map import: ${file.name}`);
+  try {
+    if (lowerName.endsWith(".geojson") || lowerName.endsWith(".json")) {
+      updateImportProgress(8, "Reading GeoJSON package...", "Loading source file");
+      const text = await file.text();
+      updateImportProgress(34, "Parsing GeoJSON features...", "Extracting vector geometry");
+      await yieldToMainThread();
+      features = parseGeoJsonFeatures(text, file.name);
+      updateImportProgress(68, "Preparing imported layers...", `${features.length} item${features.length === 1 ? "" : "s"} parsed`);
+    } else if (lowerName.endsWith(".kml")) {
+      updateImportProgress(8, "Reading KML package...", "Loading source file");
+      const text = await file.text();
+      updateImportProgress(14, "Parsing KML structure...", "Locating placemarks");
+      await yieldToMainThread();
+      features = await parseKmlFeatures(text, file.name, {
+        sourceLabel: "KML",
+        entryName: file.name,
+        onProgress: async ({ fraction = 0, stage = "Parsing KML structure...", detail = "" }) => {
+          updateImportProgress(14 + (clamp(fraction, 0, 1) * 54), stage, detail);
+          await yieldToMainThread();
+        },
+      });
+    } else if (lowerName.endsWith(".kmz") || lowerName.endsWith(".zip")) {
+      updateImportProgress(8, "Reading archive package...", "Loading source file");
+      const buffer = await file.arrayBuffer();
+      updateImportProgress(12, "Expanding archive package...", "Scanning archive entries");
+      await yieldToMainThread();
+      features = await parseArchivePackageFeatures(buffer, file.name, {
+        onProgress: async ({ fraction = 0, stage = "Parsing archive package...", detail = "" }) => {
+          updateImportProgress(12 + (clamp(fraction, 0, 1) * 56), stage, detail);
+          await yieldToMainThread();
+        },
+      });
+    } else {
+      throw new Error(`Unsupported map import: ${file.name}`);
+    }
+
+    if (!features.length) {
+      throw new Error(`No supported features were found in ${file.name}.`);
+    }
+
+    const rootName = file.name.replace(/\.[^.]+$/, "");
+    const folderCache = new Map();
+
+    updateImportProgress(70, "Building map layers...", `${features.length} item${features.length === 1 ? "" : "s"} queued`);
+    await yieldToMainThread();
+
+    for (let index = 0; index < features.length; index += 1) {
+      const feature = features[index];
+      const cleanedFolderPath = sanitizeImportFolderPath(rootName, feature.folderPath);
+      const folderKey = cleanedFolderPath.join("\u001f");
+      let folderId = folderCache.get(folderKey);
+      if (!folderId) {
+        folderId = ensureImportFolderPath(rootName, cleanedFolderPath);
+        folderCache.set(folderKey, folderId);
+      }
+      addImportedFeature(feature, folderId, index, { deferFinalize: true });
+      if (index === features.length - 1 || (index + 1) % 20 === 0) {
+        updateImportProgress(
+          70 + (((index + 1) / features.length) * 26),
+          "Building map layers...",
+          `${index + 1} / ${features.length} item${features.length === 1 ? "" : "s"} added`,
+        );
+        await yieldToMainThread();
+      }
+    }
+
+    updateImportProgress(97, "Finalizing imported layers...", "Syncing map contents");
+    await yieldToMainThread();
+    renderMapContents();
+    syncCesiumEntities();
+    saveMapState();
+    updateImportProgress(100, "Import complete.", `${features.length} item${features.length === 1 ? "" : "s"} ready`);
+    await yieldToMainThread();
+    setStatus(`Imported ${features.length} item${features.length === 1 ? "" : "s"} from ${file.name}.`);
+  } finally {
+    closeImportProgress();
   }
-
-  if (!features.length) {
-    throw new Error(`No supported features were found in ${file.name}.`);
-  }
-
-  const rootFolderId = createMapContentFolderFromName(file.name.replace(/\.[^.]+$/, ""));
-  features.forEach((feature, index) => {
-    const folderId = feature.folderPath?.length
-      ? createMapContentFolderFromName(`${file.name.replace(/\.[^.]+$/, "")} / ${feature.folderPath.join(" / ")}`)
-      : rootFolderId;
-    addImportedFeature(feature, folderId, index);
-  });
-
-  renderMapContents();
-  setStatus(`Imported ${features.length} item${features.length === 1 ? "" : "s"} from ${file.name}.`);
 }
 
 function createMapContentFolderFromName(name) {
-  const existing = state.mapContentFolders.find((entry) => entry.name === name);
+  const existing = state.mapContentFolders.find((entry) => entry.name === name && !entry.parentId);
   if (existing) {
     return `folder:${existing.id}`;
   }
@@ -8737,45 +10552,113 @@ function createMapContentFolderFromName(name) {
   const folder = {
     id: generateId(),
     name,
+    parentId: null,
+    collapsed: false,
   };
   state.mapContentFolders.push(folder);
   state.mapContentOrder.push(`folder:${folder.id}`);
   return `folder:${folder.id}`;
 }
 
-function addImportedFeature(feature, folderId, index) {
+function createOrGetNestedMapContentFolder(name, parentFolderId = null, options = {}) {
+  const normalizedName = String(name ?? "").trim();
+  if (!normalizedName) {
+    return parentFolderId;
+  }
+  const normalizedParentId = normalizeFolderContentId(parentFolderId);
+  const existing = state.mapContentFolders.find((entry) => entry.name === normalizedName && (entry.parentId ?? null) === normalizedParentId);
+  if (existing) {
+    if (typeof options.collapsed === "boolean") {
+      existing.collapsed = options.collapsed;
+    }
+    return `folder:${existing.id}`;
+  }
+
+  const folder = {
+    id: generateId(),
+    name: normalizedName,
+    parentId: normalizedParentId,
+    collapsed: typeof options.collapsed === "boolean" ? options.collapsed : false,
+  };
+  state.mapContentFolders.push(folder);
+  state.mapContentOrder.push(`folder:${folder.id}`);
+  return `folder:${folder.id}`;
+}
+
+function sanitizeImportFolderPath(rootName, folderPath = []) {
+  const cleaned = [];
+  const normalizedRoot = String(rootName ?? "").trim().toLowerCase();
+  normalizeImportFolderSegments(folderPath).forEach((segment) => {
+    const normalizedSegment = segment.trim();
+    if (!normalizedSegment) {
+      return;
+    }
+    const lower = normalizedSegment.toLowerCase();
+    if (!cleaned.length && (lower === normalizedRoot || lower === "doc")) {
+      return;
+    }
+    if (cleaned[cleaned.length - 1]?.toLowerCase() === lower) {
+      return;
+    }
+    cleaned.push(normalizedSegment);
+  });
+  return cleaned;
+}
+
+function ensureImportFolderPath(rootFolderName, folderPath = []) {
+  let currentFolderId = createOrGetNestedMapContentFolder(rootFolderName, null, { collapsed: true });
+  sanitizeImportFolderPath(rootFolderName, folderPath).forEach((segment) => {
+    currentFolderId = createOrGetNestedMapContentFolder(segment, currentFolderId, { collapsed: true });
+  });
+  return currentFolderId;
+}
+
+function resolveImportedFeatureDisplayName(feature, fallbackName) {
+  const props = feature?.properties && typeof feature.properties === "object" ? feature.properties : {};
+  const candidates = [
+    feature?.name,
+    props.name,
+    props.title,
+    props.label,
+    props.displayName,
+    props.display_name,
+    props.featureName,
+    props.feature_name,
+    props.featname,
+    props.roadname,
+    props.altname,
+    props.rangeno,
+    extractImportedMetadataName(feature?.name),
+  ];
+  const cleanCandidate = candidates
+    .map((value) => String(value ?? "").replace(/\s+/g, " ").trim())
+    .find((value) => value && !looksLikeImportedMetadataBlob(value) && value.length <= 120);
+  return cleanCandidate || fallbackName;
+}
+
+function addImportedFeature(feature, folderId, index, options = {}) {
+  const shapeStyle = normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle);
+  const markerStyle = normalizeImportedMarkerStyle(feature.markerStyle);
   const item = {
     id: generateId(),
-    name: feature.name || `${feature.geometryType} ${index + 1}`,
+    name: resolveImportedFeatureDisplayName(feature, feature.name || `${feature.geometryType} ${index + 1}`),
     subtitle: `${feature.sourceLabel} | ${feature.geometryType}`,
     kind: `imported-${feature.geometryType.toLowerCase()}`,
     geometryType: feature.geometryType,
     properties: feature.properties ?? {},
+    shapeStyle,
+    markerStyle,
     layer: null,
   };
 
   const contentId = `imported:${item.id}`;
-  const pane = getMapContentPaneName(contentId);
-
-  if (feature.geometryType === "Point") {
-    item.layer = L.marker(feature.coordinates, {
-      pane,
-      draggable: false,
-    });
-  } else if (feature.geometryType === "LineString") {
-    item.layer = L.polyline(feature.coordinates, {
-      pane,
-      color: "#f7b955",
-      weight: 3,
-    });
-  } else {
-    item.layer = L.polygon(feature.coordinates, {
-      pane,
-      color: "#34d399",
-      weight: 2,
-      fillOpacity: 0.12,
-    });
-  }
+  item.layer = createImportedLayer({
+    contentId,
+    geometryType: feature.geometryType,
+    coordinates: feature.coordinates,
+    shapeStyle,
+    markerStyle,
+  });
 
   item.layer.addTo(state.map);
   item.layer.bindPopup(renderImportedItemPopup(item));
@@ -8783,6 +10666,8 @@ function addImportedFeature(feature, folderId, index) {
     item.layer.on("dragend edit", () => {
       item.layer.setPopupContent(renderImportedItemPopup(item));
       renderMapContents();
+      saveMapState();
+      syncCesiumEntities();
       syncShapeVertexEditUi(item);
     });
   }
@@ -8791,19 +10676,22 @@ function addImportedFeature(feature, folderId, index) {
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId);
   state.mapContentOrder.push(contentId);
-  syncCesiumEntities();
-  saveMapState();
+  if (!options.deferFinalize) {
+    syncCesiumEntities();
+    saveMapState();
+  }
 }
 
-function parseGeoJsonFeatures(text, fileName) {
+function parseGeoJsonFeatures(text, fileName, options = {}) {
   const payload = JSON.parse(text);
   const features = [];
+  const sourceLabel = options.sourceLabel ?? (fileName.endsWith(".json") ? "JSON" : "GeoJSON");
+  const folderPrefix = normalizeImportFolderSegments(options.folderPrefix);
 
-  const appendGeometry = (geometry, properties = {}, name = "") => {
+  const appendGeometry = (geometry, properties = {}, name = "", folderPath = []) => {
     if (!geometry) {
       return;
     }
-    const sourceLabel = fileName.endsWith(".json") ? "JSON" : "GeoJSON";
     if (geometry.type === "Point") {
       features.push({
         name: name || properties.name || "Imported Point",
@@ -8811,11 +10699,13 @@ function parseGeoJsonFeatures(text, fileName) {
         coordinates: [geometry.coordinates[1], geometry.coordinates[0]],
         properties,
         sourceLabel,
+        folderPath,
+        markerStyle: parseGeoJsonMarkerStyle(properties),
       });
       return;
     }
     if (geometry.type === "MultiPoint") {
-      geometry.coordinates.forEach((coordinate, index) => appendGeometry({ type: "Point", coordinates: coordinate }, properties, `${name || properties.name || "Imported Point"} ${index + 1}`));
+      geometry.coordinates.forEach((coordinate, index) => appendGeometry({ type: "Point", coordinates: coordinate }, properties, `${name || properties.name || "Imported Point"} ${index + 1}`, folderPath));
       return;
     }
     if (geometry.type === "LineString") {
@@ -8825,11 +10715,13 @@ function parseGeoJsonFeatures(text, fileName) {
         coordinates: geometry.coordinates.map((coordinate) => [coordinate[1], coordinate[0]]),
         properties,
         sourceLabel,
+        folderPath,
+        shapeStyle: parseGeoJsonShapeStyle(properties, "LineString"),
       });
       return;
     }
     if (geometry.type === "MultiLineString") {
-      geometry.coordinates.forEach((coordinates, index) => appendGeometry({ type: "LineString", coordinates }, properties, `${name || properties.name || "Imported Line"} ${index + 1}`));
+      geometry.coordinates.forEach((coordinates, index) => appendGeometry({ type: "LineString", coordinates }, properties, `${name || properties.name || "Imported Line"} ${index + 1}`, folderPath));
       return;
     }
     if (geometry.type === "Polygon") {
@@ -8839,34 +10731,162 @@ function parseGeoJsonFeatures(text, fileName) {
         coordinates: geometry.coordinates[0].map((coordinate) => [coordinate[1], coordinate[0]]),
         properties,
         sourceLabel,
+        folderPath,
+        shapeStyle: parseGeoJsonShapeStyle(properties, "Polygon"),
       });
       return;
     }
     if (geometry.type === "MultiPolygon") {
-      geometry.coordinates.forEach((coordinates, index) => appendGeometry({ type: "Polygon", coordinates }, properties, `${name || properties.name || "Imported Polygon"} ${index + 1}`));
+      geometry.coordinates.forEach((coordinates, index) => appendGeometry({ type: "Polygon", coordinates }, properties, `${name || properties.name || "Imported Polygon"} ${index + 1}`, folderPath));
       return;
     }
     if (geometry.type === "GeometryCollection") {
-      geometry.geometries.forEach((entry, index) => appendGeometry(entry, properties, `${name || properties.name || "Imported Geometry"} ${index + 1}`));
+      geometry.geometries.forEach((entry, index) => appendGeometry(entry, properties, `${name || properties.name || "Imported Geometry"} ${index + 1}`, folderPath));
     }
   };
 
   if (payload.type === "FeatureCollection") {
-    payload.features.forEach((feature) => appendGeometry(feature.geometry, feature.properties ?? {}, feature.properties?.name ?? feature.id ?? ""));
+    payload.features.forEach((feature) => {
+      const folderPath = [...folderPrefix, ...extractGeoJsonFolderSegments(feature.properties ?? {})];
+      appendGeometry(feature.geometry, feature.properties ?? {}, feature.properties?.name ?? feature.id ?? "", folderPath);
+    });
   } else if (payload.type === "Feature") {
-    appendGeometry(payload.geometry, payload.properties ?? {}, payload.properties?.name ?? payload.id ?? "");
+    appendGeometry(payload.geometry, payload.properties ?? {}, payload.properties?.name ?? payload.id ?? "", folderPrefix);
   } else {
-    appendGeometry(payload, {}, "Imported Geometry");
+    appendGeometry(payload, {}, "Imported Geometry", folderPrefix);
   }
 
   return features;
 }
 
-function parseKmlFeatures(text, fileName) {
-  // Strip XML namespace declarations so querySelectorAll works without namespace prefixes
+function normalizeImportFolderSegments(value) {
+  if (!value) {
+    return [];
+  }
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .flatMap((entry) => typeof entry === "string" ? entry.split(/[/\\>]+/).map((part) => part.trim()) : [])
+    .filter(Boolean);
+}
+
+function extractGeoJsonFolderSegments(properties = {}) {
+  const folderKeys = ["folderPath", "folder", "folderName", "group", "layer", "path"];
+  for (const key of folderKeys) {
+    const value = properties[key];
+    if (Array.isArray(value) || typeof value === "string") {
+      return normalizeImportFolderSegments(value);
+    }
+  }
+  return [];
+}
+
+function parseGeoJsonShapeStyle(properties = {}, geometryType) {
+  if (geometryType === "Point") {
+    return null;
+  }
+  const defaults = getDefaultImportedShapeStyle(geometryType);
+  const color = typeof properties.stroke === "string" && properties.stroke
+    ? properties.stroke
+    : typeof properties.color === "string" && properties.color
+      ? properties.color
+      : defaults.color;
+  const fillColor = typeof properties.fill === "string" && properties.fill ? properties.fill : color;
+  const fillOpacity = Number.isFinite(Number(properties["fill-opacity"] ?? properties.fillOpacity))
+    ? clamp(Number(properties["fill-opacity"] ?? properties.fillOpacity), 0, 1)
+    : defaults.fillOpacity;
+  const weight = Number.isFinite(Number(properties["stroke-width"] ?? properties.strokeWidth))
+    ? Math.max(0, Number(properties["stroke-width"] ?? properties.strokeWidth))
+    : defaults.weight;
+  return normalizeImportedShapeStyle(geometryType, {
+    color,
+    fillColor,
+    fillOpacity,
+    weight,
+    lineStyle: defaults.lineStyle,
+  });
+}
+
+function parseGeoJsonMarkerStyle(properties = {}) {
+  const iconUrl = typeof properties["icon-url"] === "string" && properties["icon-url"]
+    ? properties["icon-url"]
+    : typeof properties.iconUrl === "string" && properties.iconUrl
+      ? properties.iconUrl
+      : "";
+  const color = typeof properties["marker-color"] === "string" && properties["marker-color"]
+    ? properties["marker-color"]
+    : typeof properties.color === "string" && properties.color
+      ? properties.color
+      : "#f7b955";
+  const sizeLookup = { small: 16, medium: 22, large: 28 };
+  const markerSizeValue = typeof properties["marker-size"] === "string" ? properties["marker-size"].toLowerCase() : "";
+  return normalizeImportedMarkerStyle({
+    iconUrl,
+    color,
+    size: sizeLookup[markerSizeValue] ?? (Number.isFinite(Number(properties.markerSize)) ? Number(properties.markerSize) : null),
+  });
+}
+
+function stripHtmlTags(value) {
+  if (!value || typeof value !== "string") {
+    return "";
+  }
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function unwrapCdata(value) {
+  if (!value || typeof value !== "string") {
+    return "";
+  }
+  const trimmed = value.trim();
+  const match = trimmed.match(/^<!\[CDATA\[(.*)\]\]>$/is);
+  return match ? match[1] : trimmed;
+}
+
+function extractKmlNameFromDescription(description) {
+  const raw = unwrapCdata(description);
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const doc = new DOMParser().parseFromString(raw, "text/html");
+    const selectors = [
+      "table tr:first-child th",
+      "table tr:first-child td",
+      "h1",
+      "h2",
+      "h3",
+      "strong",
+      "b",
+      "title",
+    ];
+    for (const selector of selectors) {
+      const text = doc.querySelector(selector)?.textContent?.replace(/\s+/g, " ").trim();
+      if (text) {
+        return text;
+      }
+    }
+  } catch {
+    // Fall through to plain text extraction below.
+  }
+
+  const flattened = stripHtmlTags(raw);
+  if (!flattened) {
+    return "";
+  }
+  const firstChunk = flattened.split(/[|\n\r]+/).map((part) => part.trim()).find(Boolean);
+  return firstChunk ?? "";
+}
+
+async function parseKmlFeatures(text, fileName, options = {}) {
   const stripped = text
     .replace(/\sxmlns(?::\w+)?="[^"]*"/g, "")
-    .replace(/\sxmlns(?::\w+)?='[^']*'/g, "");
+    .replace(/\sxmlns(?::\w+)?='[^']*'/g, "")
+    .replace(/\s+xsi:schemaLocation="[^"]*"/g, "");
 
   let xml;
   try {
@@ -8875,9 +10895,7 @@ function parseKmlFeatures(text, fileName) {
     return [];
   }
 
-  // Check for parse errors
   if (xml.querySelector("parsererror")) {
-    // Try treating as HTML-wrapped KML (some exports)
     try {
       xml = new DOMParser().parseFromString(stripped, "text/html");
     } catch {
@@ -8886,28 +10904,29 @@ function parseKmlFeatures(text, fileName) {
   }
 
   const features = [];
-  const sourceLabel = fileName.toLowerCase().endsWith(".kmz") ? "KMZ" : "KML";
+  const sourceLabel = options.sourceLabel ?? (fileName.toLowerCase().endsWith(".kmz") ? "KMZ" : "KML");
+  const folderPrefix = normalizeImportFolderSegments(options.folderPrefix);
 
-  // Helper: get direct text child of element by local tag name (namespace-safe)
   const directText = (el, tag) => {
+    if (!el?.children) return "";
     for (const child of el.children) {
       if (child.localName === tag) return child.textContent?.trim() ?? "";
     }
     return "";
   };
 
-  // Helper: find first child element by localName (namespace-safe)
   const findChild = (el, ...tags) => {
+    if (!el?.children) return null;
     for (const child of el.children) {
       if (tags.includes(child.localName)) return child;
     }
     return null;
   };
 
-  // Helper: find all descendant elements by localName
   const findAll = (el, tag) => {
     const results = [];
     const walk = (node) => {
+      if (!node?.children) return;
       for (const child of node.children) {
         if (child.localName === tag) results.push(child);
         walk(child);
@@ -8917,47 +10936,70 @@ function parseKmlFeatures(text, fileName) {
     return results;
   };
 
-  const parsePlacemark = (placemark, folderPath) => {
-    const name = directText(placemark, "name") || "Imported Placemark";
+  const styleRegistry = await buildKmlStyleRegistry(xml.documentElement, {
+    entryName: options.entryName ?? fileName,
+    archiveEntries: options.archiveEntries ?? null,
+    archiveAssetCache: options.archiveAssetCache ?? null,
+    directText,
+    findChild,
+    findAll,
+  });
+  const totalPlacemarks = Math.max(findAll(xml.documentElement, "Placemark").length, 1);
+  let parsedPlacemarks = 0;
 
+  const parsePlacemark = async (placemark, folderPath) => {
+    const rawName = directText(placemark, "name");
     const properties = {};
     const extData = findChild(placemark, "ExtendedData");
     if (extData) {
-      findAll(extData, "Data").forEach((d) => {
-        const key = d.getAttribute("name");
-        const val = findChild(d, "value")?.textContent?.trim();
+      findAll(extData, "Data").forEach((dataNode) => {
+        const key = dataNode.getAttribute("name");
+        const val = findChild(dataNode, "value")?.textContent?.trim();
         if (key) properties[key] = val ?? "";
       });
-      // ATAK SimpleData
-      findAll(extData, "SimpleData").forEach((d) => {
-        const key = d.getAttribute("name");
-        if (key) properties[key] = d.textContent?.trim() ?? "";
+      findAll(extData, "SimpleData").forEach((dataNode) => {
+        const key = dataNode.getAttribute("name");
+        if (key) properties[key] = dataNode.textContent?.trim() ?? "";
       });
     }
 
-    // Collect all geometry elements that are direct or near-direct children
-    const geomTags = ["Point", "LineString", "LinearRing", "Polygon", "MultiGeometry"];
-    const geometries = [];
-    for (const child of placemark.children) {
-      if (geomTags.includes(child.localName)) {
-        geometries.push(child);
-      }
+    const rawDescription = directText(placemark, "description");
+    const descriptionName = rawName ? "" : extractKmlNameFromDescription(rawDescription);
+    const name = rawName || descriptionName || "Imported Placemark";
+    const descriptionText = stripHtmlTags(rawDescription);
+    if (descriptionText && descriptionText.length <= 300) {
+      properties.description = descriptionText;
     }
-    // MultiGeometry: flatten children
+
+    const resolvedStyle = await resolveKmlPlacemarkStyle(placemark, styleRegistry, {
+      entryName: options.entryName ?? fileName,
+      archiveEntries: options.archiveEntries ?? null,
+      archiveAssetCache: options.archiveAssetCache ?? null,
+      directText,
+      findChild,
+      findAll,
+    });
+
+    const geomTags = ["Point", "LineString", "LinearRing", "Polygon", "MultiGeometry"];
     const flatGeometries = [];
-    geometries.forEach((g) => {
-      if (g.localName === "MultiGeometry") {
-        for (const sub of g.children) {
+    for (const child of placemark.children) {
+      if (!geomTags.includes(child.localName)) continue;
+      if (child.localName === "MultiGeometry") {
+        for (const sub of child.children) {
           if (geomTags.includes(sub.localName)) flatGeometries.push(sub);
         }
       } else {
-        flatGeometries.push(g);
+        flatGeometries.push(child);
       }
-    });
+    }
 
     flatGeometries.forEach((geometry, index) => {
-      const gName = flatGeometries.length > 1 ? `${name} ${index + 1}` : name;
-      const base = { name: gName, properties, folderPath, sourceLabel };
+      const base = {
+        name: flatGeometries.length > 1 ? `${name} ${index + 1}` : name,
+        properties,
+        folderPath: [...folderPrefix, ...normalizeImportFolderSegments(folderPath)],
+        sourceLabel,
+      };
 
       if (geometry.localName === "Point") {
         const coordEl = findChild(geometry, "coordinates") || findAll(geometry, "coordinates")[0];
@@ -8965,7 +11007,12 @@ function parseKmlFeatures(text, fileName) {
         if (coords.length && coords[0].length === 2) {
           const [lon, lat] = coords[0];
           if (Number.isFinite(lat) && Number.isFinite(lon)) {
-            features.push({ ...base, geometryType: "Point", coordinates: [lat, lon] });
+            features.push({
+              ...base,
+              geometryType: "Point",
+              coordinates: [lat, lon],
+              markerStyle: resolvedStyle.markerStyle ?? null,
+            });
           }
         }
         return;
@@ -8975,13 +11022,17 @@ function parseKmlFeatures(text, fileName) {
         const coordEl = findChild(geometry, "coordinates") || findAll(geometry, "coordinates")[0];
         const coords = parseKmlCoordinateList(coordEl?.textContent ?? "").map(([lon, lat]) => [lat, lon]);
         if (coords.length >= 2) {
-          features.push({ ...base, geometryType: "LineString", coordinates: coords });
+          features.push({
+            ...base,
+            geometryType: "LineString",
+            coordinates: coords,
+            shapeStyle: projectKmlShapeStyle("LineString", resolvedStyle.shapeStyle),
+          });
         }
         return;
       }
 
       if (geometry.localName === "Polygon") {
-        // outerBoundaryIs > LinearRing > coordinates
         const outer = findChild(geometry, "outerBoundaryIs");
         const ring = outer ? (findChild(outer, "LinearRing") || outer) : findChild(geometry, "LinearRing");
         const coordEl = ring
@@ -8989,28 +11040,42 @@ function parseKmlFeatures(text, fileName) {
           : (findChild(geometry, "coordinates") || findAll(geometry, "coordinates")[0]);
         const coords = parseKmlCoordinateList(coordEl?.textContent ?? "").map(([lon, lat]) => [lat, lon]);
         if (coords.length >= 3) {
-          features.push({ ...base, geometryType: "Polygon", coordinates: coords });
+          features.push({
+            ...base,
+            geometryType: "Polygon",
+            coordinates: coords,
+            shapeStyle: projectKmlShapeStyle("Polygon", resolvedStyle.shapeStyle),
+          });
         }
       }
     });
+
+    parsedPlacemarks += 1;
+    if (typeof options.onProgress === "function" && (parsedPlacemarks === totalPlacemarks || parsedPlacemarks % 8 === 0)) {
+      await options.onProgress({
+        fraction: parsedPlacemarks / totalPlacemarks,
+        stage: "Parsing KML placemarks...",
+        detail: `${parsedPlacemarks} / ${totalPlacemarks} placemarks`,
+      });
+    }
   };
 
-  const walk = (node, folderPath = []) => {
+  const walk = async (node, folderPath = []) => {
+    if (!node?.children) return;
     for (const child of node.children) {
-      const ln = child.localName;
-      if (ln === "Folder" || ln === "Document") {
+      const tag = child.localName;
+      if (tag === "Folder" || tag === "Document") {
         const folderName = directText(child, "name");
-        walk(child, folderName ? [...folderPath, folderName] : folderPath);
-      } else if (ln === "Placemark") {
-        parsePlacemark(child, folderPath);
+        await walk(child, folderName ? [...folderPath, folderName] : folderPath);
+      } else if (tag === "Placemark") {
+        await parsePlacemark(child, folderPath);
       } else {
-        // Some KMLs nest Placemarks inside NetworkLink responses or other wrappers
-        walk(child, folderPath);
+        await walk(child, folderPath);
       }
     }
   };
 
-  walk(xml.documentElement, []);
+  await walk(xml.documentElement, []);
   return features;
 }
 
@@ -9031,7 +11096,364 @@ function parseKmlCoordinateList(value) {
     .filter(Boolean);
 }
 
+function projectKmlShapeStyle(geometryType, shapeStyle) {
+  if (!shapeStyle || geometryType === "Point") {
+    return null;
+  }
+  if (geometryType === "LineString") {
+    return normalizeImportedShapeStyle(geometryType, {
+      ...shapeStyle,
+      color: shapeStyle.lineColor ?? shapeStyle.color,
+      opacity: shapeStyle.lineOpacity ?? shapeStyle.opacity,
+      fillOpacity: 0,
+      weight: Number.isFinite(Number(shapeStyle.lineWeight)) ? Number(shapeStyle.lineWeight) : shapeStyle.weight,
+    });
+  }
+  return normalizeImportedShapeStyle(geometryType, {
+    ...shapeStyle,
+    color: shapeStyle.polygonStrokeColor ?? shapeStyle.color,
+    opacity: shapeStyle.polygonStrokeOpacity ?? shapeStyle.opacity,
+    weight: Number.isFinite(Number(shapeStyle.polygonWeight)) ? Number(shapeStyle.polygonWeight) : shapeStyle.weight,
+  });
+}
+
+function normalizeArchiveEntryName(name) {
+  return String(name ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function getArchiveImportPrefix(entryName) {
+  const parts = normalizeArchiveEntryName(entryName).split("/").filter(Boolean);
+  const filePart = parts.pop() ?? "";
+  const prefix = [...parts];
+  const baseName = filePart.replace(/\.[^.]+$/, "");
+  if (baseName && !["doc", "index"].includes(baseName.toLowerCase())) {
+    prefix.push(baseName);
+  }
+  return prefix;
+}
+
+function sortArchiveEntriesForImport(entries) {
+  const typeRank = (name) => {
+    const lower = name.toLowerCase();
+    if (lower.endsWith(".kml")) return 0;
+    if (lower.endsWith(".geojson")) return 1;
+    if (lower.endsWith(".json")) return 2;
+    if (lower.endsWith(".kmz")) return 3;
+    return 4;
+  };
+  return [...entries].sort((a, b) => {
+    const aName = normalizeArchiveEntryName(a.name);
+    const bName = normalizeArchiveEntryName(b.name);
+    const aDepth = aName.split("/").length;
+    const bDepth = bName.split("/").length;
+    if (aDepth !== bDepth) return aDepth - bDepth;
+    const aDoc = /(^|\/)doc\.kml$/i.test(aName);
+    const bDoc = /(^|\/)doc\.kml$/i.test(bName);
+    if (aDoc !== bDoc) return aDoc ? -1 : 1;
+    const typeDelta = typeRank(aName) - typeRank(bName);
+    if (typeDelta !== 0) return typeDelta;
+    return aName.localeCompare(bName);
+  });
+}
+
+function dedupeImportedFeatures(features) {
+  const seen = new Set();
+  return features.filter((feature) => {
+    const key = [
+      feature.name,
+      feature.geometryType,
+      JSON.stringify(feature.folderPath ?? []),
+      JSON.stringify(feature.coordinates).slice(0, 180),
+    ].join("|");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseKmlColor(value) {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+  const clean = value.trim().replace("#", "");
+  if (!/^[0-9a-f]{8}$/i.test(clean)) {
+    return null;
+  }
+  const alpha = parseInt(clean.slice(0, 2), 16) / 255;
+  const blue = clean.slice(2, 4);
+  const green = clean.slice(4, 6);
+  const red = clean.slice(6, 8);
+  const rgb = {
+    red: parseInt(red, 16),
+    green: parseInt(green, 16),
+    blue: parseInt(blue, 16),
+  };
+  return {
+    hex: `#${red}${green}${blue}`,
+    css: alpha >= 0.999 ? `#${red}${green}${blue}` : `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${alpha.toFixed(3)})`,
+    opacity: clamp(alpha, 0, 1),
+  };
+}
+
+function resolveArchiveHref(entryName, href) {
+  const normalizedHref = normalizeArchiveEntryName(href);
+  if (!normalizedHref || /^[a-z]+:/i.test(normalizedHref)) {
+    return normalizedHref;
+  }
+  const parts = normalizeArchiveEntryName(entryName).split("/").filter(Boolean);
+  parts.pop();
+  normalizedHref.split("/").filter(Boolean).forEach((part) => {
+    if (part === ".") return;
+    if (part === "..") {
+      parts.pop();
+      return;
+    }
+    parts.push(part);
+  });
+  return parts.join("/");
+}
+
+async function archiveEntryToDataUrl(entry, cache) {
+  const normalizedName = normalizeArchiveEntryName(entry.name);
+  if (cache?.has(normalizedName)) {
+    return cache.get(normalizedName);
+  }
+  const base64 = await entry.async("base64");
+  const mime = /\.png$/i.test(entry.name)
+    ? "image/png"
+    : /\.jpe?g$/i.test(entry.name)
+      ? "image/jpeg"
+      : /\.gif$/i.test(entry.name)
+        ? "image/gif"
+        : /\.svg$/i.test(entry.name)
+          ? "image/svg+xml"
+          : "application/octet-stream";
+  const dataUrl = `data:${mime};base64,${base64}`;
+  cache?.set(normalizedName, dataUrl);
+  return dataUrl;
+}
+
+async function buildKmlStyleRegistry(root, context) {
+  const styles = new Map();
+  const styleMaps = new Map();
+  const styleNodes = context.findAll(root, "Style").filter((node) => node.getAttribute?.("id"));
+  for (const styleNode of styleNodes) {
+    styles.set(`#${styleNode.getAttribute("id")}`, await parseKmlStyleNode(styleNode, context));
+  }
+  const styleMapNodes = context.findAll(root, "StyleMap").filter((node) => node.getAttribute?.("id"));
+  styleMapNodes.forEach((styleMapNode) => {
+    let target = "";
+    for (const pair of styleMapNode.children ?? []) {
+      if (pair.localName !== "Pair") continue;
+      const key = context.directText(pair, "key");
+      const styleUrl = context.directText(pair, "styleUrl");
+      if (!target || key === "normal") {
+        target = styleUrl;
+      }
+    }
+    if (target) {
+      styleMaps.set(`#${styleMapNode.getAttribute("id")}`, target);
+    }
+  });
+  return { styles, styleMaps };
+}
+
+async function parseKmlStyleNode(styleNode, context) {
+  const lineStyleNode = context.findChild(styleNode, "LineStyle");
+  const polyStyleNode = context.findChild(styleNode, "PolyStyle");
+  const iconStyleNode = context.findChild(styleNode, "IconStyle");
+  const labelStyleNode = context.findChild(styleNode, "LabelStyle");
+
+  const lineColor = parseKmlColor(context.directText(lineStyleNode ?? styleNode, "color"));
+  const polyColor = parseKmlColor(context.directText(polyStyleNode ?? styleNode, "color"));
+  const weight = Number.parseFloat(context.directText(lineStyleNode ?? styleNode, "width"));
+  const fillEnabledText = context.directText(polyStyleNode ?? styleNode, "fill");
+  const outlineEnabledText = context.directText(polyStyleNode ?? styleNode, "outline");
+  const iconHref = context.directText(context.findChild(iconStyleNode ?? styleNode, "Icon") ?? iconStyleNode ?? styleNode, "href");
+  const scale = Number.parseFloat(context.directText(iconStyleNode ?? styleNode, "scale"));
+  const labelColor = parseKmlColor(context.directText(labelStyleNode ?? styleNode, "color"));
+
+  let iconUrl = "";
+  if (iconHref && context.archiveEntries) {
+    const resolvedPath = resolveArchiveHref(context.entryName, iconHref);
+    const entry = context.archiveEntries.get(resolvedPath);
+    if (entry) {
+      iconUrl = await archiveEntryToDataUrl(entry, context.archiveAssetCache);
+    }
+  } else if (iconHref) {
+    iconUrl = iconHref;
+  }
+
+  const shapeStyle = (lineColor || polyColor || Number.isFinite(weight))
+    ? {
+      color: lineColor?.hex ?? polyColor?.hex ?? IMPORTED_VECTOR_DEFAULTS.Polygon.color,
+      fillColor: polyColor?.hex ?? lineColor?.hex ?? IMPORTED_VECTOR_DEFAULTS.Polygon.fillColor,
+      fillOpacity: fillEnabledText === "0" ? 0 : (polyColor?.opacity ?? IMPORTED_VECTOR_DEFAULTS.Polygon.fillOpacity),
+      opacity: lineColor?.opacity ?? IMPORTED_VECTOR_DEFAULTS.Polygon.opacity,
+      weight: Number.isFinite(weight) ? weight : IMPORTED_VECTOR_DEFAULTS.Polygon.weight,
+      lineColor: lineColor?.hex ?? IMPORTED_VECTOR_DEFAULTS.LineString.color,
+      lineOpacity: lineColor?.opacity ?? IMPORTED_VECTOR_DEFAULTS.LineString.opacity,
+      lineWeight: Number.isFinite(weight) ? weight : IMPORTED_VECTOR_DEFAULTS.LineString.weight,
+      polygonStrokeColor: lineColor?.hex ?? IMPORTED_VECTOR_DEFAULTS.Polygon.color,
+      polygonStrokeOpacity: lineColor?.opacity ?? IMPORTED_VECTOR_DEFAULTS.Polygon.opacity,
+      polygonWeight: outlineEnabledText === "0" ? 0 : (Number.isFinite(weight) ? weight : IMPORTED_VECTOR_DEFAULTS.Polygon.weight),
+      lineStyle: "solid",
+    }
+    : null;
+
+  const markerStyle = (iconUrl || labelColor)
+    ? normalizeImportedMarkerStyle({
+      iconUrl,
+      labelColor: labelColor?.css ?? "#ffffff",
+      scale: Number.isFinite(scale) ? scale : 1,
+    })
+    : null;
+
+  return { shapeStyle, markerStyle };
+}
+
+function resolveKmlStyleReference(styleUrl, styleRegistry) {
+  if (!styleUrl) {
+    return { shapeStyle: null, markerStyle: null };
+  }
+  const visited = new Set();
+  let ref = styleUrl;
+  while (ref && !visited.has(ref)) {
+    visited.add(ref);
+    if (styleRegistry.styles.has(ref)) {
+      return styleRegistry.styles.get(ref);
+    }
+    ref = styleRegistry.styleMaps.get(ref) ?? "";
+  }
+  return { shapeStyle: null, markerStyle: null };
+}
+
+function mergeResolvedKmlStyles(baseStyle, overrideStyle) {
+  const shapeStyle = overrideStyle.shapeStyle
+    ? {
+      ...(baseStyle.shapeStyle ?? {}),
+      ...overrideStyle.shapeStyle,
+    }
+    : (baseStyle.shapeStyle ?? null);
+  const markerStyle = overrideStyle.markerStyle
+    ? normalizeImportedMarkerStyle({
+      ...(baseStyle.markerStyle ?? {}),
+      ...overrideStyle.markerStyle,
+    })
+    : (baseStyle.markerStyle ?? null);
+  return { shapeStyle, markerStyle };
+}
+
+async function resolveKmlPlacemarkStyle(placemark, styleRegistry, context) {
+  const referencedStyle = resolveKmlStyleReference(context.directText(placemark, "styleUrl"), styleRegistry);
+  const inlineStyleNode = Array.from(placemark.children ?? []).find((child) => child.localName === "Style");
+  if (!inlineStyleNode) {
+    return referencedStyle;
+  }
+  const inlineStyle = await parseKmlStyleNode(inlineStyleNode, context);
+  return mergeResolvedKmlStyles(referencedStyle, inlineStyle);
+}
+
+async function parseArchivePackageFeatures(buffer, fileName, options = {}) {
+  if (!window.JSZip) {
+    throw new Error("Archive import requires JSZip to be loaded.");
+  }
+
+  let zip;
+  try {
+    zip = await window.JSZip.loadAsync(buffer);
+  } catch (error) {
+    throw new Error(`Could not read ${fileName}: ${error.message}`);
+  }
+
+  const files = Object.values(zip.files).filter((entry) => !entry.dir);
+  const archiveEntries = new Map(files.map((entry) => [normalizeArchiveEntryName(entry.name), entry]));
+  const archiveAssetCache = new Map();
+  const candidates = sortArchiveEntriesForImport(files.filter((entry) => /\.(kml|kmz|geojson|json)$/i.test(entry.name)));
+  const imported = [];
+  const totalCandidates = Math.max(candidates.length, 1);
+
+  const reportProgress = async (fraction, stage, detail = "") => {
+    if (typeof options.onProgress !== "function") {
+      return;
+    }
+    await options.onProgress({
+      fraction: clamp(fraction, 0, 1),
+      stage,
+      detail,
+    });
+  };
+
+  await reportProgress(0.04, "Scanning archive entries...", `${candidates.length} candidate file${candidates.length === 1 ? "" : "s"} found`);
+
+  for (let entryIndex = 0; entryIndex < candidates.length; entryIndex += 1) {
+    const entry = candidates[entryIndex];
+    const lower = entry.name.toLowerCase();
+    const folderPrefix = getArchiveImportPrefix(entry.name);
+    const baseFraction = entryIndex / totalCandidates;
+    const fractionSpan = 1 / totalCandidates;
+    const relayProgress = async ({ fraction = 0, stage = "Parsing archive package...", detail = "" }) => {
+      await reportProgress(
+        baseFraction + (clamp(fraction, 0, 1) * fractionSpan),
+        stage,
+        detail || `${entryIndex + 1} / ${totalCandidates} archive entries`,
+      );
+    };
+
+    await relayProgress({
+      fraction: 0.03,
+      stage: "Parsing archive package...",
+      detail: `${entryIndex + 1} / ${totalCandidates} | ${entry.name}`,
+    });
+
+    if (lower.endsWith(".kml")) {
+      const text = await entry.async("text");
+      imported.push(...await parseKmlFeatures(text, fileName, {
+        sourceLabel: fileName.toLowerCase().endsWith(".kmz") ? "KMZ" : "ZIP",
+        entryName: entry.name,
+        archiveEntries,
+        archiveAssetCache,
+        folderPrefix,
+        onProgress: relayProgress,
+      }));
+    } else if (lower.endsWith(".kmz")) {
+      const nestedFeatures = await parseArchivePackageFeatures(await entry.async("arraybuffer"), entry.name.split("/").pop(), {
+        onProgress: relayProgress,
+      });
+      imported.push(...nestedFeatures.map((feature) => ({
+        ...feature,
+        folderPath: [...folderPrefix, ...(feature.folderPath ?? [])],
+      })));
+    } else {
+      try {
+        imported.push(...parseGeoJsonFeatures(await entry.async("text"), fileName, {
+          sourceLabel: fileName.toLowerCase().endsWith(".zip") ? "ZIP" : "GeoJSON",
+          folderPrefix,
+        }));
+      } catch {
+        // Ignore non-GeoJSON .json payloads inside archives.
+      }
+    }
+
+    await reportProgress(
+      (entryIndex + 1) / totalCandidates,
+      "Parsing archive package...",
+      `${entryIndex + 1} / ${totalCandidates} archive entries`,
+    );
+    await yieldToMainThread();
+  }
+
+  if (!imported.length) {
+    throw new Error(`No supported KML, KMZ, or GeoJSON overlays were found in ${fileName}.`);
+  }
+
+  return dedupeImportedFeatures(imported);
+}
+
 async function parseKmzFeatures(buffer, fileName) {
+  return parseArchivePackageFeatures(buffer, fileName);
   console.log("[kmz] parseKmzFeatures called, JSZip:", typeof window.JSZip, "buffer bytes:", buffer.byteLength);
   let zip;
   try {
@@ -9107,6 +11529,7 @@ function syncCesiumEntities() {
   viewer._managedPrimitives = [];
 
   const isVisible = (contentId) => !state.hiddenContentIds.has(contentId);
+  const overlayClassificationType = C.ClassificationType.TERRAIN;
 
   const addClampedPolygon = (id, latLngs, options = {}) => {
     const coords = latLngs.map((p) => Array.isArray(p)
@@ -9137,7 +11560,7 @@ function syncCesiumEntities() {
         hierarchy: new C.PolygonHierarchy(hierarchyPositions),
         material: fillColor,
         heightReference: C.HeightReference.CLAMP_TO_GROUND,
-        classificationType: C.ClassificationType.BOTH,
+        classificationType: overlayClassificationType,
         perPositionHeight: false,
         arcType: C.ArcType.GEODESIC,
         zIndex: options.zIndex ?? 10,
@@ -9284,7 +11707,7 @@ function syncCesiumEntities() {
           flat: true,
           translucent: true,
         }),
-        classificationType: C.ClassificationType.TERRAIN,
+        classificationType: overlayClassificationType,
         asynchronous: false,
       });
       viewer.scene.primitives.add(primitive);
@@ -9298,33 +11721,52 @@ function syncCesiumEntities() {
     const id = `managed:imported:${item.id}`;
     if (item.geometryType === "Point") {
       const latlng = item.layer.getLatLng();
-      entities.add({
+      const markerStyle = normalizeImportedMarkerStyle(item.markerStyle);
+      const pointColor = markerStyle?.color ?? "#f7b955";
+      const baseEntity = {
         id,
         position: C.Cartesian3.fromDegrees(latlng.lng, latlng.lat, 0),
-        point: {
-          pixelSize: 9,
-          color: C.Color.fromCssColorString("#f7b955"),
-          outlineColor: C.Color.WHITE,
-          outlineWidth: 1.5,
-          heightReference: C.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
         label: {
           text: item.name,
           font: "13px Bahnschrift",
-          fillColor: C.Color.WHITE,
-          pixelOffset: new C.Cartesian2(0, -16),
+          fillColor: C.Color.fromCssColorString(markerStyle?.labelColor ?? "#ffffff"),
+          pixelOffset: new C.Cartesian2(0, markerStyle?.iconUrl ? -22 : -16),
           heightReference: C.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           style: C.LabelStyle.FILL_AND_OUTLINE,
           outlineWidth: 2,
           outlineColor: C.Color.BLACK,
         },
-      });
+      };
+      if (markerStyle?.iconUrl) {
+        entities.add({
+          ...baseEntity,
+          billboard: {
+            image: markerStyle.iconUrl,
+            scale: markerStyle.scale ?? 1,
+            verticalOrigin: C.VerticalOrigin.CENTER,
+            heightReference: C.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+      } else {
+        entities.add({
+          ...baseEntity,
+          point: {
+            pixelSize: markerStyle?.size ?? 9,
+            color: C.Color.fromCssColorString(pointColor),
+            outlineColor: C.Color.WHITE,
+            outlineWidth: 1.5,
+            heightReference: C.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+      }
     } else if (item.geometryType === "LineString") {
-      const shapeColor = item.shapeStyle?.color ?? "#f7b955";
-      const weight = item.shapeStyle?.weight ?? 3;
-      const lineStyle = item.shapeStyle?.lineStyle ?? "solid";
+      const style = normalizeImportedShapeStyle(item.geometryType, item.shapeStyle);
+      const shapeColor = style.color;
+      const weight = style.weight;
+      const lineStyle = style.lineStyle;
       const positions = item.layer.getLatLngs().map((p) => C.Cartesian3.fromDegrees(p.lng, p.lat, 0));
       entities.add({
         id,
@@ -9338,23 +11780,14 @@ function syncCesiumEntities() {
     } else {
       const rings = item.layer.getLatLngs();
       const outer = Array.isArray(rings[0]) ? rings[0] : rings;
-      const shapeColor = item.drawn
-        ? (item.shapeStyle?.color ?? DRAW_DEFAULTS.color)
-        : "#34d399";
-      const fillOpacity = item.drawn
-        ? (item.shapeStyle?.fillOpacity ?? DRAW_DEFAULTS.fillOpacity)
-        : 0.12;
-      const weight = item.drawn
-        ? (item.shapeStyle?.weight ?? DRAW_DEFAULTS.weight)
-        : 2;
-      const lineStyle = item.shapeStyle?.lineStyle ?? DRAW_DEFAULTS.lineStyle;
+      const style = normalizeImportedShapeStyle(item.geometryType, item.shapeStyle);
       addClampedPolygon(id, outer, {
-        color: shapeColor,
-        fillColor: shapeColor,
-        fillOpacity,
-        outlineColor: shapeColor,
-        outlineWidth: weight,
-        lineStyle,
+        color: style.color,
+        fillColor: style.fillColor ?? style.color,
+        fillOpacity: style.fillOpacity,
+        outlineColor: style.color,
+        outlineWidth: style.weight,
+        lineStyle: style.lineStyle,
         zIndex: 12,
       });
     }
@@ -9697,13 +12130,16 @@ function rssiColor(rssi, lineOfSight, opacity = 0.7) {
 }
 
 function propagationModelLabel(value) {
-  if (value === "itu-p526") {
-    return "ITU-R P.526";
+  if (value === "itu-buildings-weather") {
+    return "Buildings and Weather";
   }
   if (value === "itu-hybrid") {
-    return "ITU Hybrid";
+    return "Terrain and Weather";
   }
-  return "ITU-R P.525";
+  if (value === "itu-p526") {
+    return "Terrain";
+  }
+  return "Free Space Path Loss";
 }
 
 function toMgrs(lat, lon) {

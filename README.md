@@ -9,19 +9,22 @@ The app is primarily a static client-side application. There is no required back
 The current application supports:
 
 - 2D mapping with satellite, dark, OSM, and custom XYZ imagery
+- Built-in Google Satellite and Google Hybrid XYZ basemap presets derived from TAK custom map source XML
 - 3D visualization with Cesium-compatible imagery and terrain
 - Cesium World Terrain support when a Cesium Ion token is provided
+- Optional Cesium Ion OSM Buildings in 3D and in streamed propagation surface sampling
 - Client-side DTED terrain import for terrain-aware RF calculations
 - Right-click terrain/elevation lookup on the map using the currently configured terrain source
 - Placement of radios, jammers, relays, and receivers on the map
 - Built-in and custom emitter profiles stored in the browser
 - Terrain-aware coverage generation using multiple propagation models
+- Optional building obstruction and approximate material-loss modeling when Cesium OSM Buildings are enabled
 - Point inspection of generated coverage layers for RSSI, path loss, range, line-of-sight, and terrain blockage
 - Terrain-aware site planning for Tx/Rx recommendations inside a drawn planning region
 - Terrain-aware 3D placement of recommended sites and direct-path 3D links between paired recommendations
 - Map content management with folders, drag/reorder, focus, rename, edit, hide, and delete actions
 - Drawing circles, rectangles, polylines, and polygons directly on the map
-- Drag-and-drop import of GeoJSON, KML, and KMZ into editable map layers
+- Drag-and-drop import of GeoJSON, KML, KMZ, and ATAK data package ZIP overlays into editable map layers
 - Export of placed emitters to GeoJSON, KML, KMZ, or a ZIP bundle containing both GeoJSON and KML
 - Browser GPS and USB GPS input using the Web Serial path for NMEA devices
 - Coordinate display in MGRS, lat/long, or degrees-minutes-seconds
@@ -147,7 +150,7 @@ This split is why the site stays responsive even when evaluating larger coverage
 
 ## Cesium Setup
 
-If you want streamed 3D terrain and Cesium-backed 3D imagery, you should configure a Cesium Ion token.
+If you want streamed 3D terrain, Cesium-backed 3D imagery, and Cesium OSM Buildings, you should configure a Cesium Ion token.
 
 ### Why You Need A Token
 
@@ -200,20 +203,26 @@ After adding a token:
 
 1. Open the `Imagery` dropdown.
 2. Confirm `3D Terrain Source` is set to `Cesium World Terrain`.
-3. Choose `3D Imagery`.
-4. Click the `3D View` button in the map area.
+3. Optionally turn on `3D OSM Buildings`.
+4. Choose `3D Imagery`.
+5. Click the `3D View` button in the map area.
 
 When a token is present, the app defaults the terrain source to `Cesium World Terrain`.
+If `3D OSM Buildings` is enabled, the app also loads Cesium Ion OSM Buildings in 3D and samples a combined terrain-plus-building surface for streamed propagation runs.
 
 ### What The Imagery Dropdown Controls Do
 
 - `Basemap`: Controls the 2D Leaflet imagery layer.
+- Built-in basemap presets include Esri, Google Satellite, Google Hybrid, OpenStreetMap, and custom XYZ.
 - `Radius (km)`: Used by coverage generation and terrain sampling workflows.
 - `Custom Tile URL`: Lets you use a custom XYZ tile source in 2D.
 - `3D Terrain Source`: Chooses ellipsoid-only, Cesium World Terrain, or a custom Cesium terrain endpoint.
 - `3D Imagery`: Chooses which imagery source Cesium uses in 3D.
+- 3D imagery can use the selected basemap, including the built-in Google Satellite and Google Hybrid presets.
 - `Custom Terrain URL`: Lets you point Cesium to a terrain service other than Cesium World Terrain.
 - `Cesium Ion Token`: Stores the token used for Cesium Ion-backed terrain services.
+- `3D OSM Buildings`: Toggles streamed Cesium Ion OpenStreetMap buildings in 3D and in Cesium-sampled propagation surfaces.
+- `Building Material Model`: Chooses the approximate building penetration-loss preset applied when streamed buildings obstruct a link.
 
 ## Main Interface Overview
 
@@ -282,7 +291,7 @@ It supports:
 Content that appears there includes:
 
 - placed emitters
-- imported GeoJSON/KML/KMZ items
+- imported GeoJSON/KML/KMZ/ATAK ZIP items
 - drawn shapes
 - coverage layers
 - planning layers and regions
@@ -307,12 +316,15 @@ Supported formats:
 - GeoJSON
 - KML
 - KMZ
+- ATAK data package ZIP archives
 
 Import behavior:
 
 - imported files create a folder based on file name
+- imported archive folders and source folder paths are preserved in `Map Contents`
 - imported features are added as editable map items
 - points, lines, and polygons are supported
+- common KML/KMZ style colors and packaged point symbols are preserved when possible
 - imported items are added to `Map Contents`
 - imported items can be focused, renamed, moved into folders, hidden, and deleted
 
@@ -608,7 +620,7 @@ If you are new to the app, this is a good full workflow to follow:
 3. Add a Cesium Ion token in `Imagery` if you want streamed 3D terrain.
 4. Configure imagery and terrain.
 5. Place one or more emitters.
-6. Optionally import additional map content by dragging GeoJSON, KML, or KMZ onto the map.
+6. Optionally import additional map content by dragging GeoJSON, KML, KMZ, or ATAK ZIP overlays onto the map.
 7. Draw any supporting shapes or boundaries.
 8. Adjust weather.
 9. Generate coverage for a selected asset.
@@ -625,10 +637,11 @@ If you are new to the app, this is a good full workflow to follow:
 - This is a browser-based planning and exploration tool, not a certified engineering package.
 - Cesium World Terrain and some hosted imagery or terrain services require valid credentials and external service availability.
 - 3D mode can still open even when Cesium terrain or imagery authentication is incomplete, but remote resources may fail.
+- OSM building obstruction and material loss are approximate planning aids derived from streamed Cesium scene sampling, not a full deterministic building solver.
 - USB GPS requires browser Web Serial support and a compatible NMEA device.
 - Voice input depends on browser speech-recognition support.
 - DTED parsing is best-effort and client-side.
-- Imported KML and KMZ support common point, line, and polygon workflows but should still be user-validated for mission-critical use.
+- Imported KML, KMZ, GeoJSON, and ATAK ZIP overlays support common point, line, polygon, style, and folder workflows but should still be user-validated for mission-critical use.
 - AI availability depends on provider credentials, browser/network behavior, and optional proxy setup for some GenAI.mil environments.
 
 ## Summary

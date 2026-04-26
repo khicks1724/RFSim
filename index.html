@@ -19,7 +19,7 @@
     href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
   >
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260424-01">
-  <link rel="stylesheet" href="./styles.css?v=20260424-12">
+  <link rel="stylesheet" href="./styles.css?v=20260425-19">
 </head>
 <body>
   <div class="app-shell">
@@ -123,6 +123,8 @@
                 Basemap
                 <select id="basemapSelect">
                   <option value="esri">Satellite Imagery</option>
+                  <option value="google-satellite">Google Satellite</option>
+                  <option value="google-hybrid">Google Hybrid</option>
                   <option value="carto-dark">Dark Streets</option>
                   <option value="osm">OpenStreetMap</option>
                   <option value="custom">Custom XYZ</option>
@@ -144,6 +146,8 @@
                 3D Imagery
                 <select id="imagerySourceSelect">
                   <option value="selected-basemap">Use Selected Basemap</option>
+                  <option value="google-satellite">Google Satellite</option>
+                  <option value="google-hybrid">Google Hybrid</option>
                   <option value="osm">OpenStreetMap</option>
                   <option value="esri">Esri World Imagery</option>
                 </select>
@@ -158,6 +162,29 @@
                   <a class="inline-link" href="https://ion.cesium.com/signup/" target="_blank" rel="noreferrer noopener">Create token</a>
                 </span>
                 <input id="cesiumIonToken" type="password" placeholder="Paste Cesium Ion access token">
+              </label>
+              <label>
+                3D City Mesh
+                <select id="cesiumPhotorealisticTilesToggle">
+                  <option value="off">Off</option>
+                  <option value="on">Google Photorealistic 3D Tiles</option>
+                </select>
+              </label>
+              <label>
+                RF Building Model
+                <select id="cesiumOsmBuildingsToggle">
+                  <option value="off">Off</option>
+                  <option value="on">Cesium Ion OSM Buildings</option>
+                </select>
+              </label>
+              <label>
+                Building Material Model
+                <select id="buildingMaterialPreset">
+                  <option value="light-frame">Light Frame</option>
+                  <option value="brick">Brick / Masonry</option>
+                  <option value="reinforced-concrete">Reinforced Concrete</option>
+                  <option value="steel-glass">Steel / Glass High-Rise</option>
+                </select>
               </label>
             </div>
           </div>
@@ -351,6 +378,20 @@
                   </div>
                 </div>
               </div>
+            </div>
+            <div class="map-contents-search-row">
+              <label class="map-contents-search-shell" for="mapContentsSearchInput">
+                <span class="map-contents-search-icon" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="7"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </span>
+                <input id="mapContentsSearchInput" type="text" placeholder="Search map contents">
+              </label>
+              <button id="mapContentsSearchClearBtn" class="ghost-button small icon-button map-contents-search-clear hidden" type="button" aria-label="Clear map contents search">
+                &#10005;
+              </button>
             </div>
             <div id="mapContentsList" class="map-contents-list"></div>
           </section>
@@ -904,9 +945,10 @@
               <label>
                 <span>Propagation Model</span>
                 <select id="emPropModel">
-                  <option value="itu-p525">ITU-R P.525 Free Space</option>
-                  <option value="itu-p526">ITU-R P.526 Terrain Diffraction</option>
-                  <option value="itu-hybrid">ITU Hybrid Terrain + Atmosphere</option>
+                  <option value="itu-p525">Free Space Path Loss</option>
+                  <option value="itu-p526">Terrain</option>
+                  <option value="itu-hybrid">Terrain and Weather</option>
+                  <option value="itu-buildings-weather">Buildings and Weather</option>
                   <option value="longley-rice">Longley–Rice (Irregular Terrain)</option>
                   <option value="itu-p528">ITU-R P.528 (Air/Ground)</option>
                   <option value="hf-skywave">HF Skywave / NVIS</option>
@@ -1177,9 +1219,10 @@
             <label>
               Propagation Model
               <select id="propagationModel">
-                <option value="itu-p525">ITU-R P.525 Free Space</option>
-                <option value="itu-p526">ITU-R P.526 Terrain Diffraction</option>
-                <option value="itu-hybrid">ITU Hybrid Terrain + Atmosphere</option>
+                <option value="itu-p525">Free Space Path Loss</option>
+                <option value="itu-p526">Terrain</option>
+                <option value="itu-hybrid">Terrain and Weather</option>
+                <option value="itu-buildings-weather">Buildings and Weather</option>
               </select>
             </label>
             <label>
@@ -1208,7 +1251,7 @@
             </label>
           </div>
           <p class="fine-print simulation-modal-note">
-            Coverage is sampled against terrain and can be inspected on the map after generation. In 3D, overlays are clamped to the ground surface.
+            Free Space skips terrain sampling. Terrain uses terrain only. Terrain and Weather adds atmospheric attenuation. Buildings and Weather adds streamed OSM building obstruction and material loss on top of terrain and weather.
           </p>
         </div>
         <div class="simulation-modal-results">
@@ -1244,6 +1287,96 @@
     </div>
   </div>
 
+  <div id="importProgressModal" class="emitter-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="importProgressTitle">
+    <div class="emitter-modal import-progress-modal">
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <h2 id="importProgressTitle">Importing Map Data</h2>
+          <p id="importProgressFileName">Preparing import package...</p>
+        </div>
+      </div>
+      <div class="import-progress-body">
+        <div class="import-progress-copy">
+          <strong id="importProgressStage">Reading source package...</strong>
+          <span id="importProgressDetail">0%</span>
+        </div>
+        <div class="rf-import-progress-shell" aria-hidden="true">
+          <div class="rf-import-progress-grid"></div>
+          <div id="importProgressBar" class="rf-import-progress-bar">
+            <div class="rf-import-progress-spectrum"></div>
+            <div class="rf-import-progress-scanline"></div>
+          </div>
+        </div>
+        <div class="rf-import-progress-scale">
+          <span>0%</span>
+          <span>50%</span>
+          <span>100%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="deleteProgressModal" class="emitter-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="deleteProgressTitle">
+    <div class="emitter-modal import-progress-modal">
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <h2 id="deleteProgressTitle">Deleting Map Items</h2>
+          <p id="deleteProgressSummary">Preparing deletion...</p>
+        </div>
+      </div>
+      <div class="import-progress-body">
+        <div class="import-progress-copy">
+          <strong id="deleteProgressStage">Removing selected map items...</strong>
+          <span id="deleteProgressDetail">0%</span>
+        </div>
+        <div class="rf-import-progress-shell" aria-hidden="true">
+          <div class="rf-import-progress-grid"></div>
+          <div id="deleteProgressBar" class="rf-import-progress-bar">
+            <div class="rf-import-progress-spectrum"></div>
+            <div class="rf-import-progress-scanline"></div>
+          </div>
+        </div>
+        <div class="rf-import-progress-scale">
+          <span>0%</span>
+          <span>50%</span>
+          <span>100%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="simulationProgressModal" class="simulation-progress-dock hidden" role="status" aria-live="polite" aria-atomic="true" aria-labelledby="simulationProgressTitle">
+    <div class="emitter-modal import-progress-modal simulation-progress-panel">
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <h2 id="simulationProgressTitle">Generating Coverage</h2>
+          <p id="simulationProgressSummary">Preparing RF simulation...</p>
+        </div>
+      </div>
+      <div class="import-progress-body">
+        <div class="import-progress-copy">
+          <strong id="simulationProgressStage">Preparing RF simulation...</strong>
+          <span id="simulationProgressDetail">0%</span>
+        </div>
+        <div class="rf-import-progress-shell" aria-hidden="true">
+          <div class="rf-import-progress-grid"></div>
+          <div id="simulationProgressBar" class="rf-import-progress-bar">
+            <div class="rf-import-progress-spectrum"></div>
+            <div class="rf-import-progress-scanline"></div>
+          </div>
+        </div>
+        <div class="rf-import-progress-scale">
+          <span>0%</span>
+          <span>50%</span>
+          <span>100%</span>
+        </div>
+        <div class="button-row compact-button-row simulation-progress-actions">
+          <button id="simulationProgressCancelBtn" class="ghost-button small" type="button">Cancel Simulation</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/";
   </script>
@@ -1257,6 +1390,6 @@
   <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
   <script src="./app-config.js"></script>
-  <script type="module" src="./app.js?v=20260424-17"></script>
+  <script type="module" src="./app.js?v=20260425-42"></script>
 </body>
 </html>
