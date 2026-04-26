@@ -549,21 +549,7 @@
             <span class="cesium-compass-north">N</span>
           </span>
         </button>
-        <div class="map-overlay bottom-left">
-          <div class="overlay-card view-metrics-card">
-            <div class="overlay-metric-row">
-              <div class="overlay-metric-block">
-                <span id="centerCoordinateLabel">Center Grid</span>
-                <strong id="centerCoordinateValue">----------</strong>
-              </div>
-              <div class="overlay-metric-block">
-                <span>Center Elev</span>
-                <strong id="centerElevationValue">No terrain</strong>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="map-overlay bottom-right">
+        <div class="map-overlay bottom-center">
           <div id="undoBanner" class="undo-banner hidden" role="status" aria-live="polite">
             <span id="undoBannerMsg">Deleted item</span>
             <div class="undo-banner-actions">
@@ -571,14 +557,28 @@
               <button id="undoBannerDismiss" class="undo-banner-dismiss-btn" type="button" aria-label="Dismiss">&#x2715;</button>
             </div>
           </div>
-          <div class="legend-card">
-            <strong>RSSI Legend</strong>
-            <div class="spectrum-bar"></div>
-            <div class="legend-scale">
-              <span>-120 dBm</span>
-              <span>-90 dBm</span>
-              <span>-60 dBm</span>
-              <span>-40 dBm</span>
+          <div class="bottom-center-row">
+            <div class="overlay-card view-metrics-card">
+              <div class="overlay-metric-row">
+                <div class="overlay-metric-block">
+                  <span id="centerCoordinateLabel">Center Grid</span>
+                  <strong id="centerCoordinateValue">----------</strong>
+                </div>
+                <div class="overlay-metric-block">
+                  <span>Center Elev</span>
+                  <strong id="centerElevationValue">No terrain</strong>
+                </div>
+              </div>
+            </div>
+            <div class="legend-card">
+              <strong>RSSI Legend</strong>
+              <div class="spectrum-bar"></div>
+              <div class="legend-scale">
+                <span>-120 dBm</span>
+                <span>-90 dBm</span>
+                <span>-60 dBm</span>
+                <span>-40 dBm</span>
+              </div>
             </div>
           </div>
         </div>
