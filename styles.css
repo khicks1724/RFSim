@@ -106,6 +106,191 @@ body.ai-panel-open {
   --ai-divider-width: 7px;
 }
 
+body.auth-screen-active .app-shell {
+  filter: blur(10px) saturate(0.8);
+  transform: scale(1.01);
+  pointer-events: none;
+  user-select: none;
+}
+
+.auth-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(255, 66, 165, 0.08), transparent 24%),
+    radial-gradient(circle at 82% 10%, rgba(96, 165, 250, 0.07), transparent 28%),
+    linear-gradient(180deg, rgba(3, 6, 16, 0.98), rgba(4, 8, 20, 0.99));
+}
+
+.auth-rf-spectrum,
+.auth-rf-grid,
+.auth-rf-emissions,
+.auth-rf-scanline {
+  position: absolute;
+  inset: 0;
+}
+
+.auth-rf-spectrum {
+  overflow: hidden;
+  opacity: 0.96;
+}
+
+.auth-rf-grid {
+  background:
+    repeating-linear-gradient(90deg, rgba(96, 165, 250, 0.04) 0, rgba(96, 165, 250, 0.04) 1px, transparent 1px, transparent 56px),
+    repeating-linear-gradient(180deg, rgba(129, 140, 248, 0.028) 0, rgba(129, 140, 248, 0.028) 1px, transparent 1px, transparent 24px);
+  opacity: 0.46;
+}
+
+.auth-rf-emissions {
+  inset: -10% 0;
+  background:
+    linear-gradient(180deg, rgba(255, 242, 122, 0.14) 0%, rgba(255, 140, 44, 0.13) 14%, rgba(255, 33, 122, 0.11) 32%, rgba(128, 49, 255, 0.1) 52%, rgba(22, 12, 80, 0.05) 76%, rgba(2, 5, 16, 0) 100%),
+    linear-gradient(90deg,
+      rgba(0, 0, 0, 0) 0%,
+      rgba(255, 213, 79, 0.16) 9%,
+      rgba(255, 103, 31, 0.18) 14%,
+      rgba(255, 31, 117, 0.14) 21%,
+      rgba(122, 60, 255, 0.11) 30%,
+      rgba(0, 0, 0, 0) 39%,
+      rgba(255, 82, 176, 0.15) 49%,
+      rgba(255, 127, 35, 0.18) 56%,
+      rgba(255, 220, 86, 0.16) 61%,
+      rgba(0, 0, 0, 0) 70%,
+      rgba(255, 40, 110, 0.13) 80%,
+      rgba(125, 63, 255, 0.1) 88%,
+      rgba(0, 0, 0, 0) 100%),
+    repeating-linear-gradient(90deg,
+      rgba(0, 0, 0, 0) 0 6%,
+      rgba(255, 210, 79, 0.08) 6% 8%,
+      rgba(255, 102, 51, 0.11) 8% 11%,
+      rgba(255, 34, 119, 0.08) 11% 13%,
+      rgba(124, 58, 237, 0.07) 13% 16%,
+      rgba(0, 0, 0, 0) 16% 23%),
+    repeating-linear-gradient(180deg,
+      rgba(255, 255, 255, 0) 0 10px,
+      rgba(255, 210, 79, 0.03) 10px 16px,
+      rgba(255, 80, 80, 0.04) 16px 22px,
+      rgba(0, 0, 0, 0) 22px 34px);
+  background-size: 100% 130%, 150% 120%, 220px 100%, 100% 180px;
+  background-repeat: repeat-y, no-repeat, repeat, repeat;
+  background-position: center -12%, center -10%, left top, center top;
+  mix-blend-mode: screen;
+  filter: blur(10px) saturate(1.08);
+  will-change: transform, opacity, background-position;
+}
+
+.auth-rf-emissions-a {
+  opacity: 0.44;
+  transform: translate3d(0, -6%, 0) scale(1.05);
+  animation: auth-rf-waterfall-a 28s linear infinite;
+}
+
+.auth-rf-emissions-b {
+  opacity: 0.24;
+  transform: translate3d(0, -16%, 0) scale(1.12);
+  animation: auth-rf-waterfall-b 44s linear infinite;
+}
+
+.auth-rf-scanline {
+  display: none;
+}
+
+.auth-card {
+  position: relative;
+  z-index: 1;
+  width: min(420px, calc(100vw - 36px));
+  display: grid;
+  gap: 14px;
+  padding: 28px 26px 24px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  background:
+    linear-gradient(180deg, rgba(13, 18, 28, 0.96), rgba(10, 14, 22, 0.98));
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.auth-card h1 {
+  margin: -4px 0 0;
+  font-size: 2.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-card-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.auth-screen-status {
+  min-height: 20px;
+  font-size: 0.86rem;
+  color: #bfe9ff;
+}
+
+.auth-screen-status.error {
+  color: #fda4af;
+}
+
+.auth-screen-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-screen-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-screen-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.auth-screen-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+
+.auth-screen-link:hover {
+  color: #ffffff;
+}
+
+@keyframes auth-rf-waterfall-a {
+  0% {
+    transform: translate3d(0, -10%, 0) scale(1.04);
+    background-position: center -18%, center -14%, left 0 top -18px, center top 0;
+  }
+  100% {
+    transform: translate3d(0, 6%, 0) scale(1.08);
+    background-position: center 18%, center 10%, left 0 top 160px, center top 180px;
+  }
+}
+
+@keyframes auth-rf-waterfall-b {
+  0% {
+    transform: translate3d(0, -20%, 0) scale(1.1);
+    background-position: center -28%, center -22%, left 40px top -120px, center top -90px;
+  }
+  100% {
+    transform: translate3d(0, 4%, 0) scale(1.16);
+    background-position: center 12%, center 16%, left 40px top 120px, center top 120px;
+  }
+}
+
 /* ── Thin custom scrollbars ──────────────────────────────────────────────── */
 * {
   scrollbar-width: thin;

@@ -37,14 +37,27 @@ function authRequired(request, response, next) {
   }
 }
 
+function normalizeUsername(value = "") {
+  return String(value).trim();
+}
+
+function usernameToInternalEmail(username) {
+  const slug = normalizeUsername(username)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "user";
+  return `${slug}@rfsim.local`;
+}
+
 const registerSchema = z.object({
-  email: z.string().email(),
+  username: z.string().min(1).max(120),
   password: z.string().min(12),
-  fullName: z.string().min(1).max(120)
+  fullName: z.string().min(1).max(120).optional()
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  username: z.string().min(1).max(120),
   password: z.string().min(1)
 });
 
@@ -87,19 +100,25 @@ app.post("/api/auth/register", async (request, response) => {
     return;
   }
 
-  const { email, password, fullName } = parsed.data;
+  const username = normalizeUsername(parsed.data.username);
+  const password = parsed.data.password;
+  const fullName = normalizeUsername(parsed.data.fullName || username);
+  const internalEmail = usernameToInternalEmail(username);
 
   try {
-    const existing = await query("select id from app_user where email = $1", [email.toLowerCase()]);
+    const existing = await query(
+      "select id from app_user where lower(email) = lower($1) or lower(full_name) = lower($2)",
+      [internalEmail, username]
+    );
     if (existing.rowCount > 0) {
-      response.status(409).json({ error: "An account with that email already exists." });
+      response.status(409).json({ error: "An account with that username already exists." });
       return;
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await query(
       "insert into app_user (email, password_hash, full_name) values ($1, $2, $3) returning id, email, full_name",
-      [email.toLowerCase(), passwordHash, fullName]
+      [internalEmail, passwordHash, fullName]
     );
     const user = result.rows[0];
     response.status(201).json({
@@ -118,22 +137,23 @@ app.post("/api/auth/login", async (request, response) => {
     return;
   }
 
-  const { email, password } = parsed.data;
+  const username = normalizeUsername(parsed.data.username);
+  const password = parsed.data.password;
 
   try {
     const result = await query(
-      "select id, email, full_name, password_hash from app_user where email = $1",
-      [email.toLowerCase()]
+      "select id, email, full_name, password_hash from app_user where lower(email) = lower($1) or lower(full_name) = lower($1)",
+      [username]
     );
     if (result.rowCount === 0) {
-      response.status(401).json({ error: "Invalid email or password." });
+      response.status(401).json({ error: "Invalid username or password." });
       return;
     }
 
     const user = result.rows[0];
     const matches = await bcrypt.compare(password, user.password_hash);
     if (!matches) {
-      response.status(401).json({ error: "Invalid email or password." });
+      response.status(401).json({ error: "Invalid username or password." });
       return;
     }
 

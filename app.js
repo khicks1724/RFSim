@@ -481,9 +481,11 @@ const MAP_STATE_STORAGE_KEY = "ew-sim-map-state";
 const MAP_STATE_STORAGE_KEY_LEGACY = null; // no prior keys to migrate
 const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
 const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
+const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
 const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
 const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
 const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
+const INITIAL_GUEST_SESSION = window.sessionStorage.getItem(GUEST_SESSION_STORAGE_KEY) === "1";
 const AI_PROVIDER_CATALOG = {
   "genai-mil": {
     shortLabel: "GenAI.mil",
@@ -534,6 +536,18 @@ const dom = {
   workspaceMenu: document.querySelector("#workspaceMenu"),
   workspaceMenuValue: document.querySelector("#workspaceMenuValue"),
   workspaceMenuHeadline: document.querySelector("#workspaceMenuHeadline"),
+  authScreen: document.querySelector("#authScreen"),
+  authScreenTitle: document.querySelector("#authScreenTitle"),
+  authScreenCopy: document.querySelector("#authScreenCopy"),
+  authScreenStatus: document.querySelector("#authScreenStatus"),
+  authScreenFullNameRow: document.querySelector("#authScreenFullNameRow"),
+  authScreenFullName: document.querySelector("#authScreenFullName"),
+  authScreenEmail: document.querySelector("#authScreenEmail"),
+  authScreenPassword: document.querySelector("#authScreenPassword"),
+  authScreenSubmitBtn: document.querySelector("#authScreenSubmitBtn"),
+  authScreenGuestBtn: document.querySelector("#authScreenGuestBtn"),
+  authScreenModeCopy: document.querySelector("#authScreenModeCopy"),
+  authScreenToggleModeBtn: document.querySelector("#authScreenToggleModeBtn"),
   workspaceStatus: document.querySelector("#workspaceStatus"),
   workspaceAuthGuest: document.querySelector("#workspaceAuthGuest"),
   workspaceAuthMember: document.querySelector("#workspaceAuthMember"),
@@ -868,8 +882,9 @@ const state = {
     lastPlacementEventKey: "",
   },
   session: {
-    token: window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
-    activeProjectId: window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY),
+    guest: INITIAL_GUEST_SESSION,
+    token: INITIAL_GUEST_SESSION ? null : window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
+    activeProjectId: INITIAL_GUEST_SESSION ? null : window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY),
     user: null,
     projects: [],
     autosaveTimerId: null,
@@ -893,6 +908,7 @@ const state = {
     messages: [],
     requestInFlight: false,
   },
+  authScreenMode: "login",
   canceledSimulationRequestIds: new Set(),
 };
 
@@ -921,6 +937,49 @@ function timeoutAfter(ms, message = "Operation timed out") {
   return new Promise((_, reject) => {
     window.setTimeout(() => reject(new Error(message)), ms);
   });
+}
+
+function createDefaultProfiles() {
+  return [
+    {
+      id: generateId(),
+      profileName: "Standard VHF",
+      type: "radio",
+      force: "friendly",
+      name: "RF-01",
+      unit: "Alpha",
+      frequencyMHz: 350,
+      powerW: 50,
+      antennaHeightM: 10,
+      antennaGainDbi: 2.1,
+      receiverSensitivityDbm: -95,
+      systemLossDb: 1.5,
+      icon: "radio",
+      color: "#38bdf8",
+      notes: "",
+    },
+  ];
+}
+
+function isGuestSession() {
+  return Boolean(state.session.guest);
+}
+
+function hasWorkspaceAccess() {
+  return isGuestSession() || Boolean(state.session.token && state.session.user);
+}
+
+function canUsePersistentBrowserStorage() {
+  return !isGuestSession();
+}
+
+function setGuestSessionEnabled(enabled) {
+  state.session.guest = Boolean(enabled);
+  if (state.session.guest) {
+    window.sessionStorage.setItem(GUEST_SESSION_STORAGE_KEY, "1");
+  } else {
+    window.sessionStorage.removeItem(GUEST_SESSION_STORAGE_KEY);
+  }
 }
 
 async function sampleCesiumSurfaceBatch(scene, batch, options = {}) {
@@ -1387,6 +1446,11 @@ async function loadServerAiProviderSettings() {
 }
 
 function persistSessionStorage() {
+  if (isGuestSession()) {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+    return;
+  }
   if (state.session.token) {
     window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, state.session.token);
   } else {
@@ -1400,9 +1464,12 @@ function persistSessionStorage() {
   }
 }
 
-function clearSessionState() {
+function clearSessionState({ preserveGuest = false } = {}) {
   if (state.session.autosaveTimerId) {
     window.clearTimeout(state.session.autosaveTimerId);
+  }
+  if (!preserveGuest) {
+    setGuestSessionEnabled(false);
   }
   state.session.token = null;
   state.session.user = null;
@@ -1414,6 +1481,10 @@ function clearSessionState() {
 }
 
 async function hydrateSession() {
+  if (isGuestSession()) {
+    syncWorkspaceUi();
+    return;
+  }
   if (!state.session.token) {
     syncWorkspaceUi();
     return;
@@ -1442,24 +1513,122 @@ async function loadProjectList() {
   syncWorkspaceUi();
 }
 
+function setAuthScreenStatus(message = "", isError = false) {
+  if (!dom.authScreenStatus) {
+    return;
+  }
+  const fallback = state.authScreenMode === "register"
+    ? "Create an account to enter the workspace."
+    : "Sign in or use guest mode to continue.";
+  dom.authScreenStatus.textContent = message || fallback;
+  dom.authScreenStatus.classList.toggle("error", Boolean(isError));
+}
+
+function setAuthScreenMode(mode) {
+  state.authScreenMode = mode === "register" ? "register" : "login";
+  syncAuthScreenUi();
+}
+
+function syncAuthScreenUi() {
+  if (!dom.authScreen) {
+    return;
+  }
+  const hasAccess = hasWorkspaceAccess();
+  document.body.classList.toggle("auth-screen-active", !hasAccess);
+  dom.authScreen.classList.toggle("hidden", hasAccess);
+  dom.authScreen.setAttribute("aria-hidden", String(hasAccess));
+  if (hasAccess) {
+    return;
+  }
+
+  const isRegister = state.authScreenMode === "register";
+  dom.authScreenTitle.textContent = "RF Sim";
+  dom.authScreenCopy.textContent = isRegister
+    ? "Create an account with a username and password, or continue as a guest."
+    : "Sign in with a username and password, or continue as a guest.";
+  dom.authScreenFullNameRow?.classList.add("hidden");
+  dom.authScreenSubmitBtn.textContent = isRegister ? "Create Account" : "Sign In";
+  dom.authScreenModeCopy.textContent = isRegister ? "Already have an account?" : "Need an account?";
+  dom.authScreenToggleModeBtn.textContent = isRegister ? "Back to sign in" : "Create one";
+  if (!dom.authScreenStatus.textContent.trim()) {
+    setAuthScreenStatus("", false);
+  }
+}
+
+function getAuthScreenCredentials() {
+  return {
+    fullName: dom.authScreenFullName?.value.trim() ?? "",
+    email: dom.authScreenEmail?.value.trim() ?? "",
+    password: dom.authScreenPassword?.value ?? "",
+  };
+}
+
+async function submitAuthScreen() {
+  const credentials = getAuthScreenCredentials();
+  if (state.authScreenMode === "register") {
+    setAuthScreenStatus("Creating account...");
+    await onWorkspaceRegister(credentials);
+  } else {
+    setAuthScreenStatus("Signing in...");
+    await onWorkspaceLogin(credentials);
+  }
+  dom.authScreenPassword.value = "";
+}
+
+function enterGuestMode() {
+  setGuestSessionEnabled(true);
+  window.location.reload();
+}
+
 function syncWorkspaceUi() {
   if (!dom.workspaceMenuBtn || !dom.workspaceMenu) {
     return;
   }
 
-  const signedIn = Boolean(state.session.token && state.session.user);
-  dom.workspaceAuthGuest.classList.toggle("hidden", signedIn);
-  dom.workspaceAuthMember.classList.toggle("hidden", !signedIn);
-  dom.workspaceSignOutBtn.classList.toggle("hidden", !signedIn);
+  const hasAccess = hasWorkspaceAccess();
+  const guest = isGuestSession();
+  dom.workspaceAuthGuest.classList.toggle("hidden", hasAccess);
+  dom.workspaceAuthMember.classList.toggle("hidden", !hasAccess);
+  dom.workspaceSignOutBtn.classList.toggle("hidden", !hasAccess);
 
-  if (!signedIn) {
+  if (!hasAccess) {
     dom.workspaceMenuValue.textContent = "Sign In";
     dom.workspaceMenuHeadline.textContent = "Account & Projects";
-    dom.workspaceStatus.textContent = "Sign in to save projects to the server. Local browser save remains available until then.";
+    dom.workspaceStatus.textContent = "Sign in to enter RF Sim and access server-backed projects, or use guest mode for an in-memory session.";
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
+    syncAuthScreenUi();
     return;
   }
 
+  if (guest) {
+    dom.workspaceSignOutBtn.textContent = "Exit Guest";
+    dom.workspaceMenuValue.textContent = "Guest";
+    dom.workspaceMenuHeadline.textContent = "Guest Workspace";
+    dom.workspaceUserLabel.textContent = "Guest Session";
+    dom.workspaceProjectMode.textContent = "Guest";
+    dom.workspaceProjectStatus.textContent = "Guest mode does not save projects, AI keys, or Cesium tokens.";
+    dom.workspaceProjectSelect.innerHTML = '<option value="">Ephemeral Session</option>';
+    dom.workspaceProjectSelect.value = "";
+    dom.workspaceProjectSelect.setAttribute("disabled", "true");
+    dom.workspaceProjectName.value = "";
+    dom.workspaceProjectName.setAttribute("disabled", "true");
+    dom.workspaceProjectCreateBtn?.setAttribute("disabled", "true");
+    dom.workspaceProjectSaveBtn?.setAttribute("disabled", "true");
+    dom.workspaceProjectReloadBtn?.setAttribute("disabled", "true");
+    dom.workspaceProjectSnapshotBtn?.setAttribute("disabled", "true");
+    dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
+    setAuthScreenStatus("", false);
+    syncAuthScreenUi();
+    return;
+  }
+
+  dom.workspaceSignOutBtn.textContent = "Sign Out";
+  dom.workspaceProjectSelect.removeAttribute("disabled");
+  dom.workspaceProjectName.removeAttribute("disabled");
+  dom.workspaceProjectCreateBtn?.removeAttribute("disabled");
+  dom.workspaceProjectSaveBtn?.removeAttribute("disabled");
+  dom.workspaceProjectReloadBtn?.removeAttribute("disabled");
+  dom.workspaceProjectSnapshotBtn?.removeAttribute("disabled");
   const userLabel = state.session.user.fullName || state.session.user.email;
   const activeProject = state.session.projects.find((project) => project.id === state.session.activeProjectId) ?? null;
   const activeProjectLabel = activeProject?.name || "Local Browser State";
@@ -1490,53 +1659,69 @@ function syncWorkspaceUi() {
   } else {
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
   }
+  setAuthScreenStatus("", false);
+  syncAuthScreenUi();
 }
 
-async function onWorkspaceLogin() {
-  const email = dom.workspaceEmail.value.trim();
-  const password = dom.workspacePassword.value;
-  if (!email || !password) {
-    setStatus("Enter email and password.", true);
+async function onWorkspaceLogin(credentials = null) {
+  const username = (credentials?.email ?? dom.workspaceEmail.value).trim();
+  const password = credentials?.password ?? dom.workspacePassword.value;
+  if (!username || !password) {
+    setStatus("Enter username and password.", true);
+    setAuthScreenStatus("Enter username and password.", true);
     return;
   }
 
   const payload = await apiFetch("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ username, password }),
   });
+  setGuestSessionEnabled(false);
   state.session.token = payload.token;
   state.session.user = payload.user;
   persistSessionStorage();
   await loadProjectList();
   await loadServerAiProviderSettings();
+  closeWorkspaceMenu();
+  setAuthScreenStatus("", false);
   setStatus(`Signed in as ${payload.user.email}.`);
 }
 
-async function onWorkspaceRegister() {
-  const fullName = dom.workspaceFullName.value.trim();
-  const email = dom.workspaceEmail.value.trim();
-  const password = dom.workspacePassword.value;
-  if (!fullName || !email || !password) {
-    setStatus("Enter full name, email, and password to create an account.", true);
+async function onWorkspaceRegister(credentials = null) {
+  const username = (credentials?.email ?? dom.workspaceEmail.value).trim();
+  const password = credentials?.password ?? dom.workspacePassword.value;
+  if (!username || !password) {
+    setStatus("Enter username and password to create an account.", true);
+    setAuthScreenStatus("Enter username and password to create an account.", true);
     return;
   }
 
   const payload = await apiFetch("/auth/register", {
     method: "POST",
-    body: JSON.stringify({ fullName, email, password }),
+    body: JSON.stringify({ username, password }),
   });
+  setGuestSessionEnabled(false);
   state.session.token = payload.token;
   state.session.user = payload.user;
   persistSessionStorage();
   await loadProjectList();
   await loadServerAiProviderSettings();
+  closeWorkspaceMenu();
+  setAuthScreenStatus("", false);
   setStatus(`Account created for ${payload.user.email}.`);
 }
 
 function onWorkspaceSignOut() {
+  if (isGuestSession()) {
+    clearSessionState();
+    window.location.reload();
+    return;
+  }
   clearSessionState();
+  setAuthScreenMode("login");
+  setAuthScreenStatus("Signed out. Sign in to continue.");
   syncWorkspaceUi();
-  setStatus("Signed out. Local browser save remains available.");
+  setStatus("Signed out.");
 }
 
 async function onWorkspaceProjectCreate() {
@@ -2451,6 +2636,26 @@ function wireEvents() {
   dom.workspaceLoginBtn?.addEventListener("click", () => onWorkspaceLogin().catch((error) => setStatus(error.message, true)));
   dom.workspaceRegisterBtn?.addEventListener("click", () => onWorkspaceRegister().catch((error) => setStatus(error.message, true)));
   dom.workspaceSignOutBtn?.addEventListener("click", onWorkspaceSignOut);
+  dom.authScreenToggleModeBtn?.addEventListener("click", () => {
+    setAuthScreenStatus("", false);
+    setAuthScreenMode(state.authScreenMode === "register" ? "login" : "register");
+  });
+  dom.authScreenSubmitBtn?.addEventListener("click", () => submitAuthScreen().catch((error) => {
+    setAuthScreenStatus(error.message, true);
+    setStatus(error.message, true);
+  }));
+  dom.authScreenGuestBtn?.addEventListener("click", enterGuestMode);
+  [dom.authScreenFullName, dom.authScreenEmail, dom.authScreenPassword].forEach((input) => {
+    input?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitAuthScreen().catch((error) => {
+          setAuthScreenStatus(error.message, true);
+          setStatus(error.message, true);
+        });
+      }
+    });
+  });
   dom.workspaceProjectCreateBtn?.addEventListener("click", () => onWorkspaceProjectCreate().catch((error) => setStatus(error.message, true)));
   dom.workspaceProjectSelect?.addEventListener("change", () => onWorkspaceProjectSelectChanged().catch((error) => setStatus(error.message, true)));
   dom.workspaceProjectSaveBtn?.addEventListener("click", () => saveActiveProjectNow().catch((error) => setStatus(error.message, true)));
@@ -2641,6 +2846,9 @@ function wireEvents() {
 }
 
 function loadSettings() {
+  if (!canUsePersistentBrowserStorage()) {
+    return;
+  }
   const stored = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
   if (!stored) {
     return;
@@ -2671,6 +2879,9 @@ function loadSettings() {
 }
 
 function persistSettings() {
+  if (!canUsePersistentBrowserStorage()) {
+    return;
+  }
   window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
 }
 
@@ -2718,6 +2929,9 @@ function serializeCurrentMapState() {
 }
 
 function saveMapState() {
+  if (!canUsePersistentBrowserStorage()) {
+    return;
+  }
   const payload = serializeCurrentMapState();
   try {
     window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
@@ -2834,6 +3048,9 @@ async function loadMapState() {
     }
   }
 
+  if (!canUsePersistentBrowserStorage()) {
+    return;
+  }
   const stored = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
   if (!stored) return;
   let saved;
@@ -3421,6 +3638,10 @@ function onWorkerMessage(event) {
 }
 
 function loadCesiumIonToken() {
+  if (!canUsePersistentBrowserStorage()) {
+    dom.cesiumIonToken.value = "";
+    return;
+  }
   const stored = window.localStorage.getItem(CESIUM_ION_TOKEN_STORAGE_KEY);
   if (stored) {
     dom.cesiumIonToken.value = stored;
@@ -3444,12 +3665,12 @@ function clearIonTerrainCaches() {
 
 function onCesiumIonTokenChanged() {
   const token = dom.cesiumIonToken.value.trim();
-  if (token) {
+  if (token && canUsePersistentBrowserStorage()) {
     window.localStorage.setItem(CESIUM_ION_TOKEN_STORAGE_KEY, token);
     if (dom.terrainSourceSelect.value === "ellipsoid") {
       dom.terrainSourceSelect.value = "cesium-world";
     }
-  } else {
+  } else if (canUsePersistentBrowserStorage()) {
     window.localStorage.removeItem(CESIUM_ION_TOKEN_STORAGE_KEY);
     if (dom.terrainSourceSelect.value === "cesium-world") {
       dom.terrainSourceSelect.value = "ellipsoid";
@@ -3635,6 +3856,12 @@ function endAiPanelResize() {
 }
 
 function loadAiProviderSettings() {
+  if (!canUsePersistentBrowserStorage()) {
+    state.ai.savedConfigs = [];
+    setActiveAiDraft("", "", "", "", "");
+    setAiStatusFromCurrentConfig();
+    return;
+  }
   const stored = window.localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
   if (!stored) {
     return;
@@ -3690,6 +3917,9 @@ function loadAiProviderSettings() {
 }
 
 function persistAiProviderSettings() {
+  if (!canUsePersistentBrowserStorage()) {
+    return;
+  }
   window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify({
     configs: state.ai.savedConfigs,
     activeConfigId: state.ai.activeConfigId,
@@ -7469,29 +7699,20 @@ function getActiveTerrain() {
 }
 
 function loadProfiles() {
+  if (!canUsePersistentBrowserStorage()) {
+    state.profiles = createDefaultProfiles();
+    renderProfiles();
+    if (state.profiles[0]) {
+      dom.profileSelect.value = state.profiles[0].id;
+      onProfileSelectionChange();
+    }
+    return;
+  }
   const stored = window.localStorage.getItem(PROFILE_STORAGE_KEY);
   if (stored) {
     state.profiles = JSON.parse(stored);
   } else {
-    state.profiles = [
-      {
-        id: generateId(),
-        profileName: "Standard VHF",
-        type: "radio",
-        force: "friendly",
-        name: "RF-01",
-        unit: "Alpha",
-        frequencyMHz: 350,
-        powerW: 50,
-        antennaHeightM: 10,
-        antennaGainDbi: 2.1,
-        receiverSensitivityDbm: -95,
-        systemLossDb: 1.5,
-        icon: "radio",
-        color: "#38bdf8",
-        notes: "",
-      },
-    ];
+    state.profiles = createDefaultProfiles();
     persistProfiles();
   }
 
@@ -7503,6 +7724,9 @@ function loadProfiles() {
 }
 
 function persistProfiles() {
+  if (!canUsePersistentBrowserStorage()) {
+    return;
+  }
   window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(state.profiles));
 }
 
