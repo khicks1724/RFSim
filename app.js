@@ -551,6 +551,7 @@ const dom = {
   workspaceProjectSaveBtn: document.querySelector("#workspaceProjectSaveBtn"),
   workspaceProjectReloadBtn: document.querySelector("#workspaceProjectReloadBtn"),
   workspaceProjectSnapshotBtn: document.querySelector("#workspaceProjectSnapshotBtn"),
+  workspaceProjectDeleteBtn: document.querySelector("#workspaceProjectDeleteBtn"),
   workspaceProjectStatus: document.querySelector("#workspaceProjectStatus"),
   aiMenuBtn: null,
   aiMenu: null,
@@ -1455,12 +1456,15 @@ function syncWorkspaceUi() {
     dom.workspaceMenuValue.textContent = "Sign In";
     dom.workspaceMenuHeadline.textContent = "Account & Projects";
     dom.workspaceStatus.textContent = "Sign in to save projects to the server. Local browser save remains available until then.";
+    dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
     return;
   }
 
   const userLabel = state.session.user.fullName || state.session.user.email;
+  const activeProject = state.session.projects.find((project) => project.id === state.session.activeProjectId) ?? null;
+  const activeProjectLabel = activeProject?.name || "Local Browser State";
   dom.workspaceUserLabel.textContent = userLabel;
-  dom.workspaceMenuValue.textContent = userLabel;
+  dom.workspaceMenuValue.textContent = activeProjectLabel;
   dom.workspaceMenuHeadline.textContent = state.session.activeProjectId ? "Server Project" : "Workspace";
   dom.workspaceProjectMode.textContent = state.session.activeProjectId ? "Server" : "Local";
   dom.workspaceProjectStatus.textContent = state.session.activeProjectId
@@ -1481,6 +1485,11 @@ function syncWorkspaceUi() {
     dom.workspaceProjectSelect.appendChild(option);
   });
   dom.workspaceProjectSelect.value = state.session.activeProjectId ?? "";
+  if (state.session.activeProjectId) {
+    dom.workspaceProjectDeleteBtn?.removeAttribute("disabled");
+  } else {
+    dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
+  }
 }
 
 async function onWorkspaceLogin() {
@@ -1619,6 +1628,36 @@ async function onWorkspaceProjectSnapshot() {
     body: JSON.stringify({ label, state: serializeCurrentMapState() }),
   });
   setStatus(`Created snapshot ${label}.`);
+}
+
+async function onWorkspaceProjectDelete() {
+  if (!state.session.token) {
+    setStatus("Sign in first to manage server projects.", true);
+    return;
+  }
+
+  const projectId = dom.workspaceProjectSelect.value || state.session.activeProjectId || "";
+  if (!projectId) {
+    setStatus("Select a server project first.", true);
+    return;
+  }
+
+  const project = state.session.projects.find((entry) => entry.id === projectId);
+  const projectName = project?.name || "this project";
+  const confirmed = window.confirm(`Delete "${projectName}"? This removes the server project and its snapshots.`);
+  if (!confirmed) {
+    return;
+  }
+
+  saveMapState();
+  await apiFetch(`/projects/${projectId}`, { method: "DELETE" });
+  state.session.projects = state.session.projects.filter((entry) => entry.id !== projectId);
+  if (state.session.activeProjectId === projectId) {
+    state.session.activeProjectId = null;
+  }
+  persistSessionStorage();
+  syncWorkspaceUi();
+  setStatus(`Deleted project ${projectName}. Switched to local browser state.`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2417,6 +2456,7 @@ function wireEvents() {
   dom.workspaceProjectSaveBtn?.addEventListener("click", () => saveActiveProjectNow().catch((error) => setStatus(error.message, true)));
   dom.workspaceProjectReloadBtn?.addEventListener("click", onWorkspaceProjectReload);
   dom.workspaceProjectSnapshotBtn?.addEventListener("click", () => onWorkspaceProjectSnapshot().catch((error) => setStatus(error.message, true)));
+  dom.workspaceProjectDeleteBtn?.addEventListener("click", () => onWorkspaceProjectDelete().catch((error) => setStatus(error.message, true)));
   document.addEventListener("click", closeTopBarMenus);
   document.addEventListener("click", closeMapContentsMenu);
   document.addEventListener("click", closeRenamePopover);

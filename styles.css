@@ -330,8 +330,8 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 }
 
 .workspace-menu {
-  width: 420px;
-  min-width: 420px;
+  width: 520px;
+  min-width: 520px;
 }
 
 .workspace-menu-title-row {
@@ -339,7 +339,33 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 }
 
 .workspace-menu-button {
-  min-width: 158px;
+  min-width: 220px;
+  max-width: 300px;
+}
+
+.workspace-menu-button .status-chip-action-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.workspace-project-actions {
+  gap: 6px;
+}
+
+.danger-button {
+  border-color: rgba(239, 68, 68, 0.34);
+  color: #fecaca;
+}
+
+.danger-button:hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.56);
+  background: rgba(127, 29, 29, 0.16);
+}
+
+.danger-button:disabled {
+  opacity: 0.45;
 }
 
 .terrain-menu .list-shell,
