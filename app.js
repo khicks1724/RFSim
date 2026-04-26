@@ -11360,17 +11360,68 @@ function finalizeMapDeletionBatch() {
 
 // ── deleteMapContent (with undo) ──────────────────────────────────────────────
 
-function deleteMapContent(contentId, options = {}) {
-  if (contentId.startsWith("folder:")) {
-    state.mapContentFolders = state.mapContentFolders.filter((entry) => `folder:${entry.id}` !== contentId);
-    Array.from(state.mapContentAssignments.entries()).forEach(([itemId, folderId]) => {
-      if (folderId === contentId) {
-        state.mapContentAssignments.delete(itemId);
+function collectFolderDescendants(folderContentId) {
+  // Returns { folderIds: Set, itemIds: Set } of all descendants recursively.
+  const folderIds = new Set();
+  const itemIds = new Set();
+
+  function recurse(fid) {
+    // Direct item children
+    state.mapContentAssignments.forEach((assignedFolderId, cid) => {
+      if (assignedFolderId === fid && !cid.startsWith("folder:")) {
+        itemIds.add(cid);
       }
     });
-    state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== contentId);
+    // Sub-folders
+    state.mapContentFolders.forEach((folder) => {
+      const subfolderId = `folder:${folder.id}`;
+      if (`folder:${folder.parentId}` === fid && !folderIds.has(subfolderId)) {
+        folderIds.add(subfolderId);
+        recurse(subfolderId);
+      }
+    });
+  }
+
+  recurse(folderContentId);
+  return { folderIds, itemIds };
+}
+
+function deleteMapContent(contentId, options = {}) {
+  if (contentId.startsWith("folder:")) {
+    // Collect everything inside this folder tree before removing anything
+    const { folderIds, itemIds } = collectFolderDescendants(contentId);
+
+    // Delete all descendant items (assets, viewsheds, imported shapes, etc.)
+    itemIds.forEach((itemId) => {
+      deleteMapContent(itemId, { deferFinalize: true, silent: true });
+    });
+
+    // Remove all descendant folders from state
+    const allFolderIds = new Set([contentId, ...folderIds]);
+    state.mapContentFolders = state.mapContentFolders.filter(
+      (entry) => !allFolderIds.has(`folder:${entry.id}`)
+    );
+
+    // Clean up assignments and order for all removed folders + items
+    allFolderIds.forEach((fid) => {
+      state.mapContentAssignments.forEach((_, cid) => {
+        if (state.mapContentAssignments.get(cid) === fid) {
+          state.mapContentAssignments.delete(cid);
+        }
+      });
+    });
+    state.mapContentOrder = state.mapContentOrder.filter(
+      (entryId) => !allFolderIds.has(entryId) && !itemIds.has(entryId)
+    );
+    state.hiddenContentIds = new Set(
+      [...state.hiddenContentIds].filter(
+        (id) => !allFolderIds.has(id) && !itemIds.has(id)
+      )
+    );
+
     if (!options.deferFinalize) {
       renderMapContents();
+      syncCesiumEntities();
       saveMapState();
     }
     return;
