@@ -1807,6 +1807,34 @@ function setAutosaveIndicator(state_) {
   }
 }
 
+function flushPendingAutosave() {
+  if (!state.session.autosavePending && !state.session.autosaveTimerId) return;
+  if (!state.session.token || !state.session.activeProjectId) return;
+
+  // Cancel any pending debounce timer — we're firing now
+  if (state.session.autosaveTimerId) {
+    window.clearTimeout(state.session.autosaveTimerId);
+    state.session.autosaveTimerId = null;
+  }
+
+  // Use fetch with keepalive:true — survives page unload, supports auth headers
+  try {
+    fetch(`${API_BASE_URL}/projects/${state.session.activeProjectId}`, {
+      method: "PUT",
+      keepalive: true,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${state.session.token}`,
+      },
+      body: JSON.stringify({ state: serializeCurrentMapState() }),
+    });
+  } catch {
+    // Best-effort — nothing we can do at unload time
+  }
+
+  state.session.autosavePending = false;
+}
+
 function queueActiveProjectAutosave() {
   if (!state.session.token || !state.session.activeProjectId) {
     return;
@@ -2493,6 +2521,10 @@ async function init() {
   state.map.on("contextmenu", onMapContextMenu);
   state.map.on("moveend zoomend resize", updateMapOverlayMetrics);
   state.map.on("moveend zoomend", saveMapState);
+  window.addEventListener("beforeunload", flushPendingAutosave);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPendingAutosave();
+  });
   dom.map.addEventListener("click", (event) => {
     if (!state.placingAsset || state.view3dEnabled) {
       return;
