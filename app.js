@@ -3218,56 +3218,41 @@ function applySavedMapState(saved) {
 }
 
 async function loadMapState() {
+  // Read localStorage first — it is the only place KMZ geometry is persisted.
+  let localState = null;
+  try {
+    const raw = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
+    if (raw) localState = JSON.parse(raw);
+  } catch {
+    window.localStorage.removeItem(MAP_STATE_STORAGE_KEY);
+  }
+
   if (state.session.token && state.session.activeProjectId) {
     try {
       const payload = await apiFetch(`/projects/${state.session.activeProjectId}`);
       const serverState = payload.project?.latest_state_json ?? null;
-      // Only treat the server state as authoritative if it has actual content.
-      // An empty/null server state means the project was never successfully saved —
-      // fall through to localStorage so locally-stored work is not discarded.
-      const serverHasContent = serverState && (
-        (Array.isArray(serverState.assets) && serverState.assets.length > 0) ||
-        (Array.isArray(serverState.importedItems) && serverState.importedItems.length > 0) ||
-        serverState.mapView
-      );
-      if (serverHasContent) {
-        // KMZ-imported items are stored localStorage-only (too large for server).
-        // Merge them back in from localStorage so they survive a refresh.
-        let mergedState = serverState;
-        try {
-          const localRaw = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
-          if (localRaw) {
-            const localState = JSON.parse(localRaw);
-            const localImported = (localState.importedItems ?? []).filter((i) => !i.drawn);
-            if (localImported.length > 0) {
-              mergedState = {
-                ...serverState,
-                importedItems: [...localImported, ...(serverState.importedItems ?? [])],
-              };
-            }
-          }
-        } catch { /* ignore localStorage errors */ }
+
+      if (serverState) {
+        // Server is authoritative for everything EXCEPT importedItems — KMZ geometry
+        // is localStorage-only because it is too large to send to the server.
+        // Pull non-drawn (KMZ) items from localStorage; drawn shapes come from server.
+        const localKmzItems = (localState?.importedItems ?? []).filter((i) => !i.drawn);
+        const serverDrawnItems = (serverState.importedItems ?? []).filter((i) => i.drawn);
+        const mergedState = {
+          ...serverState,
+          importedItems: [...localKmzItems, ...serverDrawnItems],
+        };
         applySavedMapState(mergedState);
         return;
-      }
-      if (serverState && !serverHasContent) {
-        setStatus("Server project has no saved state — loading from browser storage.", false);
       }
     } catch (error) {
       setStatus(`Server project load failed, falling back to browser state: ${error.message}`, true);
     }
   }
 
-  const stored = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
-  if (!stored) return;
-  let saved;
-  try {
-    saved = JSON.parse(stored);
-  } catch {
-    window.localStorage.removeItem(MAP_STATE_STORAGE_KEY);
-    return;
+  if (localState) {
+    applySavedMapState(localState);
   }
-  applySavedMapState(saved);
 }
 
 function toggleSettingsMenu(event) {
