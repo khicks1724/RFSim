@@ -14115,94 +14115,117 @@ function syncCesiumEntities() {
   });
 
   // --- IMPORTED FEATURES ---
-  // Only sync drawn shapes (user-created) to Cesium. KMZ-imported items
-  // (drawn === false) can number in the thousands and overwhelm the Cesium
-  // entity system, causing the 3D view to hang or show nothing. KMZ content
-  // is visible in 2D; for 3D, only user-drawn overlays are synced.
-  const CESIUM_IMPORTED_LIMIT = 500;
+  // Use GeoJsonDataSource for batch rendering — avoids per-entity overhead that
+  // hangs Cesium when KMZ files contain thousands of features.
   const visibleImported = state.importedItems.filter((item) => isVisible(`imported:${item.id}`) && item.layer);
-  const importedToSync = visibleImported.filter((item) => item.drawn);
-  // Include non-drawn items only if the total count is small enough to be safe.
-  const nonDrawn = visibleImported.filter((item) => !item.drawn);
-  const syncList = nonDrawn.length <= CESIUM_IMPORTED_LIMIT
-    ? visibleImported
-    : importedToSync;
 
-  syncList.forEach((item) => {
-    const id = `managed:imported:${item.id}`;
-    if (item.geometryType === "Point") {
-      const latlng = item.layer.getLatLng();
-      const markerStyle = normalizeImportedMarkerStyle(item.markerStyle);
-      const pointColor = markerStyle?.color ?? "#f7b955";
-      const baseEntity = {
-        id,
-        position: C.Cartesian3.fromDegrees(latlng.lng, latlng.lat, 0),
-        label: {
-          text: item.name,
-          font: "13px Bahnschrift",
-          fillColor: C.Color.fromCssColorString(markerStyle?.labelColor ?? "#ffffff"),
-          pixelOffset: new C.Cartesian2(0, markerStyle?.iconUrl ? -22 : -16),
-          heightReference: C.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          style: C.LabelStyle.FILL_AND_OUTLINE,
-          outlineWidth: 2,
-          outlineColor: C.Color.BLACK,
-        },
-      };
-      if (markerStyle?.iconUrl) {
-        entities.add({
-          ...baseEntity,
-          billboard: {
-            image: markerStyle.iconUrl,
-            scale: markerStyle.scale ?? 1,
-            verticalOrigin: C.VerticalOrigin.CENTER,
-            heightReference: C.HeightReference.CLAMP_TO_GROUND,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  // Remove previous imported DataSource if present
+  const DS_NAME = "managed-imported";
+  const existingDs = viewer.dataSources.getByName(DS_NAME);
+  existingDs.forEach((ds) => viewer.dataSources.remove(ds, true));
+
+  if (visibleImported.length > 0) {
+    const features = [];
+    visibleImported.forEach((item) => {
+      try {
+        let geometry = null;
+        if (item.geometryType === "Point") {
+          const latlng = item.layer.getLatLng();
+          geometry = { type: "Point", coordinates: [latlng.lng, latlng.lat] };
+        } else if (item.geometryType === "LineString") {
+          const latlngs = item.layer.getLatLngs();
+          geometry = { type: "LineString", coordinates: latlngs.map((p) => [p.lng, p.lat]) };
+        } else {
+          const rings = item.layer.getLatLngs();
+          const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+          geometry = { type: "Polygon", coordinates: [outer.map((p) => [p.lng, p.lat])] };
+        }
+        const markerStyle = item.geometryType === "Point" ? normalizeImportedMarkerStyle(item.markerStyle) : null;
+        const shapeStyle = item.geometryType !== "Point" ? normalizeImportedShapeStyle(item.geometryType, item.shapeStyle) : null;
+        features.push({
+          type: "Feature",
+          geometry,
+          properties: {
+            name: item.name ?? "",
+            geometryType: item.geometryType,
+            pointColor: markerStyle?.color ?? "#f7b955",
+            pointSize: markerStyle?.size ?? 9,
+            labelColor: markerStyle?.labelColor ?? "#ffffff",
+            strokeColor: shapeStyle?.color ?? "#3388ff",
+            strokeWidth: shapeStyle?.weight ?? 2,
+            fillColor: shapeStyle?.fillColor ?? shapeStyle?.color ?? "#3388ff",
+            fillOpacity: shapeStyle?.fillOpacity ?? 0.2,
           },
         });
-      } else {
-        entities.add({
-          ...baseEntity,
-          point: {
-            pixelSize: markerStyle?.size ?? 9,
-            color: C.Color.fromCssColorString(pointColor),
-            outlineColor: C.Color.WHITE,
-            outlineWidth: 1.5,
-            heightReference: C.HeightReference.CLAMP_TO_GROUND,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-        });
+      } catch (_) { /* skip malformed item */ }
+    });
+
+    const geojson = { type: "FeatureCollection", features };
+    C.GeoJsonDataSource.load(geojson, {
+      clampToGround: true,
+      markerSize: 20,
+    }).then((ds) => {
+      ds.name = DS_NAME;
+      // Apply per-feature styling after load
+      ds.entities.values.forEach((entity) => {
+        const props = entity.properties;
+        if (!props) return;
+        const gtype = props.geometryType?.getValue();
+        if (gtype === "Point") {
+          const color = C.Color.fromCssColorString(props.pointColor?.getValue() ?? "#f7b955");
+          const size = props.pointSize?.getValue() ?? 9;
+          const labelColor = C.Color.fromCssColorString(props.labelColor?.getValue() ?? "#ffffff");
+          if (entity.point) {
+            entity.point.color = color;
+            entity.point.pixelSize = size;
+            entity.point.outlineColor = C.Color.WHITE;
+            entity.point.outlineWidth = 1.5;
+            entity.point.heightReference = C.HeightReference.CLAMP_TO_GROUND;
+            entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+          }
+          if (entity.billboard) {
+            entity.billboard.heightReference = C.HeightReference.CLAMP_TO_GROUND;
+            entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+          }
+          if (entity.label) {
+            entity.label.fillColor = labelColor;
+            entity.label.style = C.LabelStyle.FILL_AND_OUTLINE;
+            entity.label.outlineWidth = 2;
+            entity.label.outlineColor = C.Color.BLACK;
+            entity.label.heightReference = C.HeightReference.CLAMP_TO_GROUND;
+            entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+          }
+        } else if (gtype === "LineString") {
+          const color = C.Color.fromCssColorString(props.strokeColor?.getValue() ?? "#3388ff");
+          const width = props.strokeWidth?.getValue() ?? 2;
+          if (entity.polyline) {
+            entity.polyline.material = color;
+            entity.polyline.width = width;
+            entity.polyline.clampToGround = true;
+          }
+        } else {
+          const stroke = C.Color.fromCssColorString(props.strokeColor?.getValue() ?? "#3388ff");
+          const fill = C.Color.fromCssColorString(props.fillColor?.getValue() ?? "#3388ff")
+            .withAlpha(props.fillOpacity?.getValue() ?? 0.2);
+          const width = props.strokeWidth?.getValue() ?? 2;
+          if (entity.polygon) {
+            entity.polygon.material = fill;
+            entity.polygon.outlineColor = stroke;
+            entity.polygon.outlineWidth = width;
+          }
+          if (entity.polyline) {
+            entity.polyline.material = stroke;
+            entity.polyline.width = width;
+          }
+        }
+      });
+      if (state.cesiumViewer) {
+        viewer.dataSources.add(ds);
       }
-    } else if (item.geometryType === "LineString") {
-      const style = normalizeImportedShapeStyle(item.geometryType, item.shapeStyle);
-      const shapeColor = style.color;
-      const weight = style.weight;
-      const lineStyle = style.lineStyle;
-      const positions = item.layer.getLatLngs().map((p) => C.Cartesian3.fromDegrees(p.lng, p.lat, 0));
-      entities.add({
-        id,
-        polyline: {
-          positions,
-          width: weight,
-          material: getCesiumStrokeMaterial(C, shapeColor, lineStyle),
-          clampToGround: true,
-        },
-      });
-    } else {
-      const rings = item.layer.getLatLngs();
-      const outer = Array.isArray(rings[0]) ? rings[0] : rings;
-      const style = normalizeImportedShapeStyle(item.geometryType, item.shapeStyle);
-      addClampedPolygon(id, outer, {
-        color: style.color,
-        fillColor: style.fillColor ?? style.color,
-        fillOpacity: style.fillOpacity,
-        outlineColor: style.color,
-        outlineWidth: style.weight,
-        lineStyle: style.lineStyle,
-        zIndex: 12,
-      });
-    }
-  });
+    }).catch((err) => {
+      console.warn("GeoJsonDataSource load failed:", err);
+    });
+  }
 
   // --- PLANNING REGION ---
   if (state.planning.regionLayer) {
