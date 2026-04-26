@@ -168,15 +168,163 @@ Sign in to enable named projects. The active project is shown in the top bar.
 
 Guest mode (no sign-in) works fully in browser storage only.
 
-## Optional AI Proxy
+## AI Providers
 
-For `GenAI.mil (STARK)` environments where direct browser access is blocked, run the included proxy:
+The AI assistant supports three provider types. Configure them in **Settings → AI Integration**.
+
+### Anthropic (Claude) / GenAI.mil (STARK)
+
+Enter your API key in the settings panel. GenAI.mil keys start with `STARK_`. If direct browser access to GenAI.mil is blocked by network policy, run the included HTTP proxy:
 
 ```bash
 node genai-proxy.js
 ```
 
-Default endpoint: `http://127.0.0.1:8787/v1/chat/completions`
+The app will automatically fall back to the proxy at `http://127.0.0.1:8787` when direct access fails.
+
+### Local Model (Ollama / LM Studio / llama.cpp)
+
+Run AI inference entirely on your own hardware with no external API keys or internet access required.
+
+**Prerequisites:** Node.js and one of:
+- [Ollama](https://ollama.com) — recommended, simplest setup
+- [LM Studio](https://lmstudio.ai) — GUI-based, good for Windows
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) server mode
+
+#### Setup (one time)
+
+**1. Start your local model server**
+
+```bash
+# Ollama
+ollama serve
+ollama pull llama3          # or mistral, phi3, gemma3, etc.
+
+# LM Studio
+# Load a model and enable Local Server in the app (default port 1234)
+
+# llama.cpp
+./server -m your-model.gguf --port 8080
+```
+
+**2. Start the proxy with TLS**
+
+The proxy generates a self-signed certificate the first time so the browser can call it from HTTPS pages without being blocked by mixed-content policy.
+
+```bash
+node genai-proxy.js --local-model
+```
+
+On first run it prints a one-time platform-specific command to trust the certificate:
+
+| Platform | Trust command |
+|---|---|
+| **Windows** (PowerShell as Admin) | `Import-Certificate -FilePath "certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root` |
+| **macOS** | `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/proxy.crt` |
+| **Linux (Chrome)** | Import via `chrome://settings/certificates` → Authorities |
+| **Linux (Firefox)** | Import via `about:preferences#privacy` → View Certificates → Authorities |
+
+Restart your browser after trusting the certificate.
+
+**3. Configure in the app**
+
+1. Open **Settings → AI Integration**
+2. Select **Local Model (Ollama / LM Studio)** from the Provider dropdown
+3. Leave the Model Server URL at the default or change it to match your server:
+   - Ollama: `http://localhost:11434/v1/chat/completions`
+   - LM Studio: `http://localhost:1234/v1/chat/completions`
+   - llama.cpp: `http://localhost:8080/v1/chat/completions`
+4. Click **Detect Models** — the app will find all loaded models and fill in the model name
+5. Click **Test Connection**
+
+#### Overriding the model server URL
+
+Set the `LOCAL_MODEL_URL` environment variable before starting the proxy to change the default forwarding target:
+
+```bash
+LOCAL_MODEL_URL=http://localhost:1234/v1/chat/completions node genai-proxy.js --local-model
+```
+
+#### Proxy endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `http://127.0.0.1:8787/v1/chat/completions` | GenAI.mil forwarding (HTTP) |
+| `https://127.0.0.1:8788/v1/local/chat/completions` | Local model forwarding (HTTPS) |
+| `https://127.0.0.1:8788/v1/local/health` | Model discovery / health check |
+
+## Deployment
+
+The full stack runs as Docker containers behind nginx. This is the path for a shared hosted deployment where multiple users sign in and have persistent projects.
+
+### Prerequisites
+
+- A Linux server (EC2, VPS, bare metal) with Docker and Docker Compose installed
+- A domain name pointed at the server's public IP
+- Ports 80 and 443 open in the firewall / security group
+
+### Configuration
+
+Copy the example environment file and fill in your values:
+
+```bash
+cp deploy/.env.example deploy/.env
+```
+
+Key variables in `deploy/.env`:
+
+| Variable | Description |
+|---|---|
+| `POSTGRES_PASSWORD` | Database password (choose a strong one) |
+| `JWT_SECRET` | Random secret for signing auth tokens (32+ chars) |
+| `APP_ORIGIN` | Your public URL, e.g. `https://rfplanner.example.com` |
+| `PORT` | Backend port inside the container (default `3000`) |
+
+### Start the stack
+
+```bash
+docker compose up -d --build
+```
+
+This starts three containers:
+- `rfplanner-db` — PostgreSQL database
+- `rfplanner-backend` — Node.js auth and project API
+- `rfplanner-nginx` — nginx reverse proxy serving the frontend and proxying `/api` to the backend
+
+Database migrations run automatically on startup.
+
+### HTTPS / TLS
+
+The nginx config in [deploy/](deploy/) is set up for Certbot. After the stack is running:
+
+```bash
+# Install Certbot on the host
+sudo apt install certbot python3-certbot-nginx
+
+# Obtain a certificate
+sudo certbot --nginx -d rfplanner.example.com
+```
+
+Certbot will patch the nginx config and set up auto-renewal.
+
+### Updating
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Migrations run automatically on restart. No manual SQL steps needed.
+
+### Logs
+
+```bash
+docker compose logs -f backend    # API logs
+docker compose logs -f nginx      # nginx access / error logs
+docker compose logs -f db         # Postgres logs
+```
+
+See [docs/aws-ec2-production.md](docs/aws-ec2-production.md) for a step-by-step EC2 setup guide.
 
 ## Repository Layout
 
