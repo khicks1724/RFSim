@@ -14190,35 +14190,31 @@ function _syncCesiumEntitiesImmediate() {
     }).then((ds) => {
       if (!state.cesiumViewer || viewer._importedDsGeneration !== generation) return;
       ds.name = DS_NAME;
+
+      // Collect outline polylines to add after iteration (can't mutate values array while iterating)
+      const outlineEntitiesToAdd = [];
+
       ds.entities.values.forEach((entity) => {
         const props = entity.properties;
         if (!props) return;
         const gtype = props._gtype?.getValue();
+
         if (gtype === "Point") {
           const color = C.Color.fromCssColorString(props._pc?.getValue() ?? "#f7b955");
           const size = props._ps?.getValue() ?? 9;
-          const labelColor = C.Color.fromCssColorString(props._lc?.getValue() ?? "#ffffff");
-          if (entity.billboard) {
-            entity.billboard.show = false;
-          }
-          if (!entity.point) {
-            entity.point = new C.PointGraphics();
-          }
-          entity.point.color = color;
-          entity.point.pixelSize = size;
-          entity.point.outlineColor = C.Color.WHITE;
-          entity.point.outlineWidth = 1.5;
-          entity.point.heightReference = C.HeightReference.CLAMP_TO_GROUND;
-          entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-          if (entity.label) {
-            entity.label.fillColor = labelColor;
-            entity.label.style = C.LabelStyle.FILL_AND_OUTLINE;
-            entity.label.outlineWidth = 2;
-            entity.label.outlineColor = C.Color.BLACK;
-            entity.label.heightReference = C.HeightReference.CLAMP_TO_GROUND;
-            entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-            entity.label.show = false;
-          }
+          // GeoJsonDataSource creates a billboard for points — replace with a point graphic
+          if (entity.billboard) entity.billboard.show = false;
+          entity.point = new C.PointGraphics({
+            color,
+            pixelSize: size,
+            outlineColor: C.Color.WHITE,
+            outlineWidth: 1.5,
+            heightReference: C.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          });
+          // Hide auto-generated label; name clutter is too dense for thousands of points
+          if (entity.label) entity.label.show = false;
+
         } else if (gtype === "LineString") {
           const color = C.Color.fromCssColorString(props._sc?.getValue() ?? "#3388ff");
           const width = props._sw?.getValue() ?? 2;
@@ -14227,23 +14223,41 @@ function _syncCesiumEntitiesImmediate() {
             entity.polyline.width = width;
             entity.polyline.clampToGround = true;
           }
+
         } else {
+          // Polygon
           const stroke = C.Color.fromCssColorString(props._sc?.getValue() ?? "#3388ff");
           const fill = C.Color.fromCssColorString(props._fc?.getValue() ?? "#3388ff")
             .withAlpha(props._fo?.getValue() ?? 0.2);
           const width = props._sw?.getValue() ?? 2;
           if (entity.polygon) {
             entity.polygon.material = fill;
-            entity.polygon.outline = true;
-            entity.polygon.outlineColor = stroke;
+            // Disable built-in outline — it doesn't work when clampToGround is true
+            entity.polygon.outline = false;
           }
-          if (entity.polyline) {
-            entity.polyline.material = stroke;
-            entity.polyline.width = width;
-            entity.polyline.clampToGround = true;
+          // Add a separate clamped polyline for the outline
+          if (entity.polygon?.hierarchy) {
+            const hierarchy = entity.polygon.hierarchy.getValue
+              ? entity.polygon.hierarchy.getValue()
+              : entity.polygon.hierarchy;
+            const positions = hierarchy?.positions;
+            if (positions && positions.length >= 3) {
+              const closed = [...positions, positions[0]];
+              outlineEntitiesToAdd.push(new C.Entity({
+                polyline: new C.PolylineGraphics({
+                  positions: closed,
+                  width,
+                  material: stroke,
+                  clampToGround: true,
+                }),
+              }));
+            }
           }
         }
       });
+
+      outlineEntitiesToAdd.forEach((e) => ds.entities.add(e));
+
       viewer.dataSources.add(ds);
       console.log(`[Cesium] imported DataSource added: ${ds.entities.values.length} entities`);
     }).catch((err) => {
