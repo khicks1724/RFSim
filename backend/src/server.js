@@ -67,7 +67,9 @@ const loginSchema = z.object({
 const projectSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(500).optional().default(""),
-  state: z.any().optional().default({})
+  state: z.any().optional().default({}),
+  schemaVersion: z.number().int().nonnegative().optional(),
+  clientSavedAt: z.string().datetime({ offset: true }).optional()
 });
 
 const snapshotSchema = z.object({
@@ -282,7 +284,7 @@ app.post("/api/projects", authRequired, async (request, response) => {
 app.get("/api/projects/:projectId", authRequired, async (request, response) => {
   try {
     const result = await query(
-      "select id, name, description, latest_state_json, updated_at from project where id = $1 and owner_user_id = $2",
+      "select id, name, description, latest_state_json, state_schema_version, client_saved_at, updated_at from project where id = $1 and owner_user_id = $2",
       [request.params.projectId, request.user.sub]
     );
     if (result.rowCount === 0) {
@@ -320,6 +322,16 @@ app.put("/api/projects/:projectId", authRequired, async (request, response) => {
     index += 1;
     updates.push(`latest_state_json = $${index}::jsonb`);
     values.push(JSON.stringify(parsed.data.state));
+  }
+  if (parsed.data.schemaVersion !== undefined) {
+    index += 1;
+    updates.push(`state_schema_version = $${index}`);
+    values.push(parsed.data.schemaVersion);
+  }
+  if (parsed.data.clientSavedAt !== undefined) {
+    index += 1;
+    updates.push(`client_saved_at = $${index}`);
+    values.push(parsed.data.clientSavedAt);
   }
 
   updates.push("updated_at = now()");

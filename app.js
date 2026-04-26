@@ -74,6 +74,50 @@ const BUILDING_MATERIAL_MODELS = {
   },
 };
 
+// ─── State schema versioning ──────────────────────────────────────────────────
+// Bump this integer whenever the serialized state shape changes in a way that
+// requires a migration. applySavedMapState() runs migrateStatePayload() first
+// so old saves are always upgraded before being applied.
+const STATE_SCHEMA_VERSION = 1;
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+// Stamp version metadata onto a newly created content record (asset, folder,
+// importedItem). Records loaded from storage already carry these fields.
+function stampContentRecord(record) {
+  if (!record.version) record.version = 1;
+  if (!record.lastModified) record.lastModified = nowIso();
+  return record;
+}
+
+// Upgrade a raw saved-state payload from any prior schema version to the
+// current STATE_SCHEMA_VERSION. Each case falls through intentionally.
+function migrateStatePayload(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  const from = payload.schemaVersion ?? 0;
+  if (from >= STATE_SCHEMA_VERSION) return payload;
+
+  // v0 → v1: add version + lastModified to every content record that lacks them.
+  if (from < 1) {
+    const fallback = nowIso();
+    const stampArray = (arr) =>
+      Array.isArray(arr)
+        ? arr.map((r) => ({ version: 1, lastModified: fallback, ...r }))
+        : arr;
+    payload = {
+      ...payload,
+      schemaVersion: 1,
+      assets: stampArray(payload.assets),
+      importedItems: stampArray(payload.importedItems),
+      mapContentFolders: stampArray(payload.mapContentFolders),
+    };
+  }
+
+  return payload;
+}
+
 function generateId() {
   if (typeof crypto !== "undefined") {
     if (typeof crypto.randomUUID === "function") {
@@ -2215,7 +2259,12 @@ async function saveActiveProjectNow({ silent = false } = {}) {
   } catch { /* quota */ }
 
   try {
-    const body = JSON.stringify({ state: serializeMapStateForServer() });
+    const serverState = serializeMapStateForServer();
+    const body = JSON.stringify({
+      state: serverState,
+      schemaVersion: STATE_SCHEMA_VERSION,
+      clientSavedAt: serverState.savedAt ?? nowIso(),
+    });
     await xhrPutProject(state.session.activeProjectId, body, state.session.token);
   } catch (err) {
     setAutosaveIndicator("error");
@@ -2783,6 +2832,8 @@ const emitterModal = {
           }
         }
         asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+        asset.version = (asset.version ?? 1) + 1;
+        asset.lastModified = nowIso();
         updateAssetMarker(asset);
         renderAssets();
         renderMapContents();
@@ -3419,6 +3470,8 @@ function serializeImportedItem(item) {
 
   return {
     id: item.id,
+    version: item.version ?? 1,
+    lastModified: item.lastModified ?? nowIso(),
     name: item.name,
     subtitle: item.subtitle,
     kind: item.kind,
@@ -3436,6 +3489,8 @@ function serializeCurrentMapState() {
   const serializedImported = state.importedItems.map(serializeImportedItem);
 
   return {
+    schemaVersion: STATE_SCHEMA_VERSION,
+    savedAt: nowIso(),
     mapView: { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() },
     assets: state.assets,
     profiles: state.profiles,
@@ -3458,6 +3513,7 @@ function serializeMapStateForServer() {
   const full = serializeCurrentMapState();
   const { profiles, settings, ...serverState } = full;
   serverState.importedItems = (serverState.importedItems ?? []).filter((item) => item.drawn);
+  // Keep schemaVersion and savedAt so the server can record what version wrote the state.
   return serverState;
 }
 
@@ -3482,8 +3538,9 @@ function saveMapState() {
   queueActiveProjectAutosave();
 }
 
-function applySavedMapState(saved) {
-  if (!saved) return;
+function applySavedMapState(rawSaved) {
+  if (!rawSaved) return;
+  const saved = migrateStatePayload(rawSaved);
 
   // Restore map view
   if (saved.mapView) {
@@ -3519,9 +3576,11 @@ function applySavedMapState(saved) {
     state.settings = { ...state.settings, ...saved.settings };
   }
 
-  // Restore assets
+  // Restore assets — ensure every record carries version metadata after migration.
   if (Array.isArray(saved.assets)) {
     saved.assets.forEach((asset) => {
+      if (!asset.version) asset.version = 1;
+      if (!asset.lastModified) asset.lastModified = nowIso();
       state.assets.push(asset);
       const marker = L.marker([asset.lat, asset.lon], {
         icon: createEmitterIcon(asset),
@@ -3532,11 +3591,13 @@ function applySavedMapState(saved) {
     });
   }
 
-  // Restore imported items
+  // Restore imported items — carry version metadata through.
   if (Array.isArray(saved.importedItems)) {
     saved.importedItems.forEach((saved) => {
       const item = {
         id: saved.id,
+        version: saved.version ?? 1,
+        lastModified: saved.lastModified ?? nowIso(),
         name: saved.name,
         subtitle: saved.subtitle,
         kind: saved.kind,
@@ -7478,7 +7539,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const emitterData = normalizeAiEmitterData(action.asset ?? action);
     // Build asset directly — do NOT route through the shared emitter form so we
     // don't accidentally inherit stale form state or overwrite it for subsequent placements.
-    const newAsset = {
+    const newAsset = stampContentRecord({
       id: generateId(),
       type: emitterData.type ?? "radio",
       force: emitterData.force ?? "friendly",
@@ -7496,7 +7557,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
       lat: assetLat,
       lon: assetLon,
       groundElevationM: sampleTerrainElevation(assetLat, assetLon),
-    };
+    });
     const latlng = { lat: assetLat, lng: assetLon };
     const marker = L.marker(latlng, {
       icon: createEmitterIcon(newAsset),
@@ -7535,6 +7596,8 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
       asset.lon = Number(action.lon);
     }
     asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+    asset.version = (asset.version ?? 1) + 1;
+    asset.lastModified = nowIso();
     const marker = state.assetMarkers.get(asset.id);
     if (marker) {
       marker.setLatLng([asset.lat, asset.lon]);
@@ -8525,13 +8588,13 @@ function addAsset(latlng) {
   // Use modal data if available (preferred), else fall back to hidden form fields
   const formData = state.pendingEmitterData ?? getEmitterFormData();
   state.pendingEmitterData = null;
-  const asset = {
+  const asset = stampContentRecord({
     id: generateId(),
     ...formData,
     lat: latlng.lat,
     lon: latlng.lng,
     groundElevationM: sampleTerrainElevation(latlng.lat, latlng.lng),
-  };
+  });
 
   const marker = L.marker(latlng, {
     icon: createEmitterIcon(asset),
@@ -11635,12 +11698,12 @@ function editMapContent(contentId) {
 }
 
 function addMapContentFolder() {
-  const folder = {
+  const folder = stampContentRecord({
     id: generateId(),
     name: `Folder ${state.mapContentFolders.length + 1}`,
     parentId: null,
     collapsed: false,
-  };
+  });
   state.mapContentFolders.push(folder);
   state.mapContentOrder.push(`folder:${folder.id}`);
   renderMapContents();
@@ -12373,7 +12436,7 @@ function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
 }
 
 function addDrawnFeature(feature, folderId = null) {
-  const item = {
+  const item = stampContentRecord({
     id: generateId(),
     name: feature.name,
     subtitle: `Drawn | ${feature.geometryType}`,
@@ -12384,7 +12447,7 @@ function addDrawnFeature(feature, folderId = null) {
     shapeStyle: normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle ?? { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color }),
     markerStyle: null,
     layer: null,
-  };
+  });
 
   const contentId = `imported:${item.id}`;
   item.layer = createImportedLayer({
@@ -12710,12 +12773,12 @@ function createMapContentFolderFromName(name) {
     return `folder:${existing.id}`;
   }
 
-  const folder = {
+  const folder = stampContentRecord({
     id: generateId(),
     name,
     parentId: null,
     collapsed: false,
-  };
+  });
   state.mapContentFolders.push(folder);
   state.mapContentOrder.push(`folder:${folder.id}`);
   return `folder:${folder.id}`;
@@ -12735,12 +12798,12 @@ function createOrGetNestedMapContentFolder(name, parentFolderId = null, options 
     return `folder:${existing.id}`;
   }
 
-  const folder = {
+  const folder = stampContentRecord({
     id: generateId(),
     name: normalizedName,
     parentId: normalizedParentId,
     collapsed: typeof options.collapsed === "boolean" ? options.collapsed : false,
-  };
+  });
   state.mapContentFolders.push(folder);
   state.mapContentOrder.push(`folder:${folder.id}`);
   return `folder:${folder.id}`;
@@ -12800,7 +12863,7 @@ function resolveImportedFeatureDisplayName(feature, fallbackName) {
 function addImportedFeature(feature, folderId, index, options = {}) {
   const shapeStyle = normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle);
   const markerStyle = normalizeImportedMarkerStyle(feature.markerStyle);
-  const item = {
+  const item = stampContentRecord({
     id: generateId(),
     name: resolveImportedFeatureDisplayName(feature, feature.name || `${feature.geometryType} ${index + 1}`),
     subtitle: `${feature.sourceLabel} | ${feature.geometryType}`,
@@ -12810,7 +12873,7 @@ function addImportedFeature(feature, folderId, index, options = {}) {
     shapeStyle,
     markerStyle,
     layer: null,
-  };
+  });
 
   const contentId = `imported:${item.id}`;
   item.layer = createImportedLayer({
