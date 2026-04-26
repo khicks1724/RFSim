@@ -1214,14 +1214,6 @@ function simulationUsesBuildingModel(propagationModel) {
   return propagationModel === "itu-buildings-weather";
 }
 
-async function gzipJson(data) {
-  const encoded = new TextEncoder().encode(JSON.stringify(data));
-  const cs = new CompressionStream("gzip");
-  const writer = cs.writable.getWriter();
-  writer.write(encoded);
-  writer.close();
-  return new Response(cs.readable).arrayBuffer();
-}
 
 async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers ?? {});
@@ -1784,89 +1776,46 @@ async function onWorkspaceProjectSelectChanged() {
   window.location.reload();
 }
 
-const AUTOSAVE_RING_MS = 1400; // must match the CSS animation duration
+// ── Autosave ─────────────────────────────────────────────────────────────────
+// Three states: saving (ring fills with real XHR progress) → saved (green check)
+//                                                           → error (red X)
+// The indicator is always visible while a project is active.
 
-async function saveActiveProjectNow({ silent = false } = {}) {
-  if (!state.session.token || !state.session.activeProjectId) {
-    return false;
-  }
+const CIRCUMFERENCE = 37.7; // 2π × r=6
 
-  setAutosaveIndicator("saving");
-  const animationDone = new Promise((resolve) => setTimeout(resolve, AUTOSAVE_RING_MS));
-
-  let fetchError = null;
-  try {
-    const body = await gzipJson({ state: serializeMapStateForServer() });
-    const headers = new Headers({
-      "Content-Type": "application/json",
-      "Content-Encoding": "gzip",
-    });
-    if (state.session.token) headers.set("Authorization", `Bearer ${state.session.token}`);
-    const response = await fetch(`${API_BASE_URL}/projects/${state.session.activeProjectId}`, {
-      method: "PUT",
-      headers,
-      body,
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => response.statusText);
-      throw new Error(`HTTP ${response.status}: ${text}`);
-    }
-  } catch (err) {
-    fetchError = err;
-  }
-
-  // Always let the ring animation finish before changing the indicator
-  await animationDone;
-
-  if (fetchError) {
-    setAutosaveIndicator("error");
-    // Re-throw so the caller (queueActiveProjectAutosave) can also show status
-    throw fetchError;
-  }
-
-  state.session.autosavePending = false;
-  syncWorkspaceUi();
-  if (!silent) {
-    setStatus("Project saved to server.");
-  }
-  setAutosaveIndicator("saved");
-  if (_autosaveSavedTimerId) window.clearTimeout(_autosaveSavedTimerId);
-  _autosaveSavedTimerId = window.setTimeout(() => {
-    _autosaveSavedTimerId = null;
-    if (!state.session.autosavePending) setAutosaveIndicator("hidden");
-  }, 2000);
-  return true;
+function setAutosaveRingProgress(fraction) {
+  const fill = document.getElementById("autosaveRingFill");
+  if (fill) fill.style.strokeDashoffset = String(CIRCUMFERENCE * (1 - fraction));
 }
 
-let _autosaveSavedTimerId = null;
-
-const AUTOSAVE_ERROR_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><line x1="8" y1="5" x2="8" y2="8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11" r="0.75" fill="currentColor"/></svg>`;
-const AUTOSAVE_SPINNER_SVG = `<svg class="workspace-autosave-spin" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle class="autosave-spinner-track" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle class="autosave-spinner-fill" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="37.7" stroke-dashoffset="37.7"/></svg>`;
-const AUTOSAVE_CHECK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="3,8 6.5,11.5 13,5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-const AUTOSAVE_CLOCK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><polyline points="8,5 8,8 10.5,9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
 function setAutosaveIndicator(state_) {
-  // ── Top-bar chip indicator ──────────────────────────────────────────────
   const el = dom.autosaveIndicator;
-  if (el) {
-    el.classList.remove("hidden", "is-pending", "is-saving", "is-saved", "is-error");
-    if (state_ === "hidden") {
-      el.classList.add("hidden");
-    } else {
-      el.classList.add(`is-${state_}`);
-      const titles = { pending: "Autosave pending…", saving: "Saving to server…", saved: "All changes saved", error: "Save failed — changes kept in browser storage" };
-      el.setAttribute("title", titles[state_] ?? "");
-    }
+  if (!el) return;
+
+  el.classList.remove("hidden", "is-saving", "is-saved", "is-error");
+
+  if (!state.session.activeProjectId) {
+    el.classList.add("hidden");
+  } else if (state_ === "saving") {
+    el.classList.add("is-saving");
+    el.setAttribute("title", "Saving to server…");
+    setAutosaveRingProgress(0);
+  } else if (state_ === "saved") {
+    el.classList.add("is-saved");
+    el.setAttribute("title", "All changes saved");
+  } else if (state_ === "error") {
+    el.classList.add("is-error");
+    el.setAttribute("title", "Save failed — changes kept in browser storage");
+  } else {
+    el.classList.add("hidden");
   }
 
-  // ── Workspace dropdown status row ───────────────────────────────────────
+  // ── Workspace dropdown status row ─────────────────────────────────────────
   const row = dom.workspaceAutosaveStatus;
-  const icon = dom.workspaceAutosaveIcon;
   const label = dom.workspaceAutosaveLabel;
-  if (!row || !icon || !label) return;
+  if (!row || !label) return;
 
-  if (state_ === "hidden") {
-    row.classList.add("hidden");
+  if (!state.session.activeProjectId) {
     row.className = "workspace-autosave-status hidden";
     return;
   }
@@ -1874,85 +1823,115 @@ function setAutosaveIndicator(state_) {
   row.classList.remove("hidden");
   if (state_ === "saving") {
     row.className = "workspace-autosave-status is-saving";
-    icon.innerHTML = AUTOSAVE_SPINNER_SVG;
     label.textContent = "Saving to server…";
-  } else if (state_ === "pending") {
-    row.className = "workspace-autosave-status is-pending";
-    icon.innerHTML = AUTOSAVE_CLOCK_SVG;
-    label.textContent = "Autosave queued…";
   } else if (state_ === "saved") {
     row.className = "workspace-autosave-status is-saved";
-    icon.innerHTML = AUTOSAVE_CHECK_SVG;
     label.textContent = "All changes saved";
   } else if (state_ === "error") {
     row.className = "workspace-autosave-status is-error";
-    icon.innerHTML = AUTOSAVE_ERROR_SVG;
     label.textContent = "Save failed — changes in browser storage";
+  } else {
+    row.className = "workspace-autosave-status hidden";
   }
 }
 
-function flushPendingAutosave() {
-  // Always flush the latest state to localStorage — this is the guaranteed
-  // local recovery layer for any reload, regardless of server connectivity.
-  const localPayload = serializeCurrentMapState();
+// XHR-based PUT so we get real upload progress events for the ring.
+function xhrPutProject(projectId, body, token) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `${API_BASE_URL}/projects/${projectId}`);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) setAutosaveRingProgress(e.loaded / e.total);
+    });
+    xhr.upload.addEventListener("load", () => setAutosaveRingProgress(1));
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("Network error")));
+    xhr.addEventListener("timeout", () => reject(new Error("Request timed out")));
+    xhr.timeout = 30000;
+    xhr.send(body);
+  });
+}
+
+async function saveActiveProjectNow({ silent = false } = {}) {
+  if (!state.session.token || !state.session.activeProjectId) return false;
+
+  setAutosaveIndicator("saving");
+
+  // Write to localStorage immediately as a safety net
   try {
-    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(localPayload));
-  } catch {
-    // quota exceeded — nothing to do
+    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(serializeCurrentMapState()));
+  } catch { /* quota */ }
+
+  try {
+    const body = JSON.stringify({ state: serializeMapStateForServer() });
+    await xhrPutProject(state.session.activeProjectId, body, state.session.token);
+  } catch (err) {
+    setAutosaveIndicator("error");
+    throw err;
   }
+
+  state.session.autosavePending = false;
+  syncWorkspaceUi();
+  setAutosaveIndicator("saved");
+  return true;
+}
+
+function flushPendingAutosave() {
+  // Always write localStorage — guaranteed local recovery layer.
+  try {
+    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(serializeCurrentMapState()));
+  } catch { /* quota */ }
 
   if (!state.session.autosavePending && !state.session.autosaveTimerId) return;
   if (!state.session.token || !state.session.activeProjectId) return;
 
-  // Cancel any pending debounce timer — we're firing now
   if (state.session.autosaveTimerId) {
     window.clearTimeout(state.session.autosaveTimerId);
     state.session.autosaveTimerId = null;
   }
 
-  // Use fetch with keepalive:true — survives page unload, supports auth headers
-  // Compress asynchronously then fire; keepalive fires even if page is unloading.
-  gzipJson({ state: serializeMapStateForServer() }).then((body) => {
+  // keepalive fetch survives page unload
+  try {
     fetch(`${API_BASE_URL}/projects/${state.session.activeProjectId}`, {
       method: "PUT",
       keepalive: true,
       headers: {
         "Content-Type": "application/json",
-        "Content-Encoding": "gzip",
         "Authorization": `Bearer ${state.session.token}`,
       },
-      body,
+      body: JSON.stringify({ state: serializeMapStateForServer() }),
     });
-  }).catch(() => {
-    // Best-effort — nothing we can do at unload time
-  });
+  } catch { /* best-effort */ }
 
   state.session.autosavePending = false;
 }
 
 function queueActiveProjectAutosave() {
-  if (!state.session.token || !state.session.activeProjectId) {
-    return;
-  }
+  if (!state.session.token || !state.session.activeProjectId) return;
+
   state.session.autosavePending = true;
   syncWorkspaceUi();
-  setAutosaveIndicator("pending");
-  if (_autosaveSavedTimerId) {
-    window.clearTimeout(_autosaveSavedTimerId);
-    _autosaveSavedTimerId = null;
-  }
-  if (state.session.autosaveTimerId) {
-    window.clearTimeout(state.session.autosaveTimerId);
-  }
+
+  if (state.session.autosaveTimerId) window.clearTimeout(state.session.autosaveTimerId);
+
   state.session.autosaveTimerId = window.setTimeout(async () => {
     state.session.autosaveTimerId = null;
     try {
       await saveActiveProjectNow({ silent: true });
     } catch (error) {
       setStatus(`Autosave failed: ${error.message}`, true);
-      setAutosaveIndicator("hidden");
     }
-  }, 900);
+  }, 1500);
 }
 
 function onWorkspaceProjectReload() {
