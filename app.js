@@ -13903,7 +13903,17 @@ async function parseKmzFeatures(buffer, fileName) {
   });
 }
 
+let _syncCesiumRafId = null;
 function syncCesiumEntities() {
+  if (!state.cesiumViewer) return;
+  if (_syncCesiumRafId) return; // already queued — collapse into one call
+  _syncCesiumRafId = requestAnimationFrame(() => {
+    _syncCesiumRafId = null;
+    _syncCesiumEntitiesImmediate();
+  });
+}
+
+function _syncCesiumEntitiesImmediate() {
   if (!state.cesiumViewer) {
     return;
   }
@@ -14119,10 +14129,14 @@ function syncCesiumEntities() {
   // hangs Cesium when KMZ files contain thousands of features.
   const visibleImported = state.importedItems.filter((item) => isVisible(`imported:${item.id}`) && item.layer);
 
-  // Remove previous imported DataSource if present
+  // Remove previous imported DataSource synchronously
   const DS_NAME = "managed-imported";
   const existingDs = viewer.dataSources.getByName(DS_NAME);
   existingDs.forEach((ds) => viewer.dataSources.remove(ds, true));
+
+  // Cancel any in-flight load so a stale result doesn't overwrite a newer one
+  if (!viewer._importedDsGeneration) viewer._importedDsGeneration = 0;
+  const generation = ++viewer._importedDsGeneration;
 
   if (visibleImported.length > 0) {
     const features = [];
@@ -14147,46 +14161,50 @@ function syncCesiumEntities() {
           geometry,
           properties: {
             name: item.name ?? "",
-            geometryType: item.geometryType,
-            pointColor: markerStyle?.color ?? "#f7b955",
-            pointSize: markerStyle?.size ?? 9,
-            labelColor: markerStyle?.labelColor ?? "#ffffff",
-            strokeColor: shapeStyle?.color ?? "#3388ff",
-            strokeWidth: shapeStyle?.weight ?? 2,
-            fillColor: shapeStyle?.fillColor ?? shapeStyle?.color ?? "#3388ff",
-            fillOpacity: shapeStyle?.fillOpacity ?? 0.2,
+            _gtype: item.geometryType,
+            _pc: markerStyle?.color ?? "#f7b955",
+            _ps: markerStyle?.size ?? 9,
+            _lc: markerStyle?.labelColor ?? "#ffffff",
+            _sc: shapeStyle?.color ?? "#3388ff",
+            _sw: shapeStyle?.weight ?? 2,
+            _fc: shapeStyle?.fillColor ?? shapeStyle?.color ?? "#3388ff",
+            _fo: shapeStyle?.fillOpacity ?? 0.2,
           },
         });
       } catch (_) { /* skip malformed item */ }
     });
 
+    console.log(`[Cesium] loading ${features.length} imported features (gen ${generation})`);
     const geojson = { type: "FeatureCollection", features };
     C.GeoJsonDataSource.load(geojson, {
       clampToGround: true,
-      markerSize: 20,
+      markerSize: 12,
+      stroke: C.Color.fromCssColorString("#3388ff"),
+      fill: C.Color.fromCssColorString("#3388ff").withAlpha(0.2),
+      strokeWidth: 2,
     }).then((ds) => {
+      if (!state.cesiumViewer || viewer._importedDsGeneration !== generation) return;
       ds.name = DS_NAME;
-      // Apply per-feature styling after load
       ds.entities.values.forEach((entity) => {
         const props = entity.properties;
         if (!props) return;
-        const gtype = props.geometryType?.getValue();
+        const gtype = props._gtype?.getValue();
         if (gtype === "Point") {
-          const color = C.Color.fromCssColorString(props.pointColor?.getValue() ?? "#f7b955");
-          const size = props.pointSize?.getValue() ?? 9;
-          const labelColor = C.Color.fromCssColorString(props.labelColor?.getValue() ?? "#ffffff");
-          if (entity.point) {
-            entity.point.color = color;
-            entity.point.pixelSize = size;
-            entity.point.outlineColor = C.Color.WHITE;
-            entity.point.outlineWidth = 1.5;
-            entity.point.heightReference = C.HeightReference.CLAMP_TO_GROUND;
-            entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-          }
+          const color = C.Color.fromCssColorString(props._pc?.getValue() ?? "#f7b955");
+          const size = props._ps?.getValue() ?? 9;
+          const labelColor = C.Color.fromCssColorString(props._lc?.getValue() ?? "#ffffff");
           if (entity.billboard) {
-            entity.billboard.heightReference = C.HeightReference.CLAMP_TO_GROUND;
-            entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            entity.billboard.show = false;
           }
+          if (!entity.point) {
+            entity.point = new C.PointGraphics();
+          }
+          entity.point.color = color;
+          entity.point.pixelSize = size;
+          entity.point.outlineColor = C.Color.WHITE;
+          entity.point.outlineWidth = 1.5;
+          entity.point.heightReference = C.HeightReference.CLAMP_TO_GROUND;
+          entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
           if (entity.label) {
             entity.label.fillColor = labelColor;
             entity.label.style = C.LabelStyle.FILL_AND_OUTLINE;
@@ -14194,36 +14212,37 @@ function syncCesiumEntities() {
             entity.label.outlineColor = C.Color.BLACK;
             entity.label.heightReference = C.HeightReference.CLAMP_TO_GROUND;
             entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            entity.label.show = false;
           }
         } else if (gtype === "LineString") {
-          const color = C.Color.fromCssColorString(props.strokeColor?.getValue() ?? "#3388ff");
-          const width = props.strokeWidth?.getValue() ?? 2;
+          const color = C.Color.fromCssColorString(props._sc?.getValue() ?? "#3388ff");
+          const width = props._sw?.getValue() ?? 2;
           if (entity.polyline) {
             entity.polyline.material = color;
             entity.polyline.width = width;
             entity.polyline.clampToGround = true;
           }
         } else {
-          const stroke = C.Color.fromCssColorString(props.strokeColor?.getValue() ?? "#3388ff");
-          const fill = C.Color.fromCssColorString(props.fillColor?.getValue() ?? "#3388ff")
-            .withAlpha(props.fillOpacity?.getValue() ?? 0.2);
-          const width = props.strokeWidth?.getValue() ?? 2;
+          const stroke = C.Color.fromCssColorString(props._sc?.getValue() ?? "#3388ff");
+          const fill = C.Color.fromCssColorString(props._fc?.getValue() ?? "#3388ff")
+            .withAlpha(props._fo?.getValue() ?? 0.2);
+          const width = props._sw?.getValue() ?? 2;
           if (entity.polygon) {
             entity.polygon.material = fill;
+            entity.polygon.outline = true;
             entity.polygon.outlineColor = stroke;
-            entity.polygon.outlineWidth = width;
           }
           if (entity.polyline) {
             entity.polyline.material = stroke;
             entity.polyline.width = width;
+            entity.polyline.clampToGround = true;
           }
         }
       });
-      if (state.cesiumViewer) {
-        viewer.dataSources.add(ds);
-      }
+      viewer.dataSources.add(ds);
+      console.log(`[Cesium] imported DataSource added: ${ds.entities.values.length} entities`);
     }).catch((err) => {
-      console.warn("GeoJsonDataSource load failed:", err);
+      console.warn("[Cesium] GeoJsonDataSource load failed:", err);
     });
   }
 
