@@ -6574,26 +6574,63 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     prompt || "(see attached image)",
   ].filter(Boolean).join("\n\n");
 
-  systemText = [
-    "You are an RF planning assistant embedded in a live map-based RF simulator.",
-    "Answer briefly and precisely.",
-    "If no map or simulation changes are needed, reply in plain text.",
-    "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
-    "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, generate-document.",
-    "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
-    "Use exact ids from the scenario summary.",
-    "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
-    "Do not invent tools, URLs, or ids.",
-    "If terrainLosMatrix is present, use it when discussing LOS or relay placement.",
-    "SCENARIO SUMMARY:",
-    scenarioSummary,
-    contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
-    fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
-    "USER REQUEST:",
-    prompt || "(see attached image)",
-  ].filter(Boolean).join("\n\n");
+  if (state.ai.provider === "local-model") {
+    // Smaller models need a tighter, example-driven prompt with JSON first.
+    // Trim the scenario summary to avoid overwhelming a 4B model.
+    const trimmedSummary = scenarioSummary.length > 6000
+      ? scenarioSummary.slice(0, 6000) + "\n...[truncated]"
+      : scenarioSummary;
 
-  // Build multimodal content for Anthropic; text-only fallback for GenAI.mil
+    systemText = [
+      "You are an RF planning assistant. You MUST respond with valid JSON only — no prose, no markdown, no code fences.",
+      "",
+      "RESPONSE FORMAT (always use this exact structure):",
+      '{"assistantMessage":"Your reply to the user here.","actions":[]}',
+      "",
+      "To place an asset:",
+      '{"assistantMessage":"Placed PRC-163 in Range 400.","actions":[{"type":"add-asset","lat":34.1234,"lon":-116.5678,"name":"PRC-163 Alpha","emitterType":"PRC-163","force":"friendly","frequencyMHz":150,"powerW":5,"antennaHeightM":2,"antennaGainDbi":2.15,"receiverSensitivityDbm":-107,"systemLossDb":3}]}',
+      "",
+      "To place and simulate:",
+      '{"assistantMessage":"Placed and simulated.","actions":[{"type":"add-asset","lat":34.12,"lon":-116.56,"name":"Radio 1","emitterType":"radio","force":"friendly","frequencyMHz":150,"powerW":5,"antennaHeightM":2,"antennaGainDbi":2.15,"receiverSensitivityDbm":-107,"systemLossDb":3},{"type":"run-simulation","placedIndex":0,"propagationModel":"itu-p526","radiusKm":5}]}',
+      "",
+      "RULES:",
+      "- lat and lon MUST be plain numbers from the scenario geometry. NEVER null or strings.",
+      "- If the user references a named area (e.g. Range 400), read its coordinates from importedItems[].geometry.coordinates in the scenario summary.",
+      "- Compute the centroid of the polygon: average all vertex lats, average all vertex lons.",
+      "- force must be: friendly, enemy, host-nation, or civilian.",
+      "- propagationModel values: itu-p525 (free space), itu-p526 (terrain), itu-hybrid (terrain+weather), itu-buildings-weather (buildings).",
+      "- For run-simulation after add-asset in the same response, use placedIndex:0 (not assetId).",
+      "- If no polygon is found for the named area, say so in assistantMessage and use empty actions [].",
+      "- Do not include any text outside the JSON object.",
+      "",
+      "SCENARIO SUMMARY (read coordinates from here):",
+      trimmedSummary,
+      contextDetail ? `SELECTED ITEM:\n${contextDetail}` : "",
+      "USER REQUEST:",
+      prompt || "(no prompt)",
+    ].filter(Boolean).join("\n");
+  } else {
+    systemText = [
+      "You are an RF planning assistant embedded in a live map-based RF simulator.",
+      "Answer briefly and precisely.",
+      "If no map or simulation changes are needed, reply in plain text.",
+      "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
+      "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, generate-document.",
+      "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
+      "Use exact ids from the scenario summary.",
+      "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
+      "Do not invent tools, URLs, or ids.",
+      "If terrainLosMatrix is present, use it when discussing LOS or relay placement.",
+      "SCENARIO SUMMARY:",
+      scenarioSummary,
+      contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
+      fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
+      "USER REQUEST:",
+      prompt || "(see attached image)",
+    ].filter(Boolean).join("\n\n");
+  }
+
+  // Build multimodal content for Anthropic; text-only fallback for others
   let messages;
   if (state.ai.provider === "anthropic" && images.length > 0) {
     const contentBlocks = [];
@@ -6612,7 +6649,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   const raw = state.ai.provider === "anthropic"
     ? await callAnthropic(messages, 1200, 0.2)
     : state.ai.provider === "local-model"
-      ? await callLocalModel(messages, 1200, 0.2)
+      ? await callLocalModel(messages, 2048, 0.1)
       : await callGenAiMil(messages, 1200, 0.2);
   onStatus?.("Parsing response");
   const parsed = parseAiAssistantResponse(raw, prompt);
@@ -6842,19 +6879,29 @@ function parseAiAssistantResponse(text, prompt = "") {
     return { assistantMessage: "", actions: [] };
   }
 
+  // 1. Try direct parse
   try {
     return normalizeAiAssistantPayload(JSON.parse(normalized), normalized, prompt);
-  } catch {
-    const match = normalized.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, normalized), actions: [] };
-    }
+  } catch {}
+
+  // 2. Strip markdown code fences (local models often wrap JSON in ```json ... ```)
+  const fenceMatch = normalized.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) {
     try {
-      return normalizeAiAssistantPayload(JSON.parse(match[0]), normalized, prompt);
-    } catch {
-      return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, normalized), actions: [] };
-    }
+      return normalizeAiAssistantPayload(JSON.parse(fenceMatch[1].trim()), normalized, prompt);
+    } catch {}
   }
+
+  // 3. Extract first {...} block from anywhere in the response
+  const braceMatch = normalized.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try {
+      return normalizeAiAssistantPayload(JSON.parse(braceMatch[0]), normalized, prompt);
+    } catch {}
+  }
+
+  // 4. Plain text fallback
+  return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, normalized), actions: [] };
 }
 
 function normalizeAiAssistantPayload(payload, rawText = "", prompt = "") {
