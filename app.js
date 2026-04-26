@@ -902,6 +902,7 @@ const dom = {
   aiLocalModelSection: document.querySelector("#aiLocalModelSection"),
   aiLocalModelUrlInput: document.querySelector("#aiLocalModelUrlInput"),
   aiLocalModelDetectBtn: document.querySelector("#aiLocalModelDetectBtn"),
+  aiLocalModelPicker: document.querySelector("#aiLocalModelPicker"),
   saveAiProviderBtn: document.querySelector("#saveAiProviderBtn"),
   deleteAiProviderBtn: document.querySelector("#deleteAiProviderBtn"),
   testAiConnectionBtn: document.querySelector("#testAiConnectionBtn"),
@@ -3267,6 +3268,7 @@ function wireEvents() {
   dom.aiApiKeyInput.addEventListener("change", onAiProviderChanged);
   dom.aiLocalModelUrlInput?.addEventListener("change", onLocalModelUrlChanged);
   dom.aiLocalModelDetectBtn?.addEventListener("click", onLocalModelDetect);
+  dom.aiLocalModelPicker?.addEventListener("change", onLocalModelPickerChanged);
   dom.saveAiProviderBtn.addEventListener("click", saveAiProvider);
   dom.deleteAiProviderBtn?.addEventListener("click", deleteAiProvider);
   dom.testAiConnectionBtn.addEventListener("click", testAiProviderConnection);
@@ -4520,30 +4522,59 @@ function onLocalModelUrlChanged() {
 async function onLocalModelDetect() {
   if (dom.aiLocalModelDetectBtn) {
     dom.aiLocalModelDetectBtn.disabled = true;
-    dom.aiLocalModelDetectBtn.textContent = "Detecting...";
+    dom.aiLocalModelDetectBtn.textContent = "Detecting…";
   }
   const health = await fetchLocalModelList();
   if (dom.aiLocalModelDetectBtn) {
     dom.aiLocalModelDetectBtn.disabled = false;
-    dom.aiLocalModelDetectBtn.textContent = "Detect Models";
+    dom.aiLocalModelDetectBtn.textContent = "Detect";
   }
+
   if (!health.reachable) {
-    state.ai.statusMessage = "Proxy reachable but local model server is not responding. Is Ollama / LM Studio running?";
+    state.ai.statusMessage = "Could not reach local model server. Is Ollama / LM Studio running? Is the proxy running with --local-model?";
     syncAiUi();
     return;
   }
-  if (health.models.length > 0) {
-    // Auto-fill the model name field with the first discovered model
-    if (!state.ai.apiKey) {
-      state.ai.apiKey = health.models[0];
-      if (dom.aiApiKeyInput) dom.aiApiKeyInput.value = health.models[0];
-    }
-    state.ai.statusMessage = `Found ${health.models.length} model${health.models.length > 1 ? "s" : ""}: ${health.models.slice(0, 5).join(", ")}`;
+
+  if (health.models.length === 0) {
+    state.ai.statusMessage = "Proxy connected but no models found. Pull a model first (e.g. ollama pull llama3).";
     syncAiUi();
-  } else {
-    state.ai.statusMessage = "Connected to local model server but no models found. Pull a model first (e.g. ollama pull llama3).";
-    syncAiUi();
+    return;
   }
+
+  // Populate the picker dropdown
+  populateLocalModelPicker(health.models);
+
+  // Auto-select: keep current selection if still valid, else pick first
+  const currentModel = state.ai.apiKey.trim();
+  const selectedModel = health.models.includes(currentModel) ? currentModel : health.models[0];
+  state.ai.apiKey = selectedModel;
+  if (dom.aiApiKeyInput) dom.aiApiKeyInput.value = selectedModel;
+  if (dom.aiLocalModelPicker) dom.aiLocalModelPicker.value = selectedModel;
+
+  // Sync model select in chat panel header
+  renderAiModelOptions();
+  if (dom.aiChatModelSelect) dom.aiChatModelSelect.value = selectedModel;
+
+  state.ai.statusMessage = `Found ${health.models.length} model${health.models.length > 1 ? "s" : ""}. Select one and click Test Connection.`;
+  syncAiUi();
+}
+
+function onLocalModelPickerChanged() {
+  const selected = dom.aiLocalModelPicker?.value ?? "";
+  if (!selected) return;
+  state.ai.apiKey = selected;
+  if (dom.aiApiKeyInput) dom.aiApiKeyInput.value = selected;
+  renderAiModelOptions();
+  if (dom.aiChatModelSelect) dom.aiChatModelSelect.value = selected;
+  persistAiProviderSettings();
+}
+
+function populateLocalModelPicker(models) {
+  if (!dom.aiLocalModelPicker) return;
+  dom.aiLocalModelPicker.innerHTML = models
+    .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+    .join("");
 }
 
 async function onAiSavedConfigChanged() {
@@ -4699,6 +4730,9 @@ function syncAiUi() {
     const providerMeta = getAiProviderMeta(state.ai.provider);
     dom.aiApiKeyLabelText.textContent = providerMeta?.keyLabel ?? "API Key";
     dom.aiApiKeyInput.placeholder = providerMeta?.keyPlaceholder ?? "Paste API key";
+    // Hide the API key field entirely for local model — picker handles selection
+    const apiKeyLabel = document.querySelector("#aiApiKeyLabel");
+    if (apiKeyLabel) apiKeyLabel.classList.toggle("hidden", Boolean(isLocalModel));
   }
 
   const providerLabel = state.ai.provider ? getAiProviderLabel(state.ai.provider) : null;
@@ -4720,13 +4754,28 @@ function syncAiUi() {
       ? "Connected"
       : "Offline";
   }
-  // Show/hide local model fields
+  // Show/hide local model fields; switch API key input type
   const isLocalModel = getAiProviderMeta(state.ai.provider)?.isLocalModel;
   if (dom.aiLocalModelSection) {
     dom.aiLocalModelSection.classList.toggle("hidden", !isLocalModel);
   }
+  if (dom.aiApiKeyInput) {
+    dom.aiApiKeyInput.type = isLocalModel ? "text" : "password";
+  }
   if (dom.aiLocalModelUrlInput && isLocalModel) {
     dom.aiLocalModelUrlInput.value = state.ai.localModelUrl;
+  }
+  if (dom.aiLocalModelPicker && isLocalModel && state.ai.apiKey) {
+    // If the picker doesn't yet have this option (e.g. restored from storage), add it
+    const existing = [...dom.aiLocalModelPicker.options].some((o) => o.value === state.ai.apiKey);
+    if (!existing && state.ai.apiKey) {
+      const opt = document.createElement("option");
+      opt.value = state.ai.apiKey;
+      opt.textContent = state.ai.apiKey;
+      dom.aiLocalModelPicker.innerHTML = "";
+      dom.aiLocalModelPicker.appendChild(opt);
+    }
+    dom.aiLocalModelPicker.value = state.ai.apiKey;
   }
 
   renderAiEmptyState();

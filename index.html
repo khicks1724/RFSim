@@ -1265,19 +1265,29 @@
               <span class="ai-local-model-title">Local Model Settings</span>
               <span class="ai-local-model-hint">Requires <code>node genai-proxy.js --local-model</code> running on this machine</span>
             </div>
-            <div class="ai-local-model-fields">
-              <label class="ai-local-model-url-label">
-                Model Server URL
-                <input id="aiLocalModelUrlInput" type="text" placeholder="http://localhost:11434/v1/chat/completions (Ollama default)">
+
+            <div class="ai-local-model-picker-row">
+              <label class="ai-local-model-picker-label">
+                Active Model
+                <div class="ai-local-model-picker-control">
+                  <select id="aiLocalModelPicker" class="ai-local-model-picker">
+                    <option value="">— click Detect to load —</option>
+                  </select>
+                  <button id="aiLocalModelDetectBtn" class="ghost-button small" type="button">Detect</button>
+                </div>
               </label>
-              <button id="aiLocalModelDetectBtn" class="ghost-button small" type="button">Detect Models</button>
+              <label class="ai-local-model-url-label">
+                Model Server URL <span class="ai-local-model-url-hint">(leave blank for Ollama default)</span>
+                <input id="aiLocalModelUrlInput" type="text" placeholder="http://localhost:11434/v1/chat/completions">
+              </label>
             </div>
+
             <div class="ai-local-model-instructions">
               <strong>Quick start:</strong>
               <ol>
                 <li>Install <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a>, or llama.cpp and start it locally.</li>
                 <li>Run <code>node genai-proxy.js --local-model</code> — follow the one-time certificate trust prompt.</li>
-                <li>Enter the model name above (e.g. <code>llama3</code>, <code>mistral</code>) or click <strong>Detect Models</strong>.</li>
+                <li>Click <strong>Detect</strong> to find loaded models, then select one from the dropdown.</li>
                 <li>Click <strong>Test Connection</strong>.</li>
               </ol>
             </div>

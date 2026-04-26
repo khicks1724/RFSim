@@ -1784,19 +1784,55 @@ body:not(.ai-panel-open) .ai-panel {
   font-size: 0.7rem;
 }
 
-.ai-local-model-fields {
+.ai-local-model-picker-row {
   display: flex;
-  gap: 8px;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.ai-local-model-url-label {
-  flex: 1;
+.ai-local-model-picker-label {
   font-size: 0.75rem;
   color: var(--muted);
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.ai-local-model-picker-control {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ai-local-model-picker {
+  flex: 1;
+  height: 32px;
+  background: var(--bg-input, #1e2028);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 0.82rem;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.ai-local-model-picker:focus {
+  outline: none;
+  border-color: var(--border-strong);
+}
+
+.ai-local-model-url-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-local-model-url-hint {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 400;
 }
 
 .ai-local-model-url-label input {
