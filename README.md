@@ -184,65 +184,135 @@ The app will automatically fall back to the proxy at `http://127.0.0.1:8787` whe
 
 ### Local Model (Ollama / LM Studio / llama.cpp)
 
-Run AI inference entirely on your own hardware with no external API keys or internet access required.
+Run AI inference entirely on your own hardware — no external API keys or internet access required.
 
-**Prerequisites:** Node.js and one of:
-- [Ollama](https://ollama.com) — recommended, simplest setup
-- [LM Studio](https://lmstudio.ai) — GUI-based, good for Windows
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) server mode
+**Prerequisites:**
+- [Node.js](https://nodejs.org) (v18 or later)
+- [Git for Windows](https://git-scm.com/download/win) (includes OpenSSL, required for cert generation on Windows)
+- One of: [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or llama.cpp
 
-#### Setup (one time)
+---
 
-**1. Start your local model server**
+#### Step 1 — Install and start your model server
 
-```bash
-# Ollama
+**Ollama (recommended)**
+
+Download and install from [ollama.com](https://ollama.com). Then in a terminal:
+
+```powershell
 ollama serve
-ollama pull llama3          # or mistral, phi3, gemma3, etc.
-
-# LM Studio
-# Load a model and enable Local Server in the app (default port 1234)
-
-# llama.cpp
-./server -m your-model.gguf --port 8080
+ollama pull gemma3:4b     # or llama3, mistral, phi3, etc.
 ```
 
-**2. Start the proxy with TLS**
+Ollama runs on `http://localhost:11434` by default.
 
-The proxy generates a self-signed certificate the first time so the browser can call it from HTTPS pages without being blocked by mixed-content policy.
+**LM Studio**
 
-```bash
+Download from [lmstudio.ai](https://lmstudio.ai). Load a model, then go to **Local Server** in the left sidebar and click **Start Server**. Runs on `http://localhost:1234` by default.
+
+**llama.cpp**
+
+```powershell
+./server.exe -m your-model.gguf --port 8080
+```
+
+---
+
+#### Step 2 — Add Git's OpenSSL to your PATH (Windows only, one time)
+
+The proxy needs OpenSSL to generate a self-signed TLS certificate. Git for Windows ships OpenSSL at `C:\Program Files\Git\usr\bin`.
+
+Open PowerShell and run:
+
+```powershell
+# Temporary (this session only)
+$env:PATH += ";C:\Program Files\Git\usr\bin"
+
+# Permanent (restart terminal after running this)
+[System.Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";C:\Program Files\Git\usr\bin", "User")
+```
+
+---
+
+#### Step 3 — Start the proxy and generate the certificate
+
+Navigate to the project folder and run:
+
+```powershell
+cd "C:\Users\<you>\Desktop\Test Coding\EW_Sim"
 node genai-proxy.js --local-model
 ```
 
-On first run it prints a one-time platform-specific command to trust the certificate:
+On first run the proxy generates `certs/proxy.crt` and prints the trust command for your platform. You will see output like:
+
+```
+🔐  Generating self-signed TLS certificate for localhost...
+✅  Certificate written to certs/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ONE-TIME SETUP — trust the certificate
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Run this once in PowerShell (as Administrator):
+
+    Import-Certificate -FilePath "...\certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root
+
+  Then restart Chrome / Edge.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌐  GenAI.mil proxy   →  http://127.0.0.1:8787/v1/chat/completions
+🤖  Local model proxy →  https://127.0.0.1:8788/v1/local/chat/completions
+```
+
+---
+
+#### Step 4 — Trust the certificate (one time per machine)
+
+Open PowerShell **as Administrator** (right-click → Run as Administrator) and paste the command printed by the proxy:
+
+```powershell
+Import-Certificate -FilePath "C:\Users\<you>\Desktop\Test Coding\EW_Sim\certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root
+```
+
+You should see output confirming the thumbprint was added to the Root store. Then **fully close and reopen Chrome or Edge**.
 
 | Platform | Trust command |
 |---|---|
-| **Windows** (PowerShell as Admin) | `Import-Certificate -FilePath "certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root` |
+| **Windows** (Admin PowerShell) | `Import-Certificate -FilePath "certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root` |
 | **macOS** | `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/proxy.crt` |
-| **Linux (Chrome)** | Import via `chrome://settings/certificates` → Authorities |
-| **Linux (Firefox)** | Import via `about:preferences#privacy` → View Certificates → Authorities |
+| **Linux — Chrome** | `chrome://settings/certificates` → Authorities → Import |
+| **Linux — Firefox** | `about:preferences#privacy` → View Certificates → Authorities → Import |
 
-Restart your browser after trusting the certificate.
+> The certificate is valid for 10 years. You only need to do this once per machine. If you delete the `certs/` folder and regenerate, trust it again.
 
-**3. Configure in the app**
+---
+
+#### Step 5 — Configure the app
 
 1. Open **Settings → AI Integration**
-2. Select **Local Model (Ollama / LM Studio)** from the Provider dropdown
-3. Leave the Model Server URL at the default or change it to match your server:
-   - Ollama: `http://localhost:11434/v1/chat/completions`
-   - LM Studio: `http://localhost:1234/v1/chat/completions`
-   - llama.cpp: `http://localhost:8080/v1/chat/completions`
-4. Click **Detect Models** — the app will find all loaded models and fill in the model name
-5. Click **Test Connection**
+2. Set **Provider** to **Local Model (Ollama / LM Studio)**
+3. Click **Detect** — the app queries the proxy which discovers all loaded models
+4. Select your model from the dropdown (e.g. `gemma3:4b`)
+5. Click **Test Connection** — status should change to **Connected**
+6. Click **Save Key** to persist the config
 
-#### Overriding the model server URL
+If the Model Server URL field is blank it defaults to Ollama (`http://localhost:11434/v1/chat/completions`). Change it only if using LM Studio (`http://localhost:1234/v1/chat/completions`) or llama.cpp.
 
-Set the `LOCAL_MODEL_URL` environment variable before starting the proxy to change the default forwarding target:
+---
 
-```bash
-LOCAL_MODEL_URL=http://localhost:1234/v1/chat/completions node genai-proxy.js --local-model
+#### Keep the proxy running
+
+The proxy must be running whenever you use the local model. Start it before opening the app:
+
+```powershell
+cd "C:\Users\<you>\Desktop\Test Coding\EW_Sim"
+node genai-proxy.js --local-model
+```
+
+To use a different model server port, set the `LOCAL_MODEL_URL` environment variable:
+
+```powershell
+$env:LOCAL_MODEL_URL = "http://localhost:1234/v1/chat/completions"
+node genai-proxy.js --local-model
 ```
 
 #### Proxy endpoints
