@@ -4713,26 +4713,50 @@ function syncAiUi() {
     return;
   }
 
+  const isLocalModel = Boolean(getAiProviderMeta(state.ai.provider)?.isLocalModel);
+
   renderAiSavedConfigOptions();
   renderAiModelOptions();
   dom.aiProviderSelect.value = state.ai.provider;
   if (dom.aiSavedConfigLabelInput) {
     dom.aiSavedConfigLabelInput.value = state.ai.configLabel;
   }
+
+  // API key field: hidden for local model (picker handles it), text vs password for others
+  const apiKeyLabel = document.querySelector("#aiApiKeyLabel");
+  if (apiKeyLabel) apiKeyLabel.classList.toggle("hidden", isLocalModel);
+  dom.aiApiKeyInput.type = isLocalModel ? "text" : "password";
   dom.aiApiKeyInput.value = state.ai.apiKey;
-  if (dom.aiProviderSummary) {
-    const savedCount = state.ai.savedConfigs.length;
-    const savedSummary = savedCount ? ` Saved keys: ${savedCount}.` : "";
-    dom.aiProviderSummary.textContent = `${state.ai.statusMessage}${savedSummary}`;
-  }
 
   if (dom.aiApiKeyLabelText) {
     const providerMeta = getAiProviderMeta(state.ai.provider);
     dom.aiApiKeyLabelText.textContent = providerMeta?.keyLabel ?? "API Key";
     dom.aiApiKeyInput.placeholder = providerMeta?.keyPlaceholder ?? "Paste API key";
-    // Hide the API key field entirely for local model — picker handles selection
-    const apiKeyLabel = document.querySelector("#aiApiKeyLabel");
-    if (apiKeyLabel) apiKeyLabel.classList.toggle("hidden", Boolean(isLocalModel));
+  }
+
+  // Local model section visibility + field sync
+  if (dom.aiLocalModelSection) {
+    dom.aiLocalModelSection.classList.toggle("hidden", !isLocalModel);
+  }
+  if (dom.aiLocalModelUrlInput && isLocalModel) {
+    dom.aiLocalModelUrlInput.value = state.ai.localModelUrl;
+  }
+  if (dom.aiLocalModelPicker && isLocalModel && state.ai.apiKey) {
+    const existing = [...dom.aiLocalModelPicker.options].some((o) => o.value === state.ai.apiKey);
+    if (!existing) {
+      const opt = document.createElement("option");
+      opt.value = state.ai.apiKey;
+      opt.textContent = state.ai.apiKey;
+      dom.aiLocalModelPicker.innerHTML = "";
+      dom.aiLocalModelPicker.appendChild(opt);
+    }
+    dom.aiLocalModelPicker.value = state.ai.apiKey;
+  }
+
+  if (dom.aiProviderSummary) {
+    const savedCount = state.ai.savedConfigs.length;
+    const savedSummary = savedCount ? ` Saved keys: ${savedCount}.` : "";
+    dom.aiProviderSummary.textContent = `${state.ai.statusMessage}${savedSummary}`;
   }
 
   const providerLabel = state.ai.provider ? getAiProviderLabel(state.ai.provider) : null;
@@ -4753,29 +4777,6 @@ function syncAiUi() {
     dom.aiPanelStatus.textContent = state.ai.status === "ready"
       ? "Connected"
       : "Offline";
-  }
-  // Show/hide local model fields; switch API key input type
-  const isLocalModel = getAiProviderMeta(state.ai.provider)?.isLocalModel;
-  if (dom.aiLocalModelSection) {
-    dom.aiLocalModelSection.classList.toggle("hidden", !isLocalModel);
-  }
-  if (dom.aiApiKeyInput) {
-    dom.aiApiKeyInput.type = isLocalModel ? "text" : "password";
-  }
-  if (dom.aiLocalModelUrlInput && isLocalModel) {
-    dom.aiLocalModelUrlInput.value = state.ai.localModelUrl;
-  }
-  if (dom.aiLocalModelPicker && isLocalModel && state.ai.apiKey) {
-    // If the picker doesn't yet have this option (e.g. restored from storage), add it
-    const existing = [...dom.aiLocalModelPicker.options].some((o) => o.value === state.ai.apiKey);
-    if (!existing && state.ai.apiKey) {
-      const opt = document.createElement("option");
-      opt.value = state.ai.apiKey;
-      opt.textContent = state.ai.apiKey;
-      dom.aiLocalModelPicker.innerHTML = "";
-      dom.aiLocalModelPicker.appendChild(opt);
-    }
-    dom.aiLocalModelPicker.value = state.ai.apiKey;
   }
 
   renderAiEmptyState();
