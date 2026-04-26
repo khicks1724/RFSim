@@ -14115,8 +14115,20 @@ function syncCesiumEntities() {
   });
 
   // --- IMPORTED FEATURES ---
-  state.importedItems.filter((item) => isVisible(`imported:${item.id}`)).forEach((item) => {
-    if (!item.layer) return;
+  // Only sync drawn shapes (user-created) to Cesium. KMZ-imported items
+  // (drawn === false) can number in the thousands and overwhelm the Cesium
+  // entity system, causing the 3D view to hang or show nothing. KMZ content
+  // is visible in 2D; for 3D, only user-drawn overlays are synced.
+  const CESIUM_IMPORTED_LIMIT = 500;
+  const visibleImported = state.importedItems.filter((item) => isVisible(`imported:${item.id}`) && item.layer);
+  const importedToSync = visibleImported.filter((item) => item.drawn);
+  // Include non-drawn items only if the total count is small enough to be safe.
+  const nonDrawn = visibleImported.filter((item) => !item.drawn);
+  const syncList = nonDrawn.length <= CESIUM_IMPORTED_LIMIT
+    ? visibleImported
+    : importedToSync;
+
+  syncList.forEach((item) => {
     const id = `managed:imported:${item.id}`;
     if (item.geometryType === "Point") {
       const latlng = item.layer.getLatLng();
