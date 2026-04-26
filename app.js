@@ -5073,6 +5073,7 @@ function buildCompactAiScenarioSummary(contextIds = []) {
       cols: terrain.cols,
       extentVisible: Boolean(terrain.extentVisible),
     } : null,
+    cesiumTerrainAvailable: usesConfiguredCesiumTerrain(),
     planning: {
       hasRegion: Boolean(state.planning.regionLayer),
       recommendationCount: state.planning.recommendations.length,
@@ -5727,7 +5728,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  set-settings          → measurementUnits?, theme?, coordinateSystem?, gridLinesEnabled?",
     "  set-weather           → temperatureC?, humidity?, pressure?, windSpeed?",
     "  set-imagery           → basemap?",
-    "  set-emitter-form      → (emitter fields — pre-fills the UI form only, does NOT place an asset)",
+    "  set-emitter-form      → (emitter fields — pre-fills the UI form only, does NOT place an asset. Do NOT use this when placing assets — use add-asset instead.)",
     "  add-asset             → lat, lon, emitterType, name, force?, unit?, frequencyMHz, powerW, antennaHeightM, antennaGainDbi, receiverSensitivityDbm, systemLossDb, notes?",
     "  update-asset          → assetId (exact id), lat?, lon?, emitterType?, name?, force?, unit?, frequencyMHz?, powerW?, antennaHeightM?, antennaGainDbi?, receiverSensitivityDbm?, systemLossDb?",
     "  remove-asset          → assetId (exact id)",
@@ -5785,14 +5786,22 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "TERRAIN LINE-OF-SIGHT AWARENESS:",
     "═══════════════════════════════════════",
     "The scenario summary includes a `terrainLosMatrix` array. Each entry covers one asset pair:",
-    "  { from, to, distanceKm, losBlocked, minClearanceM, obstructionFrac, obstructionLat, obstructionLon, terrainAvailable }",
+    "  { from, to, distanceKm, losBlocked, minClearanceM, obstructionFrac, obstructionLat, obstructionLon, terrainAvailable, terrainSource }",
     "  losBlocked=true  → terrain physically blocks the LOS path between those assets.",
     "  minClearanceM    → how many meters of clearance the LOS line has above terrain at the worst point (negative = blocked).",
     "  obstructionFrac  → where along the path (0=from, 1=to) the worst obstruction occurs.",
-    "  terrainAvailable=false → no DTED loaded, LOS cannot be verified.",
+    "  terrainAvailable=false → terrain data was unavailable for this pair at summary time.",
+    "  terrainSource    → 'dted' (loaded file) or 'cesium' (Cesium Ion) or null.",
+    "",
+    "TERRAIN SOURCES — the system supports two terrain backends for LOS:",
+    "  1. DTED files (loaded locally) — used synchronously in the scenario summary terrainLosMatrix.",
+    "  2. Cesium Ion terrain (when terrainSource=cesium-world or custom and a token is configured) — used asynchronously by check-los and post-placement LOS checks.",
+    "  If terrainAvailable=false in the scenario summary, it means no DTED is loaded — but Cesium Ion terrain MAY still be available.",
+    "  The check-los action and post-placement LOS checks ALWAYS attempt Cesium Ion terrain as a fallback. NEVER skip LOS checks just because terrainAvailable=false in the summary.",
     "",
     "BEFORE recommending or placing assets, CHECK the terrainLosMatrix for existing assets.",
-    "WHEN PLACING NEW ASSETS, the system will compute LOS after placement and report warnings.",
+    "WHEN PLACING NEW ASSETS, the system will automatically compute LOS after placement using the best available terrain source and report warnings.",
+    "ALWAYS emit check-los actions before placement when you need to pre-verify candidate positions — even with no DTED, Cesium Ion terrain will be used.",
     "LOS PLACEMENT RULES:",
     "  • Never place a radio on the VALLEY side of a mountain range relative to its intended peer — it will be blocked.",
     "  • Ridgelines and hilltops maximise LOS. Place assets near the highest local terrain within the polygon.",
@@ -5800,7 +5809,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  • Repeater/relay placement: if direct LOS is impossible, suggest a relay on an intermediate high point.",
     "  • For 3 radios requiring mutual coverage: a triangular arrangement on elevated terrain at polygon corners/ridges is ideal — NOT a cluster in one area.",
     "  • Earth curvature matters for links >30 km: a 5 W VHF radio at 2 m antenna height has radio horizon of ~7–10 km in flat terrain.",
-    "  • If terrain data is NOT available (terrainAvailable=false), state this limitation clearly and place assets conservatively on estimated high ground based on polygon geometry.",
+    "  • If terrain data is NOT available from any source, state this and place assets conservatively on estimated high ground based on polygon geometry.",
     "",
     "═══════════════════════════════════════",
     "SPATIAL REASONING:",
@@ -6193,6 +6202,110 @@ function buildLosMatrix(assetsToCheck) {
   return links;
 }
 
+// Async version of computeTerrainLos — falls back to Cesium Ion terrain sampling
+// when no DTED file is loaded. Samples fewer points (20) to limit API calls.
+async function computeTerrainLosAsync(lat1, lon1, h1m, lat2, lon2, h2m) {
+  const terrain = getActiveTerrain();
+  if (terrain) {
+    return computeTerrainLos(lat1, lon1, h1m, lat2, lon2, h2m, terrain);
+  }
+
+  // No DTED — try Cesium terrain if configured
+  if (!usesConfiguredCesiumTerrain()) {
+    return { hasTerrain: false };
+  }
+
+  const SAMPLES = 20;
+  const EARTH_R = 6371000;
+  const Re = (4 / 3) * EARTH_R;
+
+  const distM = state.map.distance({ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 });
+  if (distM < 10) {
+    return { hasTerrain: true, blocked: false, minClearanceM: 9999, distanceM: distM };
+  }
+
+  // Sample endpoint elevations
+  const [el1Raw, el2Raw] = await Promise.all([
+    sampleCesiumTerrainElevation(lat1, lon1),
+    sampleCesiumTerrainElevation(lat2, lon2),
+  ]);
+  const el1 = el1Raw ?? 0;
+  const el2 = el2Raw ?? 0;
+  const msl1 = el1 + h1m;
+  const msl2 = el2 + h2m;
+
+  // Sample interior points sequentially to avoid hammering Cesium
+  let minClearanceM = Infinity;
+  let worstFrac = 0;
+  let worstLat = lat1;
+  let worstLon = lon1;
+  let blocked = false;
+  let sampledAny = false;
+
+  for (let i = 1; i < SAMPLES; i++) {
+    const frac = i / SAMPLES;
+    const lat = lat1 + (lat2 - lat1) * frac;
+    const lon = lon1 + (lon2 - lon1) * frac;
+    const terrainElM = await sampleCesiumTerrainElevation(lat, lon);
+    if (terrainElM === null) continue;
+    sampledAny = true;
+
+    const losHeightM = msl1 + (msl2 - msl1) * frac;
+    const d = frac * distM;
+    const bulgeCorrectionM = (d * (distM - d)) / (2 * Re);
+    const clearanceM = (losHeightM - bulgeCorrectionM) - terrainElM;
+
+    if (clearanceM < minClearanceM) {
+      minClearanceM = clearanceM;
+      worstFrac = frac;
+      worstLat = lat;
+      worstLon = lon;
+    }
+    if (clearanceM < 0) blocked = true;
+  }
+
+  if (!sampledAny) return { hasTerrain: false };
+
+  return {
+    hasTerrain: true,
+    source: "cesium",
+    blocked,
+    minClearanceM: Math.round(minClearanceM),
+    distanceM: Math.round(distM),
+    obstructionFrac: blocked ? Math.round(worstFrac * 100) / 100 : null,
+    obstructionLat: blocked ? Math.round(worstLat * 10000) / 10000 : null,
+    obstructionLon: blocked ? Math.round(worstLon * 10000) / 10000 : null,
+  };
+}
+
+// Async LOS matrix — uses Cesium terrain fallback when no DTED is loaded.
+async function buildLosMatrixAsync(assetsToCheck) {
+  const links = [];
+  const cap = Math.min(assetsToCheck.length, 10);
+  for (let i = 0; i < cap; i++) {
+    for (let j = i + 1; j < cap; j++) {
+      const a = assetsToCheck[i];
+      const b = assetsToCheck[j];
+      const h1 = Number.isFinite(a.antennaHeightM) ? a.antennaHeightM : 2;
+      const h2 = Number.isFinite(b.antennaHeightM) ? b.antennaHeightM : 2;
+      const result = await computeTerrainLosAsync(a.lat, a.lon, h1, b.lat, b.lon, h2);
+      links.push({
+        from: a.name ?? a.id,
+        to: b.name ?? b.id,
+        distanceKm: result.distanceM ? Math.round(result.distanceM / 100) / 10 : null,
+        losBlocked: result.blocked ?? null,
+        minClearanceM: result.hasTerrain ? result.minClearanceM : null,
+        obstructionFrac: result.obstructionFrac ?? null,
+        obstructionLat: result.obstructionLat ?? null,
+        obstructionLon: result.obstructionLon ?? null,
+        terrainAvailable: result.hasTerrain,
+        terrainSource: result.hasTerrain ? (result.source ?? "dted") : null,
+      });
+    }
+  }
+  return links;
+}
+
 // ─── End LOS check ──────────────────────────────────────────────────────────
 
 function buildAiScenarioSummary() {
@@ -6302,9 +6415,11 @@ function enrichAiResponseWithLinks(text, placedAssets = []) {
 
 async function executeAiActions(actions) {
   const results = [];
-  // Track asset IDs placed this batch so run-simulation can target them by index
   const placedAssetIds = [];
+  const hasAddAsset = actions.some((a) => a.type === "add-asset");
   for (const action of actions) {
+    // Suppress set-emitter-form noise when add-asset is also in the batch
+    if (action.type === "set-emitter-form" && hasAddAsset) continue;
     const result = await executeAiAction(action, { placedAssetIds });
     if (result) {
       results.push(result);
@@ -6315,23 +6430,29 @@ async function executeAiActions(actions) {
 
   // After all placements, run a LOS check on newly placed assets and append warnings
   if (placedAssetIds.length >= 2) {
-    const losLinks = buildLosMatrix(placedAssets);
-    const blockedLinks = losLinks.filter((l) => l.losBlocked === true);
-    const marginalLinks = losLinks.filter((l) => l.losBlocked === false && l.minClearanceM !== null && l.minClearanceM < 10);
+    const losLinks = await buildLosMatrixAsync(placedAssets);
+    const checkedLinks = losLinks.filter((l) => l.terrainAvailable);
+    const uncheckedLinks = losLinks.filter((l) => !l.terrainAvailable);
+    const blockedLinks = checkedLinks.filter((l) => l.losBlocked === true);
+    const marginalLinks = checkedLinks.filter((l) => l.losBlocked === false && l.minClearanceM !== null && l.minClearanceM < 10);
+    const terrainSource = losLinks.find((l) => l.terrainSource)?.terrainSource;
+    const sourceLabel = terrainSource === "cesium" ? " (Cesium Ion terrain)" : terrainSource === "dted" ? " (DTED)" : "";
+
     if (blockedLinks.length > 0) {
-      const warnings = blockedLinks.map((l) =>
-        `⚠ LOS BLOCKED: ${l.from} ↔ ${l.to} (${l.distanceKm} km) — terrain obstruction at ~${Math.round((l.obstructionFrac ?? 0.5) * 100)}% along path`
+      blockedLinks.forEach((l) =>
+        results.push(`⚠ LOS BLOCKED${sourceLabel}: ${l.from} ↔ ${l.to} (${l.distanceKm} km) — terrain obstruction at ~${Math.round((l.obstructionFrac ?? 0.5) * 100)}% along path`)
       );
-      results.push(...warnings);
     }
     if (marginalLinks.length > 0) {
-      const warnings = marginalLinks.map((l) =>
-        `⚠ LOS MARGINAL: ${l.from} ↔ ${l.to} — only ${l.minClearanceM} m clearance above terrain`
+      marginalLinks.forEach((l) =>
+        results.push(`⚠ LOS MARGINAL${sourceLabel}: ${l.from} ↔ ${l.to} — only ${l.minClearanceM} m clearance above terrain`)
       );
-      results.push(...warnings);
     }
-    if (blockedLinks.length === 0 && marginalLinks.length === 0 && losLinks.some((l) => l.terrainAvailable)) {
-      results.push(`✓ LOS clear on all ${losLinks.length} link(s) between placed assets.`);
+    if (checkedLinks.length > 0 && blockedLinks.length === 0 && marginalLinks.length === 0) {
+      results.push(`✓ LOS clear on all ${checkedLinks.length} link(s)${sourceLabel}.`);
+    }
+    if (uncheckedLinks.length > 0 && checkedLinks.length === 0) {
+      results.push("⚠ LOS could not be verified — no terrain source available (no DTED, no Cesium Ion terrain).");
     }
   }
 
@@ -6708,26 +6829,31 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   // Check LOS between a set of candidate coordinates before committing to placement.
   // action.candidates: [{lat, lon, name, antennaHeightM?}]
   if (action.type === "check-los") {
-    const terrain = getActiveTerrain();
-    if (!terrain) {
-      return "LOS check skipped: no DTED terrain loaded. Cannot verify line-of-sight.";
+    const hasDted = Boolean(getActiveTerrain());
+    const hasCesium = usesConfiguredCesiumTerrain();
+    if (!hasDted && !hasCesium) {
+      return "LOS check skipped: no terrain source available (no DTED loaded and no Cesium Ion terrain configured).";
     }
     const candidates = Array.isArray(action.candidates) ? action.candidates : [];
     if (candidates.length < 2) {
       return "LOS check skipped: need at least 2 candidate positions.";
     }
-    const links = buildLosMatrix(candidates.map((c) => ({
+    const mapped = candidates.map((c, idx) => ({
       lat: Number(c.lat),
       lon: Number(c.lon ?? c.lng),
-      name: c.name ?? `Point ${candidates.indexOf(c) + 1}`,
+      name: c.name ?? `Point ${idx + 1}`,
       antennaHeightM: Number(c.antennaHeightM) || 2,
-    })));
+    }));
+    const links = await buildLosMatrixAsync(mapped);
+    const source = links.some((l) => l.terrainSource === "cesium") ? " (via Cesium Ion terrain)" : " (via DTED)";
     const lines = links.map((l) =>
-      l.losBlocked
-        ? `BLOCKED: ${l.from} ↔ ${l.to} (${l.distanceKm} km) — obstruction at ${Math.round((l.obstructionFrac ?? 0.5) * 100)}% along path`
-        : `CLEAR: ${l.from} ↔ ${l.to} (${l.distanceKm} km, ${l.minClearanceM} m clearance)`
+      !l.terrainAvailable
+        ? `UNKNOWN: ${l.from} ↔ ${l.to} — terrain data unavailable for this link`
+        : l.losBlocked
+          ? `BLOCKED: ${l.from} ↔ ${l.to} (${l.distanceKm} km) — obstruction at ${Math.round((l.obstructionFrac ?? 0.5) * 100)}% along path`
+          : `CLEAR: ${l.from} ↔ ${l.to} (${l.distanceKm} km, ${l.minClearanceM} m clearance)`
     );
-    return `LOS check results:\n${lines.join("\n")}`;
+    return `LOS check results${source}:\n${lines.join("\n")}`;
   }
 
   return `Skipped unsupported action type ${action.type}.`;
