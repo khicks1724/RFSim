@@ -3132,8 +3132,26 @@ function positionOpenTopBarDropdowns() {
 }
 
 function initMap() {
+  // Shared canvas renderer for all imported polygon/line geometry. A single
+  // <canvas> element replaces thousands of individual SVG DOM nodes, which is
+  // the primary cause of pan jitter on large KMZ imports.
+  state.canvasRenderer = L.canvas({ padding: 0.5, tolerance: 5 });
+
   state.map = L.map("map", {
     zoomControl: true,
+    // Render the base layer onto a canvas; prevents tile repaints from
+    // triggering a full SVG reflow on every frame.
+    preferCanvas: false, // tiles stay as <img> — canvas for vector layers only
+    // Keep a 3-tile-wide border of loaded tiles around the viewport so panning
+    // reveals pre-loaded tiles instead of blank grey areas.
+    keepBuffer: 4,
+    // Don't hammer the tile server while the user is actively panning —
+    // wait until movement stops before requesting new tiles.
+    updateWhenIdle: true,
+    updateWhenZooming: false,
+    // Throttle wheel zoom so the viewport doesn't request a new tile set on
+    // every scroll tick.
+    wheelDebounceTime: 100,
   }).setView([34.744, -116.151], 10);
   state.viewshedRootLayer.addTo(state.map);
 }
@@ -8445,6 +8463,9 @@ function applyBasemap(key) {
     attribution: config.attribution,
     maxZoom: config.maxZoom,
     crossOrigin: true,
+    keepBuffer: 4,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
   });
   state.baseLayer.addTo(state.map);
   updateImageryMenuValue(config.label);
@@ -12348,11 +12369,16 @@ function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle 
     });
   }
 
+  // Use the shared canvas renderer for all vector geometry. This batches every
+  // polygon and line into one <canvas> element instead of one SVG node per
+  // feature, eliminating the DOM overhead that causes pan jitter on large KMZs.
+  const renderer = state.canvasRenderer;
   const style = normalizeImportedShapeStyle(geometryType, shapeStyle);
   const dashArray = getLeafletDashArray(style.lineStyle);
   if (geometryType === "LineString") {
     return L.polyline(coordinates, {
       pane,
+      renderer,
       color: style.color,
       opacity: style.opacity,
       weight: style.weight,
@@ -12362,6 +12388,7 @@ function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle 
 
   return L.polygon(coordinates, {
     pane,
+    renderer,
     color: style.color,
     opacity: style.opacity,
     fillColor: style.fillColor ?? style.color,
@@ -12447,7 +12474,7 @@ function updateDrawPreview(cursor) {
     state.draw.previewLayer = null;
   }
   const { mode, points } = state.draw;
-  const opts = { color: DRAW_DEFAULTS.color, weight: DRAW_DEFAULTS.weight, dashArray: "6 4", fillOpacity: 0.12, interactive: false };
+  const opts = { color: DRAW_DEFAULTS.color, weight: DRAW_DEFAULTS.weight, dashArray: "6 4", fillOpacity: 0.12, interactive: false, renderer: state.canvasRenderer };
 
   if (mode === "circle" && points.length === 1) {
     const radiusM = state.map.distance(points[0], cursor);
