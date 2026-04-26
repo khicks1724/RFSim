@@ -434,6 +434,39 @@ const RADIO_LIBRARY = {
       },
     },
   },
+  "xts-2500": {
+    label: "Motorola XTS 2500 (P25)",
+    programs: {
+      "p25-uhf": {
+        label: "P25 Phase 1 UHF",
+        rf: { frequencyMHz: 460, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-C4FM", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 100, adaptiveDataRate: false },
+      },
+      "p25-vhf": {
+        label: "P25 Phase 1 VHF",
+        rf: { frequencyMHz: 155, bandwidthKHz: 12.5, modulation: "FM", waveform: "P25-C4FM", duplex: "half-duplex", channelSpacingKHz: 12.5 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 4.8 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 100, adaptiveDataRate: false },
+      },
+      "analog-uhf": {
+        label: "Analog Conventional UHF",
+        rf: { frequencyMHz: 460, bandwidthKHz: 25, modulation: "FM", waveform: "analog", duplex: "half-duplex", channelSpacingKHz: 25 },
+        tx: { powerW: 5, dutyCycle: 0.5, papr: 0, spectralEfficiency: 2.4 },
+        rx: { sensitivityDbm: -116, noiseFigDb: 5, requiredSnrDb: 12, acrDb: 70, bdrDb: 90 },
+        antenna: { type: "whip", gainDbi: 2.15, pattern: "omnidirectional", polarization: "vertical", heightM: 1.8, cableLossDb: 0.3, systemLossDb: 2 },
+        prop: { model: "itu-p526", clutter: "urban", terrainEnabled: true, diffractionEnabled: true },
+        net: { isManet: false, relayCapable: false, maxHops: 1, latencyMs: 0, adaptiveDataRate: false },
+      },
+    },
+  },
+
   // ── MANET / Mesh Radios ──────────────────────────────────────────────────────
 
   "silvus-sc4200": {
@@ -6137,6 +6170,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  PRC-117G (SATCOM/VHF/UHF):              frequencyMHz=50, powerW=20, antennaHeightM=2, antennaGainDbi=2.15, receiverSensitivityDbm=-107, systemLossDb=3",
     "  AN/PRC-77 (legacy VHF):                 frequencyMHz=60, powerW=4, antennaHeightM=2, antennaGainDbi=2.0, receiverSensitivityDbm=-105, systemLossDb=3",
     "  SINCGARS / VRC-90:                      frequencyMHz=50, powerW=50, antennaHeightM=3, antennaGainDbi=2.15, receiverSensitivityDbm=-107, systemLossDb=2",
+    "  Motorola XTS 2500 (P25 UHF):           frequencyMHz=460, powerW=5, antennaHeightM=1.8, antennaGainDbi=2.15, receiverSensitivityDbm=-116, systemLossDb=2  (P25 Phase 1 C4FM, also supports analog conventional, UHF or VHF band)",
     "  ── Battalion CP / High-Tier ──",
     "  AN/PRC-160 HF ALE (NVIS):               frequencyMHz=7, powerW=20, antennaHeightM=5.5, antennaGainDbi=2.0, receiverSensitivityDbm=-115, systemLossDb=2  (HF 2–30 MHz, NVIS 50–500 km, long-haul beyond NVIS skip zone)",
     "  AN/PRC-160 HF ALE (long-haul):          frequencyMHz=18, powerW=20, antennaHeightM=8, antennaGainDbi=2.15, receiverSensitivityDbm=-115, systemLossDb=3",
