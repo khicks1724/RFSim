@@ -3848,9 +3848,9 @@ function applySettings() {
 }
 
 function updateCenterCrosshairVisibility() {
-  const shouldShow = Boolean(state.settings.centerGridEnabled || state.placingAsset);
+  const shouldShow = Boolean(state.settings.centerGridEnabled && !state.placingAsset);
   dom.centerGridCrosshair?.classList.toggle("hidden", !shouldShow);
-  dom.centerGridCrosshair?.classList.toggle("placement-crosshair-active", state.placingAsset);
+  dom.centerGridCrosshair?.classList.remove("placement-crosshair-active");
 }
 
 function updateWeatherUnitLabels() {
