@@ -832,6 +832,82 @@ const KMZ_ITEMS_STORAGE_KEY_PREFIX = "ew-sim-kmz-items";
 function getKmzStorageKey(projectId) {
   return projectId ? `${KMZ_ITEMS_STORAGE_KEY_PREFIX}:${projectId}` : `${KMZ_ITEMS_STORAGE_KEY_PREFIX}:guest`;
 }
+
+// ─── IndexedDB KMZ store ──────────────────────────────────────────────────────
+// localStorage cannot hold large KMZ imports (quota ~5-10 MB). IndexedDB has
+// no practical size limit and is the correct storage for binary/large data.
+// All KMZ (non-drawn) imported items are stored here keyed by project ID.
+const IDB_NAME = "ew-sim-idb";
+const IDB_VERSION = 1;
+const IDB_STORE_KMZ = "kmz-items"; // records: { projectKey, items[] }
+
+let _idbPromise = null;
+function openIdb() {
+  if (_idbPromise) return _idbPromise;
+  _idbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(IDB_STORE_KMZ)) {
+        db.createObjectStore(IDB_STORE_KMZ, { keyPath: "projectKey" });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+  return _idbPromise;
+}
+
+async function idbSaveKmzItems(projectId, items) {
+  try {
+    const db = await openIdb();
+    const projectKey = getKmzStorageKey(projectId);
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_KMZ, "readwrite");
+      tx.objectStore(IDB_STORE_KMZ).put({ projectKey, items });
+      tx.oncomplete = resolve;
+      tx.onerror = (e) => reject(e.target.error);
+    });
+  } catch (err) {
+    console.warn("[idb] KMZ save failed, falling back to localStorage:", err.message);
+    // Fallback: try localStorage (will fail silently if over quota)
+    try {
+      const key = getKmzStorageKey(projectId);
+      window.localStorage.setItem(key, JSON.stringify(items));
+    } catch { /* quota */ }
+  }
+}
+
+async function idbLoadKmzItems(projectId) {
+  // Try IndexedDB first, then fall back to localStorage for legacy saves.
+  try {
+    const db = await openIdb();
+    const projectKey = getKmzStorageKey(projectId);
+    const record = await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_KMZ, "readonly");
+      const req = tx.objectStore(IDB_STORE_KMZ).get(projectKey);
+      req.onsuccess = (e) => resolve(e.target.result);
+      req.onerror = (e) => reject(e.target.error);
+    });
+    if (record?.items?.length) return record.items;
+  } catch (err) {
+    console.warn("[idb] KMZ load failed, trying localStorage:", err.message);
+  }
+  // Legacy localStorage fallback
+  try {
+    const raw = window.localStorage.getItem(getKmzStorageKey(projectId));
+    if (raw) {
+      const items = JSON.parse(raw);
+      if (items?.length) {
+        // Migrate to IndexedDB and clear the localStorage key
+        await idbSaveKmzItems(projectId, items);
+        window.localStorage.removeItem(getKmzStorageKey(projectId));
+        return items;
+      }
+    }
+  } catch { /* corrupt */ }
+  return [];
+}
 const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
 const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
 const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
@@ -3555,19 +3631,20 @@ function saveMapViewPosition() {
 function saveMapState() {
   const payload = serializeCurrentMapState();
 
-  // Split KMZ (non-drawn) items into their own project-scoped key so the main
-  // blob stays small enough to fit in localStorage quota. Large KMZ files
-  // previously caused the full-blob write to silently fail, leaving nothing to
-  // restore on the next page load.
+  // KMZ (non-drawn) items go to IndexedDB — no size limit, async, non-blocking.
+  // Drawn items and structural state go to localStorage (small enough to fit).
   const kmzItems = (payload.importedItems ?? []).filter((i) => !i.drawn);
   const drawnItems = (payload.importedItems ?? []).filter((i) => i.drawn);
   const compactPayload = { ...payload, importedItems: drawnItems };
 
+  // Fire-and-forget — KMZ write is async but we don't need to await it here.
+  idbSaveKmzItems(state.session.activeProjectId, kmzItems).catch(() => {});
+
   try {
     window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(compactPayload));
   } catch {
-    // Still over quota even without KMZ — store minimal envelope so view
-    // position and folder structure survive.
+    // Still over quota without KMZ — write minimal envelope so map position
+    // and folder structure survive a refresh.
     try {
       const minimalPayload = {
         schemaVersion: compactPayload.schemaVersion,
@@ -3583,19 +3660,6 @@ function saveMapState() {
         assets: compactPayload.assets,
       };
       window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(minimalPayload));
-    } catch { /* truly out of space */ }
-  }
-
-  // Write KMZ items to the separate project-scoped key.
-  const kmzKey = getKmzStorageKey(state.session.activeProjectId);
-  try {
-    window.localStorage.setItem(kmzKey, JSON.stringify(kmzItems));
-  } catch {
-    // KMZ payload itself is too large — try without coordinates as a last
-    // resort so at least folder/name metadata survives (geometry won't restore).
-    try {
-      const slim = kmzItems.map(({ coordinates: _c, ...rest }) => rest);
-      window.localStorage.setItem(kmzKey, JSON.stringify(slim));
     } catch { /* truly out of space */ }
   }
 
@@ -3657,41 +3721,54 @@ function applySavedMapState(rawSaved) {
 
   // Restore imported items — carry version metadata through.
   if (Array.isArray(saved.importedItems)) {
+    let skipped = 0;
     saved.importedItems.forEach((saved) => {
-      const item = {
-        id: saved.id,
-        version: saved.version ?? 1,
-        lastModified: saved.lastModified ?? nowIso(),
-        name: saved.name,
-        subtitle: saved.subtitle,
-        kind: saved.kind,
-        geometryType: saved.geometryType,
-        properties: saved.properties ?? {},
-        drawn: saved.drawn ?? false,
-        shapeStyle: normalizeImportedShapeStyle(saved.geometryType, saved.shapeStyle),
-        markerStyle: normalizeImportedMarkerStyle(saved.markerStyle),
-        layer: null,
-      };
-      const contentId = `imported:${item.id}`;
-      item.layer = createImportedLayer({
-        contentId,
-        geometryType: saved.geometryType,
-        coordinates: saved.coordinates,
-        shapeStyle: item.shapeStyle,
-        markerStyle: item.markerStyle,
-      });
-      item.layer.addTo(state.map);
-      item.layer.bindPopup(renderImportedItemPopup(item));
-      item.layer.on?.("click", () => focusMapContent(contentId));
-      item.layer.on?.("dragend edit", () => {
-        item.layer.setPopupContent(renderImportedItemPopup(item));
-        renderMapContents();
-        saveMapState();
-        syncCesiumEntities();
-        syncShapeVertexEditUi(item);
-      });
-      state.importedItems.push(item);
+      // Skip items whose coordinates were lost (e.g. localStorage quota fallback
+      // stripped them). Silently dropping these caused the entire restore to
+      // abort mid-loop when createImportedLayer threw on undefined coordinates.
+      if (!saved.coordinates) { skipped++; return; }
+      try {
+        const item = {
+          id: saved.id,
+          version: saved.version ?? 1,
+          lastModified: saved.lastModified ?? nowIso(),
+          name: saved.name,
+          subtitle: saved.subtitle,
+          kind: saved.kind,
+          geometryType: saved.geometryType,
+          properties: saved.properties ?? {},
+          drawn: saved.drawn ?? false,
+          shapeStyle: normalizeImportedShapeStyle(saved.geometryType, saved.shapeStyle),
+          markerStyle: normalizeImportedMarkerStyle(saved.markerStyle),
+          layer: null,
+        };
+        const contentId = `imported:${item.id}`;
+        item.layer = createImportedLayer({
+          contentId,
+          geometryType: saved.geometryType,
+          coordinates: saved.coordinates,
+          shapeStyle: item.shapeStyle,
+          markerStyle: item.markerStyle,
+        });
+        item.layer.addTo(state.map);
+        item.layer.bindPopup(renderImportedItemPopup(item));
+        item.layer.on?.("click", () => focusMapContent(contentId));
+        item.layer.on?.("dragend edit", () => {
+          item.layer.setPopupContent(renderImportedItemPopup(item));
+          renderMapContents();
+          saveMapState();
+          syncCesiumEntities();
+          syncShapeVertexEditUi(item);
+        });
+        state.importedItems.push(item);
+      } catch (err) {
+        skipped++;
+        console.warn(`[restore] skipped item ${saved.id} (${saved.name}):`, err.message);
+      }
     });
+    if (skipped > 0) {
+      console.warn(`[restore] ${skipped} imported item(s) skipped — coordinates missing or corrupt. This usually means the KMZ was too large for localStorage. Re-import the file to restore geometry.`);
+    }
   }
 
   if (saved.activeTerrainId) {
@@ -3718,22 +3795,15 @@ async function loadMapState() {
       const serverState = payload.project?.latest_state_json ?? null;
 
       if (serverState) {
-        // Server is authoritative for everything EXCEPT importedItems — KMZ geometry
-        // is localStorage-only because it is too large to send to the server.
-        // Use the project-scoped KMZ key first; fall back to the full local state's
-        // non-drawn items (for backwards compatibility with older saves).
-        let projectKmzItems = [];
-        const kmzKey = getKmzStorageKey(state.session.activeProjectId);
-        try {
-          const raw = window.localStorage.getItem(kmzKey);
-          if (raw) projectKmzItems = JSON.parse(raw);
-        } catch {}
-        // Migrate: if no project-scoped key yet but localState has a matching projectId
-        // marker, use those KMZ items and write them to the project-scoped key.
+        // KMZ geometry lives in IndexedDB (no size limit). idbLoadKmzItems also
+        // handles legacy localStorage migration automatically.
+        let projectKmzItems = await idbLoadKmzItems(state.session.activeProjectId);
+        // Legacy fallback: if IDB is empty but localState has non-drawn items
+        // from before the IDB migration, adopt them and migrate them now.
         if (projectKmzItems.length === 0 && localState?.activeProjectId === state.session.activeProjectId) {
           projectKmzItems = (localState.importedItems ?? []).filter((i) => !i.drawn);
           if (projectKmzItems.length > 0) {
-            try { window.localStorage.setItem(kmzKey, JSON.stringify(projectKmzItems)); } catch {}
+            await idbSaveKmzItems(state.session.activeProjectId, projectKmzItems);
           }
         }
         const serverDrawnItems = (serverState.importedItems ?? []).filter((i) => i.drawn);
@@ -3750,14 +3820,8 @@ async function loadMapState() {
   }
 
   if (localState) {
-    // Merge in KMZ items from the project-scoped key (same as the authenticated
-    // path does) so the guest path also benefits from the split storage layout.
-    const kmzKey = getKmzStorageKey(localState.activeProjectId ?? null);
-    let guestKmzItems = [];
-    try {
-      const raw = window.localStorage.getItem(kmzKey);
-      if (raw) guestKmzItems = JSON.parse(raw);
-    } catch {}
+    // Guest path: load KMZ items from IndexedDB (with localStorage legacy fallback).
+    const guestKmzItems = await idbLoadKmzItems(localState.activeProjectId ?? null);
     const drawnItems = (localState.importedItems ?? []).filter((i) => i.drawn);
     applySavedMapState({
       ...localState,
