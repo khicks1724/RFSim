@@ -13939,6 +13939,11 @@ function _syncCesiumEntitiesImmediate() {
   const isVisible = (contentId) => !isContentEffectivelyHidden(contentId);
   const overlayClassificationType = C.ClassificationType.TERRAIN;
 
+  const safeAddEntity = (def) => {
+    if (def.id && entities.getById(def.id)) entities.removeById(def.id);
+    entities.add(def);
+  };
+
   const addClampedPolygon = (id, latLngs, options = {}) => {
     const coords = latLngs.map((p) => Array.isArray(p)
       ? { lat: Number(p[0]), lng: Number(p[1]) }
@@ -13962,7 +13967,7 @@ function _syncCesiumEntitiesImmediate() {
     const outlineColorValue = options.outlineColor ?? options.color ?? "#34d399";
     const outlineWidth = options.outlineWidth ?? options.weight ?? 2;
 
-    entities.add({
+    safeAddEntity({
       id,
       polygon: {
         hierarchy: new C.PolygonHierarchy(hierarchyPositions),
@@ -13975,7 +13980,7 @@ function _syncCesiumEntitiesImmediate() {
       },
     });
 
-    entities.add({
+    safeAddEntity({
       id: `${id}:outline`,
       polyline: {
         positions: C.Cartesian3.fromDegreesArray(outlinePositions),
@@ -13992,7 +13997,7 @@ function _syncCesiumEntitiesImmediate() {
   state.assets.filter((asset) => isVisible(`asset:${asset.id}`)).forEach((asset) => {
     const assetHeight = resolveAbsoluteHeight(asset);
     const heightRef = assetHeight.useRelativeToGround ? C.HeightReference.RELATIVE_TO_GROUND : C.HeightReference.NONE;
-    entities.add({
+    safeAddEntity({
       id: `managed:asset:${asset.id}`,
       position: C.Cartesian3.fromDegrees(asset.lon, asset.lat, assetHeight.absoluteHeightM),
       point: {
@@ -14019,7 +14024,7 @@ function _syncCesiumEntitiesImmediate() {
 
   // --- GPS LOCATION ---
   if (state.gps.location) {
-    entities.add({
+    safeAddEntity({
       id: "managed:gps:user",
       position: C.Cartesian3.fromDegrees(state.gps.location.lon, state.gps.location.lat, 0),
       point: {
@@ -14044,7 +14049,7 @@ function _syncCesiumEntitiesImmediate() {
     });
     // GPS accuracy circle
     if (state.gps.location.accuracyM) {
-      entities.add({
+      safeAddEntity({
         id: "managed:gps:accuracy",
         position: C.Cartesian3.fromDegrees(state.gps.location.lon, state.gps.location.lat, 0),
         ellipse: {
@@ -14063,7 +14068,7 @@ function _syncCesiumEntitiesImmediate() {
   // --- TERRAIN COVERAGE ---
   state.terrains.forEach((terrain) => {
     if (!terrain.extentVisible) return;
-    entities.add({
+    safeAddEntity({
       id: `managed:terrain-coverage:${terrain.id}`,
       rectangle: {
         coordinates: C.Rectangle.fromDegrees(
@@ -14267,7 +14272,7 @@ function _syncCesiumEntitiesImmediate() {
     const txRef = txHeight.useRelativeToGround ? C.HeightReference.RELATIVE_TO_GROUND : C.HeightReference.NONE;
     const rxRef = rxHeight.useRelativeToGround ? C.HeightReference.RELATIVE_TO_GROUND : C.HeightReference.NONE;
 
-    entities.add({
+    safeAddEntity({
       id: `managed:planning:tx:${index}`,
       position: C.Cartesian3.fromDegrees(recommendation.tx.lon, recommendation.tx.lat, txHeight.absoluteHeightM),
       point: {
@@ -14290,7 +14295,7 @@ function _syncCesiumEntitiesImmediate() {
         outlineColor: C.Color.BLACK,
       },
     });
-    entities.add({
+    safeAddEntity({
       id: `managed:planning:rx:${index}`,
       position: C.Cartesian3.fromDegrees(recommendation.rx.lon, recommendation.rx.lat, rxHeight.absoluteHeightM),
       point: {
@@ -14313,7 +14318,7 @@ function _syncCesiumEntitiesImmediate() {
         outlineColor: C.Color.BLACK,
       },
     });
-    entities.add({
+    safeAddEntity({
       id: `managed:planning:link:${index}`,
       polyline: {
         positions: C.Cartesian3.fromDegreesArrayHeights([
@@ -14378,7 +14383,7 @@ function _syncCesiumEntitiesImmediate() {
         const lon = west + (east - west) * i / SEG;
         positions.push(C.Cartesian3.fromDegrees(lon, clampedLat));
       }
-      entities.add({
+      safeAddEntity({
         id: `managed:gridlines:lat:${gridIdx++}`,
         polyline: {
           positions,
@@ -14396,7 +14401,7 @@ function _syncCesiumEntitiesImmediate() {
         const lat = Math.max(-85, Math.min(85, south + (north - south) * i / SEG));
         positions.push(C.Cartesian3.fromDegrees(lon, lat));
       }
-      entities.add({
+      safeAddEntity({
         id: `managed:gridlines:lon:${gridIdx++}`,
         polyline: {
           positions,
