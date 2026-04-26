@@ -6907,10 +6907,10 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
 
   onStatus?.("Contacting provider");
   const raw = state.ai.provider === "anthropic"
-    ? await callAnthropic(messages, 1200, 0.2)
+    ? await callAnthropic(messages, 16000, 0.2)
     : state.ai.provider === "local-model"
-      ? await callLocalModel(messages, 2048, 0.1)
-      : await callGenAiMil(messages, 1200, 0.2);
+      ? await callLocalModel(messages, 999999, 0.1)
+      : await callGenAiMil(messages, 32000, 0.2);
   onStatus?.("Parsing response");
   const parsed = parseAiAssistantResponse(raw, prompt);
   return {
