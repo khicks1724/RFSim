@@ -1214,6 +1214,15 @@ function simulationUsesBuildingModel(propagationModel) {
   return propagationModel === "itu-buildings-weather";
 }
 
+async function gzipJson(data) {
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  const cs = new CompressionStream("gzip");
+  const writer = cs.writable.getWriter();
+  writer.write(encoded);
+  writer.close();
+  return new Response(cs.readable).arrayBuffer();
+}
+
 async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers ?? {});
   headers.set("Content-Type", headers.get("Content-Type") ?? "application/json");
@@ -1787,10 +1796,21 @@ async function saveActiveProjectNow({ silent = false } = {}) {
 
   let fetchError = null;
   try {
-    await apiFetch(`/projects/${state.session.activeProjectId}`, {
-      method: "PUT",
-      body: JSON.stringify({ state: serializeMapStateForServer() }),
+    const body = await gzipJson({ state: serializeMapStateForServer() });
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      "Content-Encoding": "gzip",
     });
+    if (state.session.token) headers.set("Authorization", `Bearer ${state.session.token}`);
+    const response = await fetch(`${API_BASE_URL}/projects/${state.session.activeProjectId}`, {
+      method: "PUT",
+      headers,
+      body,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => response.statusText);
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
   } catch (err) {
     fetchError = err;
   }
@@ -1891,19 +1911,21 @@ function flushPendingAutosave() {
   }
 
   // Use fetch with keepalive:true — survives page unload, supports auth headers
-  try {
+  // Compress asynchronously then fire; keepalive fires even if page is unloading.
+  gzipJson({ state: serializeMapStateForServer() }).then((body) => {
     fetch(`${API_BASE_URL}/projects/${state.session.activeProjectId}`, {
       method: "PUT",
       keepalive: true,
       headers: {
         "Content-Type": "application/json",
+        "Content-Encoding": "gzip",
         "Authorization": `Bearer ${state.session.token}`,
       },
-      body: JSON.stringify({ state: serializeMapStateForServer() }),
+      body,
     });
-  } catch {
+  }).catch(() => {
     // Best-effort — nothing we can do at unload time
-  }
+  });
 
   state.session.autosavePending = false;
 }

@@ -5,6 +5,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
+const zlib = require("zlib");
 const { z } = require("zod");
 const { config } = require("./config");
 const { pool, query } = require("./db");
@@ -13,6 +14,24 @@ const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: config.appOrigin, credentials: true }));
+
+// Decompress gzip request bodies before passing to express.json
+app.use((req, res, next) => {
+  if (req.headers["content-encoding"] === "gzip") {
+    const gunzip = zlib.createGunzip();
+    req.pipe(gunzip);
+    const chunks = [];
+    gunzip.on("data", (chunk) => chunks.push(chunk));
+    gunzip.on("end", () => {
+      req.body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      next();
+    });
+    gunzip.on("error", (err) => res.status(400).json({ error: "Invalid gzip body." }));
+  } else {
+    next();
+  }
+});
+
 app.use(express.json({ limit: "25mb" }));
 
 function signToken(user) {
