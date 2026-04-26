@@ -754,6 +754,8 @@ const dom = {
   aiAddMapContextOption: document.querySelector("#aiAddMapContextOption"),
   aiAddFilesOption: document.querySelector("#aiAddFilesOption"),
   aiContextPicker: document.querySelector("#aiContextPicker"),
+  aiContextPickerSearch: document.querySelector("#aiContextPickerSearch"),
+  aiContextPickerList: document.querySelector("#aiContextPickerList"),
   aiVoiceBtn: document.querySelector("#aiVoiceBtn"),
   aiMentionDropdown: document.querySelector("#aiMentionDropdown"),
   map: document.querySelector("#map"),
@@ -2665,6 +2667,21 @@ function wireEvents() {
       }
     });
   });
+  dom.aiChatMessages?.addEventListener("click", (event) => {
+    const link = event.target.closest(".ai-map-link");
+    if (link) {
+      const contentId = link.dataset.contentId;
+      if (contentId) focusMapContent(contentId);
+    }
+  });
+  dom.aiContextPickerSearch?.addEventListener("input", renderAiContextPicker);
+  dom.aiContextPickerSearch?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dom.aiContextPickerSearch.value = "";
+      renderAiContextPicker();
+    }
+  });
   dom.workspaceProjectCreateBtn?.addEventListener("click", () => onWorkspaceProjectCreate().catch((error) => setStatus(error.message, true)));
   dom.workspaceProjectSelect?.addEventListener("change", () => onWorkspaceProjectSelectChanged().catch((error) => setStatus(error.message, true)));
   dom.workspaceProjectSaveBtn?.addEventListener("click", () => saveActiveProjectNow().catch((error) => setStatus(error.message, true)));
@@ -4203,10 +4220,11 @@ async function onAiChatSubmit(event) {
     const response = await callAiPlanningAssistant(prompt, images, files, contextIds, {
       onStatus: (statusText) => assistantMessageController.setStatus(statusText),
     });
-    const executionSummary = await executeAiActions(response.actions ?? []);
+    const { results: executionSummary, placedAssets } = await executeAiActions(response.actions ?? []);
+    const assistantMsg = enrichAiResponseWithLinks(response.assistantMessage, placedAssets);
     const reply = executionSummary.length
-      ? `${response.assistantMessage}\n\nExecuted actions:\n- ${executionSummary.join("\n- ")}`
-      : response.assistantMessage;
+      ? `${assistantMsg}\n\n**Applied changes:**\n- ${executionSummary.join("\n- ")}`
+      : assistantMsg;
     stopThinkingIndicator();
     assistantMessageController.setStatus(executionSummary.length ? "Applied changes" : "Response ready");
     await streamAiMessageText(assistantMessageController, reply);
@@ -4242,7 +4260,11 @@ function renderMarkdown(text) {
   const flushList = () => { if (inList) { out.push("</ul>"); inList = false; } };
 
   const inlineFormat = (s) => {
-    return esc(s)
+    // Handle map content links [label](contentId) BEFORE escaping
+    const withLinks = s.replace(/\[([^\]]+)\]\(((?:asset|imported|viewshed|terrain|planning-region|planning-results):[^\)]+)\)/g, (_, label, contentId) => {
+      return `\x00LINK\x00${label}\x00${contentId}\x00`;
+    });
+    let result = esc(withLinks)
       // Bold **text** or __text__
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/__(.+?)__/g, "<strong>$1</strong>")
@@ -4251,6 +4273,11 @@ function renderMarkdown(text) {
       .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, "<em>$1</em>")
       // Inline code `code`
       .replace(/`([^`]+)`/g, "<code>$1</code>");
+    // Restore map content links as clickable buttons
+    result = result.replace(/\x00LINK\x00([^\x00]+)\x00([^\x00]+)\x00/g, (_, label, contentId) => {
+      return `<button class="ai-map-link" data-content-id="${contentId}" title="Navigate to ${label}">${label}</button>`;
+    });
+    return result;
   };
 
   lines.forEach((line) => {
@@ -4770,22 +4797,44 @@ function toggleAiAttachmentMenu() {
 function toggleAiContextPickerWithState(forceOpen = false) {
   dom.aiAttachmentMenu.classList.add("hidden");
   if (forceOpen) {
+    if (dom.aiContextPickerSearch) {
+      dom.aiContextPickerSearch.value = "";
+    }
     dom.aiContextPicker.classList.remove("hidden");
     renderAiContextPicker();
+    dom.aiContextPickerSearch?.focus();
     return;
   }
   const hidden = dom.aiContextPicker.classList.toggle("hidden");
-  if (!hidden) renderAiContextPicker();
+  if (!hidden) {
+    if (dom.aiContextPickerSearch) {
+      dom.aiContextPickerSearch.value = "";
+    }
+    renderAiContextPicker();
+    dom.aiContextPickerSearch?.focus();
+  }
 }
 
 function renderAiContextPicker() {
-  dom.aiContextPicker.innerHTML = "";
-  const entries = getMapContentEntries().filter((e) => !e.id.startsWith("folder:"));
-  if (!entries.length) {
-    dom.aiContextPicker.innerHTML = `<div style="padding:10px 12px;font-size:12px;opacity:0.5;">No map contents</div>`;
+  const list = dom.aiContextPickerList ?? dom.aiContextPicker;
+  if (!list) {
     return;
   }
-  entries.forEach((entry) => {
+  list.innerHTML = "";
+  const entries = getMapContentEntries().filter((e) => !e.id.startsWith("folder:"));
+  const query = dom.aiContextPickerSearch?.value.trim().toLowerCase() ?? "";
+  const filteredEntries = query
+    ? entries.filter((entry) => {
+        const kind = String(entry.kind ?? "").toLowerCase();
+        const subtitle = String(entry.subtitle ?? "").toLowerCase();
+        return entry.name.toLowerCase().includes(query) || kind.includes(query) || subtitle.includes(query);
+      })
+    : entries;
+  if (!filteredEntries.length) {
+    list.innerHTML = `<div class="ai-context-picker-empty">${entries.length ? "No matching map contents" : "No map contents"}</div>`;
+    return;
+  }
+  filteredEntries.forEach((entry) => {
     const isSelected = state.ai.contextItemIds.includes(entry.id);
     const row = document.createElement("div");
     row.className = `ai-context-picker-item${isSelected ? " selected" : ""}`;
@@ -4795,7 +4844,7 @@ function renderAiContextPicker() {
       <span style="opacity:0.4;font-size:10px;margin-left:auto;flex-shrink:0;">${escapeHtml(entry.kind ?? "")}</span>
     `;
     row.addEventListener("click", () => toggleAiContextItem(entry.id, entry.name));
-    dom.aiContextPicker.appendChild(row);
+    list.appendChild(row);
   });
 }
 
@@ -4927,6 +4976,7 @@ function buildCompactAiScenarioSummary(contextIds = []) {
     },
     assets: state.assets.slice(0, 40).map((asset) => ({
       id: asset.id,
+      contentId: `asset:${asset.id}`,
       name: asset.name,
       unit: asset.unit ?? "",
       force: asset.force ?? "",
@@ -4935,6 +4985,17 @@ function buildCompactAiScenarioSummary(contextIds = []) {
       frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
       powerW: roundAiNumber(asset.powerW, 3),
     })),
+    importedItems: state.importedItems.slice(0, 20).map((item) => {
+      const geometry = getImportedItemGeometryForAi(item);
+      return {
+        id: item.id,
+        contentId: `imported:${item.id}`,
+        name: item.name,
+        geometryType: item.geometryType,
+        geometry,
+        bounds: typeof item.layer?.getBounds === "function" ? serializeBoundsForAi(item.layer.getBounds()) : null,
+      };
+    }),
     viewsheds: state.viewsheds.slice(0, 20).map((viewshed) => ({
       id: viewshed.id,
       name: viewshed.name ?? `${viewshed.asset.name} Coverage`,
@@ -5682,10 +5743,13 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "SPATIAL REASONING:",
     "═══════════════════════════════════════",
     "- Polygon boundaries (AO Boundary, drawn polygons) are in importedItems[].geometry.coordinates[0] as [{lat,lon}].",
+    "- The importedItems[] array in the scenario summary contains ACTUAL coordinates. Read the geometry.coordinates from the named polygon (e.g., 'Range 400') and use those real lat/lon values.",
+    "- CRITICAL: lat and lon in add-asset MUST be plain JSON numbers (e.g. 34.1234, -116.5678). Never use null, strings, or omit these fields.",
     "- Compute the polygon centroid and bounding box. Place assets distributed inside — NOT outside.",
     "- For 'highest elevation': examine the polygon vertex coordinates. Vertices at the extremes of the bounding box (especially corners) tend to be on ridgelines. Avoid placing in the center of a large polygon — that's often a valley or flat plain.",
     "- Separation check: compute haversine distance between all pairs. With 1 km minimum and 3 assets, use a triangle with ~1.5–3 km sides.",
     "- Always verify all placed coordinates are actually inside the polygon before including them.",
+    "- If a polygon has N vertices, pick the N highest-elevation candidate vertices (spread across NW/NE/SW/SE quadrants) and use those exact coordinates or points near them.",
     "",
     "═══════════════════════════════════════",
     "RF PLANNING EXPERTISE — SANITY CHECKS:",
@@ -5709,6 +5773,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "- For draw-shape circle: put center in coordinates[0], set radiusM.",
     "- Do not reference unavailable tools or external URLs.",
     "- If no action is needed, return an empty actions array.",
+    "- RESPONSE FORMATTING: In your assistantMessage, reference asset and map item names using markdown bold (**name**). The system will automatically convert these to clickable navigation links.",
     "SCENARIO SUMMARY:",
     scenarioSummary,
     contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
@@ -6146,6 +6211,32 @@ function buildAiScenarioSummary() {
   }, null, 2);
 }
 
+function enrichAiResponseWithLinks(text, placedAssets = []) {
+  if (!text) return text;
+  let result = text;
+
+  // Link newly placed assets by name
+  for (const asset of placedAssets) {
+    const escaped = asset.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${asset.name}**](asset:${asset.id})`);
+  }
+
+  // Link existing assets by name
+  for (const asset of state.assets) {
+    if (placedAssets.some((a) => a.id === asset.id)) continue;
+    const escaped = asset.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${asset.name}**](asset:${asset.id})`);
+  }
+
+  // Link imported items (polygons, shapes, etc.) by name
+  for (const item of state.importedItems) {
+    const escaped = item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${item.name}**](imported:${item.id})`);
+  }
+
+  return result;
+}
+
 async function executeAiActions(actions) {
   const results = [];
   // Track asset IDs placed this batch so run-simulation can target them by index
@@ -6157,10 +6248,11 @@ async function executeAiActions(actions) {
     }
   }
 
+  const placedAssets = placedAssetIds.map((id) => state.assets.find((a) => a.id === id)).filter(Boolean);
+
   // After all placements, run a LOS check on newly placed assets and append warnings
   if (placedAssetIds.length >= 2) {
-    const newAssets = placedAssetIds.map((id) => state.assets.find((a) => a.id === id)).filter(Boolean);
-    const losLinks = buildLosMatrix(newAssets);
+    const losLinks = buildLosMatrix(placedAssets);
     const blockedLinks = losLinks.filter((l) => l.losBlocked === true);
     const marginalLinks = losLinks.filter((l) => l.losBlocked === false && l.minClearanceM !== null && l.minClearanceM < 10);
     if (blockedLinks.length > 0) {
@@ -6180,7 +6272,7 @@ async function executeAiActions(actions) {
     }
   }
 
-  return results;
+  return { results, placedAssets };
 }
 
 async function executeAiAction(action, { placedAssetIds = [] } = {}) {
@@ -6321,7 +6413,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     }
     // Track so subsequent run-simulation actions in this batch can target it
     placedAssetIds.push(newAsset.id);
-    return `Placed ${newAsset.name} (${newAsset.frequencyMHz} MHz, ${newAsset.powerW} W) at ${assetLat.toFixed(5)}, ${assetLon.toFixed(5)}. assetId=${newAsset.id}`;
+    return `[**${newAsset.name}**](asset:${newAsset.id}) placed — ${newAsset.frequencyMHz} MHz, ${newAsset.powerW} W at ${assetLat.toFixed(5)}, ${assetLon.toFixed(5)}`;
   }
 
   if (action.type === "update-asset") {
