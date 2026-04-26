@@ -5940,6 +5940,71 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  • Running simulation radius >>50 km for a 5 W VHF handheld — signal won't reach that far",
     "If the user requests a configuration that violates any of the above, respond with a warning in assistantMessage explaining why the configuration may not work as intended, and ask for confirmation. Include the actions anyway so the user can approve and proceed, but mark them clearly in your message.",
     "",
+    "═══════════════════════════════════════",
+    "PLANNING & DOCUMENTATION CAPABILITIES:",
+    "═══════════════════════════════════════",
+    "You can generate military planning documents using the generate-document action.",
+    "Schema: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string (plain text, formatted with spacing and dividers)\"}",
+    "Always generate documents in response to requests for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA advice, or relay topology reasoning.",
+    "You may emit generate-document alongside other actions (e.g. draw a route polyline AND generate a route narrative).",
+    "",
+    "PACE PLAN DOCTRINE:",
+    "  PACE = Primary / Alternate / Contingency / Emergency comms methods for a unit or task.",
+    "  Structure each tier with: Method, Equipment, Frequency/Channel, Call Signs, Authentication, Remarks.",
+    "  Primary: Best available, highest bandwidth (e.g. Harris Falcon III digital, SINCGARS ECCM, wideband IP).",
+    "  Alternate: Secondary path, different frequency band or mode (e.g. VHF backup to UHF primary).",
+    "  Contingency: Degraded — no ECCM, plain voice, single freq, or satellite (TACSAT/SATCOM).",
+    "  Emergency: Last resort — visual signals, runners, preplanned brevity codes, CAS frequencies.",
+    "  Tailor PACE to the units and frequencies already in the scenario. Reference placed asset names and frequencies.",
+    "  Include COMSEC/OPSEC notes: use of encryption, brevity codes, comms windows, EMCON.",
+    "",
+    "SOI / CEOI GENERATION:",
+    "  SOI (Signal Operating Instructions) contains: net names, frequencies, call signs, authentication tables, pyrotechnic signals, challenge/password, hours of operation.",
+    "  CEOI (Communications-Electronics Operating Instructions) adds: equipment types, channel plans, COMSEC fill instructions, relay node designations, MEDEVAC frequencies.",
+    "  Format frequency tables with columns: Net | Primary Freq (MHz) | Alternate Freq | Call Sign | Equipment | Remarks.",
+    "  Assign call signs using military phonetic alphabet + numbered suffix (e.g., FALCON-6, VIPER-21).",
+    "  Generate authentication tables as 2-letter challenge / 2-letter response pairs (random but consistent within the doc).",
+    "  Include MEDEVAC net, artillery fire net (if applicable), and command net as separate rows.",
+    "  Use frequencies from assets already placed in the scenario where possible; fill gaps with doctrinal bands.",
+    "  VHF combat net radio: 30–88 MHz. UHF satcom: 225–400 MHz. HF: 2–30 MHz. L-band TACSAT: 1.5–1.7 GHz.",
+    "",
+    "SPECTRUM MANAGEMENT:",
+    "  List all in-use frequencies from the scenario assets, group by band, identify conflicts (same freq, overlapping coverage).",
+    "  Flag frequencies within 5 MHz of each other in the same area as potential intermodulation interference.",
+    "  Suggest deconfliction: minimum 5 MHz separation in VHF, 10 MHz in UHF for co-located systems.",
+    "  Document: frequency, user/net, power level, expected range, remarks on terrain/urban attenuation.",
+    "",
+    "AFTER-ACTION REPORT (AAR):",
+    "  Standard structure: Classification | DTG | Unit | Exercise/Event | Participants | Objectives | Summary | Sustains | Improves | Recommendations | Attachments.",
+    "  For RF exercises: include coverage achieved vs planned, link failures and root cause, terrain lessons, equipment issues.",
+    "  Pull data from scenario assets, LOS matrix results, and simulation coverage layers to populate the AAR.",
+    "",
+    "ROUTE ANALYSIS NARRATIVE:",
+    "  When given a route (polyline or list of checkpoints), describe terrain challenges for comms along that route.",
+    "  Identify: ridge crossings (potential LOS breaks), valley segments (dead zones), urban terrain (multipath), open terrain (good coverage).",
+    "  For each route segment, state: expected comms status (clear/degraded/dead), recommended radio type, relay requirement.",
+    "  Reference imported items by name (MSR, checkpoints, no-fire areas) that the route passes through.",
+    "  Recommend relay/retrans positions on high ground along or adjacent to the route.",
+    "",
+    "COA (COURSE OF ACTION) COMMS SUPPORT:",
+    "  For a given maneuver plan, advise on comms architecture: which units need direct comms, which need relays, net structure.",
+    "  Consider: unit dispersion, terrain between elements, movement corridors, phase line communications requirements.",
+    "  Identify comms risk: which phase/axis has the most terrain-blocked links, and what mitigation is needed.",
+    "  Recommend: net hierarchy (command net, logistics net, fires net), frequencies per net, relay node positions.",
+    "  If units are placed on the map, use their actual positions and the terrainLosMatrix to assess each link.",
+    "",
+    "RELAY NODE PLACEMENT LOGIC:",
+    "  A relay is needed when: distanceKm > radio horizon (~7–10 km for 5 W VHF at 2 m height), OR losBlocked=true in the LOS matrix.",
+    "  Radio horizon formula: d_km ≈ 4.12 × (√h_tx_m + √h_rx_m). A 30 m tower extends this to ~22 km.",
+    "  Relay placement criteria: (1) must have LOS to both endpoints, (2) prefer terrain 20+ m above both endpoint elevations, (3) minimize path asymmetry.",
+    "  If placing a relay, use check-los to verify both relay-to-A and relay-to-B links before committing.",
+    "  Topology options: linear relay (A→R→B), hub relay (R covers multiple units), mesh (each node acts as relay for neighbors).",
+    "  For each relay recommendation, output: proposed grid/coordinates, antenna height required, expected link margins.",
+    "  If terrain data is available via LOS matrix, cite the specific obstruction location (obstructionFrac, obstructionLat/Lon) when explaining why a relay is needed.",
+    "",
+    "  generate-document action: use for ALL of the above. Never just write the document in assistantMessage — always use the action so it renders in a copyable document block.",
+    "  For complex requests (e.g. PACE + SOI + relay drawing), emit multiple generate-document actions and map actions together.",
+    "",
     "GENERAL RULES:",
     "- ONLY use action type strings from the list above. 'radio', 'jammer', 'PRC-163' etc. are NOT action types — they are emitterType values inside add-asset.",
     "- ALWAYS use the exact `id` field from the assets array for assetId — never use name as ID.",
@@ -5962,7 +6027,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "Answer briefly and precisely.",
     "If no map or simulation changes are needed, reply in plain text.",
     "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
-    "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los.",
+    "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, generate-document.",
+    "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
     "Use exact ids from the scenario summary.",
     "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
     "Do not invent tools, URLs, or ids.",
@@ -6957,6 +7023,52 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
           : `CLEAR: ${l.from} ↔ ${l.to} (${l.distanceKm} km, ${l.minClearanceM} m clearance)`
     );
     return `LOS check results${source}:\n${lines.join("\n")}`;
+  }
+
+  if (action.type === "generate-document") {
+    const docType = action.docType ?? "document";
+    const title = action.title ?? docType.toUpperCase();
+    const content = action.content ?? "";
+    if (!content.trim()) return "Skipped generate-document: no content provided.";
+
+    // Render a copyable document block into the chat
+    const docId = `ai-doc-${Date.now()}`;
+    const article = document.createElement("article");
+    article.className = "ai-chat-message ai-chat-message-assistant ai-document-block";
+
+    const header = document.createElement("div");
+    header.className = "ai-chat-message-header";
+    const titleEl = document.createElement("strong");
+    titleEl.textContent = title;
+    header.appendChild(titleEl);
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "ai-doc-copy-btn";
+    copyBtn.type = "button";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(content).then(() => {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+      }).catch(() => {
+        copyBtn.textContent = "Failed";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+      });
+    });
+    header.appendChild(copyBtn);
+    article.appendChild(header);
+
+    const pre = document.createElement("pre");
+    pre.className = "ai-document-content";
+    pre.id = docId;
+    pre.textContent = content;
+    article.appendChild(pre);
+
+    dom.aiChatMessages.append(article);
+    dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
+    state.ai.messages.push({ role: "assistant", text: `[Document: ${title}]\n${content}` });
+
+    return `Generated ${docType}: "${title}".`;
   }
 
   return `Skipped unsupported action type ${action.type}.`;

@@ -1372,6 +1372,57 @@ body:not(.ai-panel-open) .ai-panel {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 10px 22px rgba(0, 0, 0, 0.12);
 }
 
+/* ── Planning document blocks ── */
+.ai-document-block {
+  max-width: min(96%, 660px);
+  padding: 0;
+  overflow: hidden;
+}
+.ai-document-block .ai-chat-message-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-alt));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.ai-document-block .ai-chat-message-header strong {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+.ai-doc-copy-btn {
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 0.12s;
+}
+.ai-doc-copy-btn:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.ai-document-content {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  background: var(--bg);
+  max-height: 420px;
+  overflow-y: auto;
+  border: none;
+}
+
 .ai-chat-form {
   display: grid;
   gap: 10px;
