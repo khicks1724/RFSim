@@ -1789,7 +1789,7 @@ async function saveActiveProjectNow({ silent = false } = {}) {
   try {
     await apiFetch(`/projects/${state.session.activeProjectId}`, {
       method: "PUT",
-      body: JSON.stringify({ state: serializeCurrentMapState() }),
+      body: JSON.stringify({ state: serializeMapStateForServer() }),
     });
   } catch (err) {
     fetchError = err;
@@ -1874,9 +1874,9 @@ function setAutosaveIndicator(state_) {
 function flushPendingAutosave() {
   // Always flush the latest state to localStorage — this is the guaranteed
   // local recovery layer for any reload, regardless of server connectivity.
-  const payload = serializeCurrentMapState();
+  const localPayload = serializeCurrentMapState();
   try {
-    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(localPayload));
   } catch {
     // quota exceeded — nothing to do
   }
@@ -1899,7 +1899,7 @@ function flushPendingAutosave() {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${state.session.token}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ state: serializeMapStateForServer() }),
     });
   } catch {
     // Best-effort — nothing we can do at unload time
@@ -3047,33 +3047,43 @@ function persistSettings() {
   window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
 }
 
+function serializeImportedItem(item) {
+  let coordinates;
+  if (item.geometryType === "Point") {
+    const ll = item.layer.getLatLng();
+    coordinates = [ll.lat, ll.lng];
+  } else if (item.geometryType === "LineString") {
+    coordinates = item.layer.getLatLngs().map((p) => [p.lat, p.lng]);
+  } else {
+    const rings = item.layer.getLatLngs();
+    const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+    coordinates = outer.map((p) => [p.lat, p.lng]);
+  }
+  // Only persist the two properties the app actually reads back — isCircle and radiusM.
+  // Full GeoJSON attribute tables from imports can be enormous (100+ fields × thousands
+  // of features) and are not used by any rendering or logic path after initial import.
+  const { isCircle, radiusM } = item.properties ?? {};
+  const properties = {};
+  if (isCircle) properties.isCircle = isCircle;
+  if (radiusM !== undefined) properties.radiusM = radiusM;
+
+  return {
+    id: item.id,
+    name: item.name,
+    subtitle: item.subtitle,
+    kind: item.kind,
+    geometryType: item.geometryType,
+    properties,
+    drawn: item.drawn ?? false,
+    shapeStyle: item.shapeStyle ?? null,
+    markerStyle: item.markerStyle ?? null,
+    coordinates,
+  };
+}
+
 function serializeCurrentMapState() {
   const center = state.map.getCenter();
-  const serializedImported = state.importedItems.map((item) => {
-    let coordinates;
-    if (item.geometryType === "Point") {
-      const ll = item.layer.getLatLng();
-      coordinates = [ll.lat, ll.lng];
-    } else if (item.geometryType === "LineString") {
-      coordinates = item.layer.getLatLngs().map((p) => [p.lat, p.lng]);
-    } else {
-      const rings = item.layer.getLatLngs();
-      const outer = Array.isArray(rings[0]) ? rings[0] : rings;
-      coordinates = outer.map((p) => [p.lat, p.lng]);
-    }
-    return {
-      id: item.id,
-      name: item.name,
-      subtitle: item.subtitle,
-      kind: item.kind,
-      geometryType: item.geometryType,
-      properties: item.properties,
-      drawn: item.drawn ?? false,
-      shapeStyle: item.shapeStyle ?? null,
-      markerStyle: item.markerStyle ?? null,
-      coordinates,
-    };
-  });
+  const serializedImported = state.importedItems.map(serializeImportedItem);
 
   return {
     mapView: { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() },
@@ -3088,6 +3098,14 @@ function serializeCurrentMapState() {
     hiddenContentIds: [...state.hiddenContentIds],
     activeTerrainId: state.activeTerrainId,
   };
+}
+
+// Leaner version of serializeCurrentMapState for server saves — omits profiles
+// and settings (stored via their own API/localStorage keys) to keep payload small.
+function serializeMapStateForServer() {
+  const full = serializeCurrentMapState();
+  const { profiles, settings, ...serverState } = full;
+  return serverState;
 }
 
 function saveMapState() {

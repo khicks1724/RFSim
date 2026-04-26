@@ -3,6 +3,8 @@ const cors = require("cors");
 const helmet = require("helmet");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const fs = require("fs");
+const path = require("path");
 const { z } = require("zod");
 const { config } = require("./config");
 const { pool, query } = require("./db");
@@ -11,7 +13,7 @@ const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: config.appOrigin, credentials: true }));
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "25mb" }));
 
 function signToken(user) {
   return jwt.sign(
@@ -194,6 +196,11 @@ app.get("/api/user/ai-configs", authRequired, async (request, response) => {
     );
     response.json({ configs: result.rows });
   } catch (error) {
+    // Table may not exist yet if migration hasn't run — return empty rather than 500
+    if (error.code === "42P01") {
+      response.json({ configs: [] });
+      return;
+    }
     response.status(500).json({ error: error.message });
   }
 });
@@ -230,6 +237,10 @@ app.put("/api/user/ai-configs", authRequired, async (request, response) => {
     response.json({ configs: parsed.data.configs });
   } catch (error) {
     await client.query("rollback");
+    if (error.code === "42P01") {
+      response.status(503).json({ error: "AI config storage not available — run the latest database migration." });
+      return;
+    }
     response.status(500).json({ error: error.message });
   } finally {
     client.release();
@@ -409,6 +420,25 @@ app.post("/api/projects/:projectId/snapshots", authRequired, async (request, res
   }
 });
 
-app.listen(config.port, () => {
-  console.log(`EW Sim backend listening on port ${config.port}`);
+async function runMigrations() {
+  const sqlDir = path.join(__dirname, "../sql");
+  const files = fs.readdirSync(sqlDir).filter((f) => f.endsWith(".sql")).sort();
+  for (const file of files) {
+    const sql = fs.readFileSync(path.join(sqlDir, file), "utf8");
+    try {
+      await query(sql);
+      console.log(`Migration applied: ${file}`);
+    } catch (error) {
+      console.error(`Migration failed (${file}): ${error.message}`);
+    }
+  }
+}
+
+runMigrations().then(() => {
+  app.listen(config.port, () => {
+    console.log(`EW Sim backend listening on port ${config.port}`);
+  });
+}).catch((error) => {
+  console.error("Failed to run migrations:", error.message);
+  process.exit(1);
 });
