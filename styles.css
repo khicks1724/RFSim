@@ -1111,11 +1111,11 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-panel-title-group {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+  grid-template-columns: minmax(0, 1fr) minmax(148px, 176px);
   grid-template-areas:
     "title model"
     "status model";
-  column-gap: 16px;
+  column-gap: 24px;
   row-gap: 4px;
   align-items: start;
   min-width: 0;
@@ -1140,14 +1140,23 @@ body:not(.ai-panel-open) .ai-panel {
   display: grid;
   grid-area: model;
   gap: 3px;
-  max-width: 220px;
+  width: min(176px, 100%);
+  max-width: 176px;
   justify-self: end;
   align-self: start;
   margin-top: 1px;
 }
 
+.ai-model-toggle > .eyebrow {
+  padding-left: 10px;
+}
+
 .ai-chat-model-select {
-  min-width: 180px;
+  width: 100%;
+  min-width: 0;
+  max-width: 176px;
+  font-size: 0.9rem;
+  padding-right: 28px;
 }
 
 .ai-panel-header .button-row {

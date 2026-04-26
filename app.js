@@ -1425,23 +1425,28 @@ async function loadServerAiProviderSettings() {
     return;
   }
 
-  const localConfigs = state.ai.savedConfigs.map(sanitizeAiSavedConfig).filter(Boolean);
-  const payload = await apiFetch("/user/ai-configs");
-  const serverConfigs = Array.isArray(payload.configs)
-    ? payload.configs.map(sanitizeAiSavedConfig).filter(Boolean)
-    : [];
-  const mergedConfigs = mergeAiSavedConfigs(serverConfigs, localConfigs);
+  try {
+    const localConfigs = state.ai.savedConfigs.map(sanitizeAiSavedConfig).filter(Boolean);
+    const payload = await apiFetch("/user/ai-configs");
+    const serverConfigs = Array.isArray(payload.configs)
+      ? payload.configs.map(sanitizeAiSavedConfig).filter(Boolean)
+      : [];
+    const mergedConfigs = mergeAiSavedConfigs(serverConfigs, localConfigs);
 
-  state.ai.savedConfigs = mergedConfigs;
-  if (state.ai.activeConfigId && !mergedConfigs.some((config) => config.id === state.ai.activeConfigId)) {
-    state.ai.activeConfigId = "";
-  }
+    state.ai.savedConfigs = mergedConfigs;
+    if (state.ai.activeConfigId && !mergedConfigs.some((config) => config.id === state.ai.activeConfigId)) {
+      state.ai.activeConfigId = "";
+    }
 
-  persistAiProviderSettings();
-  syncAiUi();
+    persistAiProviderSettings();
+    syncAiUi();
 
-  if (!aiSavedConfigListsEqual(serverConfigs, mergedConfigs)) {
-    await syncAiProviderSettingsToServer();
+    if (!aiSavedConfigListsEqual(serverConfigs, mergedConfigs)) {
+      await syncAiProviderSettingsToServer();
+    }
+  } catch (error) {
+    syncAiUi();
+    setStatus(`AI provider settings unavailable: ${error.message}`, true);
   }
 }
 
@@ -1496,8 +1501,12 @@ async function hydrateSession() {
     await loadProjectList();
     await loadServerAiProviderSettings();
   } catch (error) {
-    clearSessionState();
-    setStatus(`Session reset: ${error.message}`, true);
+    if (/Invalid token|Authentication required|User not found/i.test(error.message)) {
+      clearSessionState();
+      setStatus(`Session reset: ${error.message}`, true);
+    } else {
+      setStatus(`Workspace sync warning: ${error.message}`, true);
+    }
   }
   syncWorkspaceUi();
 }
