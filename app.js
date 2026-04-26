@@ -976,6 +976,12 @@ function canUsePersistentBrowserStorage() {
   return !isGuestSession();
 }
 
+// Map state (assets, shapes, view) is always saved to localStorage regardless of
+// auth/guest status — it's purely local data and must survive any page reload.
+function canSaveMapState() {
+  return true;
+}
+
 function setGuestSessionEnabled(enabled) {
   state.session.guest = Boolean(enabled);
   if (state.session.guest) {
@@ -1808,6 +1814,15 @@ function setAutosaveIndicator(state_) {
 }
 
 function flushPendingAutosave() {
+  // Always flush the latest state to localStorage — this is the guaranteed
+  // local recovery layer for any reload, regardless of server connectivity.
+  const payload = serializeCurrentMapState();
+  try {
+    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // quota exceeded — nothing to do
+  }
+
   if (!state.session.autosavePending && !state.session.autosaveTimerId) return;
   if (!state.session.token || !state.session.activeProjectId) return;
 
@@ -1826,7 +1841,7 @@ function flushPendingAutosave() {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${state.session.token}`,
       },
-      body: JSON.stringify({ state: serializeCurrentMapState() }),
+      body: JSON.stringify(payload),
     });
   } catch {
     // Best-effort — nothing we can do at unload time
@@ -3018,9 +3033,6 @@ function serializeCurrentMapState() {
 }
 
 function saveMapState() {
-  if (!canUsePersistentBrowserStorage()) {
-    return;
-  }
   const payload = serializeCurrentMapState();
   try {
     window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
@@ -3137,9 +3149,6 @@ async function loadMapState() {
     }
   }
 
-  if (!canUsePersistentBrowserStorage()) {
-    return;
-  }
   const stored = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
   if (!stored) return;
   let saved;
