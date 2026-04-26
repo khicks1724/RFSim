@@ -2780,7 +2780,7 @@ function applySavedMapState(saved) {
   }
 
   // Apply hidden visibility after all layers are added
-  state.hiddenContentIds.forEach((contentId) => setContentLayerVisible(contentId, false));
+  syncAllContentVisibility();
 }
 
 async function loadMapState() {
@@ -4251,21 +4251,83 @@ function toggleVoiceInput() {
 
 // ── Map content visibility (eye icon) ────────────────────────────────────────
 
+function getFolderDescendantContentIds(folderContentId) {
+  const descendants = [];
+  const walk = (currentFolderContentId) => {
+    state.mapContentFolders.forEach((folder) => {
+      const childFolderContentId = `folder:${folder.id}`;
+      if (getFolderParentContentId(childFolderContentId) === currentFolderContentId) {
+        descendants.push(childFolderContentId);
+        walk(childFolderContentId);
+      }
+    });
+    state.mapContentAssignments.forEach((assignedFolderId, contentId) => {
+      if (assignedFolderId === currentFolderContentId) {
+        descendants.push(contentId);
+      }
+    });
+  };
+  walk(folderContentId);
+  return descendants;
+}
+
+function isContentHiddenByAncestorFolder(contentId) {
+  let folderId = contentId.startsWith("folder:")
+    ? getFolderParentContentId(contentId)
+    : getMapContentFolderId(contentId);
+  while (folderId) {
+    if (state.hiddenContentIds.has(folderId)) {
+      return true;
+    }
+    folderId = getFolderParentContentId(folderId);
+  }
+  return false;
+}
+
+function isContentEffectivelyHidden(contentId) {
+  return state.hiddenContentIds.has(contentId) || isContentHiddenByAncestorFolder(contentId);
+}
+
+function syncContentVisibility(contentId) {
+  if (contentId.startsWith("folder:")) {
+    getFolderDescendantContentIds(contentId).forEach((descendantId) => syncContentVisibility(descendantId));
+    return;
+  }
+  setContentLayerVisible(contentId, !isContentEffectivelyHidden(contentId));
+}
+
+function syncAllContentVisibility() {
+  getMapContentEntries()
+    .filter((entry) => !entry.id.startsWith("folder:"))
+    .forEach((entry) => syncContentVisibility(entry.id));
+}
+
 function toggleContentVisibility(contentId) {
-  const isHidden = state.hiddenContentIds.has(contentId);
-  if (isHidden) {
+  if (state.hiddenContentIds.has(contentId)) {
     state.hiddenContentIds.delete(contentId);
-    setContentLayerVisible(contentId, true);
   } else {
     state.hiddenContentIds.add(contentId);
-    setContentLayerVisible(contentId, false);
   }
+  syncContentVisibility(contentId);
   renderMapContents();
   syncCesiumEntities();
+  saveMapState();
 }
 
 function setContentLayerVisible(contentId, visible) {
-  if (contentId.startsWith("asset:")) {
+  if (contentId === "planning-region") {
+    if (!state.planning.regionLayer) {
+      return;
+    }
+    if (visible) state.planning.regionLayer.addTo(state.map);
+    else state.planning.regionLayer.remove();
+  } else if (contentId === "planning-results") {
+    if (!state.planning.markersLayer) {
+      return;
+    }
+    if (visible) state.planning.markersLayer.addTo(state.map);
+    else state.planning.markersLayer.remove();
+  } else if (contentId.startsWith("asset:")) {
     const id = contentId.slice("asset:".length);
     const marker = state.assetMarkers.get(id);
     if (marker) {
@@ -8819,6 +8881,7 @@ function setFolderParentId(folderId, parentFolderId = null) {
     return;
   }
   folder.parentId = normalizeFolderContentId(parentFolderId);
+  syncContentVisibility(`folder:${folder.id}`);
 }
 
 function getFolderChildEntryIds(folderContentId, orderToUse, entryMap, folderIds) {
@@ -8951,9 +9014,11 @@ function clearMapContentsSearch() {
 function setMapContentFolderId(contentId, folderId) {
   if (!folderId) {
     state.mapContentAssignments.delete(contentId);
+    syncContentVisibility(contentId);
     return;
   }
   state.mapContentAssignments.set(contentId, folderId);
+  syncContentVisibility(contentId);
 }
 
 function getMapContentTypeIcon(entry) {
@@ -8992,8 +9057,9 @@ function buildMapContentRow(entry, isChild = false) {
   row.dataset.contentId = entry.id;
   const isFolder = entry.kind === "folder";
   const canFocus = !isFolder;
+  const canToggleVisibility = true;
   if (isChild) row.dataset.child = "true";
-  const isHidden = state.hiddenContentIds.has(entry.id);
+  const isHidden = isContentEffectivelyHidden(entry.id);
   if (isHidden) row.dataset.hidden = "true";
   if (state.mcSelectMode && state.mcSelectedIds.has(entry.id)) row.classList.add("mc-selected");
   if (entry.searchMatch) row.classList.add("search-match");
@@ -9022,7 +9088,7 @@ function buildMapContentRow(entry, isChild = false) {
           <span class="map-content-focus-dot"></span>
         </span>
       </button>` : ""}
-      ${canFocus ? `<button class="map-content-visibility-btn${isHidden ? " hidden-layer" : ""}" type="button" aria-label="${isHidden ? "Show" : "Hide"}" title="${isHidden ? "Show" : "Hide"}">${isHidden ? eyeOff : eyeOpen}</button>` : ""}
+      ${canToggleVisibility ? `<button class="map-content-visibility-btn${isHidden ? " hidden-layer" : ""}" type="button" aria-label="${isFolder ? (isHidden ? "Show folder contents" : "Hide folder contents") : (isHidden ? "Show" : "Hide")}" title="${isFolder ? (isHidden ? "Show folder contents" : "Hide folder contents") : (isHidden ? "Show" : "Hide")}">${isHidden ? eyeOff : eyeOpen}</button>` : ""}
     </div>
   `;
 
@@ -11562,7 +11628,7 @@ function syncCesiumEntities() {
   viewer._managedPrimitives.forEach((p) => { try { viewer.scene.primitives.remove(p); } catch (_) {} });
   viewer._managedPrimitives = [];
 
-  const isVisible = (contentId) => !state.hiddenContentIds.has(contentId);
+  const isVisible = (contentId) => !isContentEffectivelyHidden(contentId);
   const overlayClassificationType = C.ClassificationType.TERRAIN;
 
   const addClampedPolygon = (id, latLngs, options = {}) => {
