@@ -3055,12 +3055,12 @@ button:focus {
 }
 
 .simulation-modal {
-  width: min(1320px, calc(100vw - 32px));
+  width: min(1480px, calc(100vw - 24px));
 }
 
 .simulation-modal-body {
   display: grid;
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
@@ -3069,21 +3069,95 @@ button:focus {
 .simulation-modal-config,
 .simulation-modal-results {
   min-height: 0;
-  padding: 18px;
+  padding: 14px 16px;
 }
 
 .simulation-modal-config {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   border-right: 1px solid var(--border);
   background: var(--bg-soft);
+  overflow-y: auto;
 }
 
 .simulation-modal-results {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+}
+
+.sim-section-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+.sim-section-label:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+.sim-hf-section {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.sim-hf-section.hf-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sim-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+/* Compact viewshed list inside simulation results */
+.simulation-modal-results .list-shell {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 0;
+}
+.simulation-modal-results .asset-item.terrain-item {
+  gap: 5px;
+  padding: 7px 10px;
+}
+.simulation-modal-results .asset-item.terrain-item header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.simulation-modal-results .asset-item.terrain-item header strong {
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.simulation-modal-results .asset-item.terrain-item header span {
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.simulation-modal-results .terrain-bounds {
+  font-size: 0.72rem;
+  gap: 4px 8px;
+}
+.simulation-modal-results .terrain-actions {
+  gap: 5px;
+}
+.simulation-modal-results .terrain-actions .ghost-button.small {
+  padding: 2px 8px;
+  font-size: 0.7rem;
 }
 
 .simulation-asset-summary {

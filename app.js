@@ -783,6 +783,11 @@ const CESIUM_ION_TOKEN_STORAGE_KEY = "ew-sim-cesium-ion-token";
 const AI_PROVIDER_STORAGE_KEY = "ew-sim-ai-provider";
 const MAP_STATE_STORAGE_KEY = "ew-sim-map-state";
 const MAP_STATE_STORAGE_KEY_LEGACY = null; // no prior keys to migrate
+const KMZ_ITEMS_STORAGE_KEY_PREFIX = "ew-sim-kmz-items";
+
+function getKmzStorageKey(projectId) {
+  return projectId ? `${KMZ_ITEMS_STORAGE_KEY_PREFIX}:${projectId}` : `${KMZ_ITEMS_STORAGE_KEY_PREFIX}:guest`;
+}
 const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
 const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
 const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
@@ -988,6 +993,15 @@ const dom = {
   exportZipBtn: document.querySelector("#exportZipBtn"),
   assetSelect: document.querySelector("#assetSelect"),
   propagationModel: document.querySelector("#propagationModel"),
+  simClutterType: document.querySelector("#simClutterType"),
+  simTerrainEnabled: document.querySelector("#simTerrainEnabled"),
+  simDiffractionEnabled: document.querySelector("#simDiffractionEnabled"),
+  simNvisEnabled: document.querySelector("#simNvisEnabled"),
+  simIonoModel: document.querySelector("#simIonoModel"),
+  simTimeDayEffects: document.querySelector("#simTimeDayEffects"),
+  simSolarIndex: document.querySelector("#simSolarIndex"),
+  simLosRenderMode: document.querySelector("#simLosRenderMode"),
+  simBelowThresholdMode: document.querySelector("#simBelowThresholdMode"),
   viewshedOpacity: document.querySelector("#viewshedOpacity"),
   viewshedList: document.querySelector("#viewshedList"),
   clearViewshedsBtn: document.querySelector("#clearViewshedsBtn"),
@@ -3290,6 +3304,9 @@ function wireEvents() {
   dom.exportZipBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsZip(); });
   dom.clearViewshedsBtn.addEventListener("click", clearViewsheds);
   dom.runSimulationBtn.addEventListener("click", runSimulation);
+  dom.propagationModel?.addEventListener("change", syncSimHfSectionVisibility);
+  dom.simLosRenderMode?.addEventListener("change", invalidateAllViewshedColorCaches);
+  dom.simBelowThresholdMode?.addEventListener("change", invalidateAllViewshedColorCaches);
   dom.simulationModalCloseBtn?.addEventListener("click", closeSimulationModal);
   dom.simulationProgressCancelBtn?.addEventListener("click", cancelSimulationProgress);
   dom.simulationModal?.addEventListener("click", (event) => {
@@ -3402,6 +3419,7 @@ function serializeCurrentMapState() {
     mapContentAssignments: Array.from(state.mapContentAssignments.entries()),
     hiddenContentIds: [...state.hiddenContentIds],
     activeTerrainId: state.activeTerrainId,
+    activeProjectId: state.session.activeProjectId ?? null,
   };
 }
 
@@ -3421,6 +3439,16 @@ function saveMapState() {
     window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // localStorage quota exceeded — fail silently
+  }
+
+  // Persist KMZ items (non-drawn) separately under a project-scoped key so that
+  // switching projects restores the correct KMZ data instead of a stale one.
+  try {
+    const kmzKey = getKmzStorageKey(state.session.activeProjectId);
+    const kmzItems = (payload.importedItems ?? []).filter((i) => !i.drawn);
+    window.localStorage.setItem(kmzKey, JSON.stringify(kmzItems));
+  } catch {
+    // quota — fail silently
   }
 
   queueActiveProjectAutosave();
@@ -3539,12 +3567,26 @@ async function loadMapState() {
       if (serverState) {
         // Server is authoritative for everything EXCEPT importedItems — KMZ geometry
         // is localStorage-only because it is too large to send to the server.
-        // Pull non-drawn (KMZ) items from localStorage; drawn shapes come from server.
-        const localKmzItems = (localState?.importedItems ?? []).filter((i) => !i.drawn);
+        // Use the project-scoped KMZ key first; fall back to the full local state's
+        // non-drawn items (for backwards compatibility with older saves).
+        let projectKmzItems = [];
+        const kmzKey = getKmzStorageKey(state.session.activeProjectId);
+        try {
+          const raw = window.localStorage.getItem(kmzKey);
+          if (raw) projectKmzItems = JSON.parse(raw);
+        } catch {}
+        // Migrate: if no project-scoped key yet but localState has a matching projectId
+        // marker, use those KMZ items and write them to the project-scoped key.
+        if (projectKmzItems.length === 0 && localState?.activeProjectId === state.session.activeProjectId) {
+          projectKmzItems = (localState.importedItems ?? []).filter((i) => !i.drawn);
+          if (projectKmzItems.length > 0) {
+            try { window.localStorage.setItem(kmzKey, JSON.stringify(projectKmzItems)); } catch {}
+          }
+        }
         const serverDrawnItems = (serverState.importedItems ?? []).filter((i) => i.drawn);
         const mergedState = {
           ...serverState,
-          importedItems: [...localKmzItems, ...serverDrawnItems],
+          importedItems: [...projectKmzItems, ...serverDrawnItems],
         };
         applySavedMapState(mergedState);
         return;
@@ -8350,6 +8392,13 @@ async function runSimulation() {
         receiverHeight: Number(dom.receiverHeight.value),
         opacity: Number(dom.viewshedOpacity.value),
         propagationModel: dom.propagationModel.value,
+        clutterType: dom.simClutterType?.value ?? "open",
+        terrainEnabled: dom.simTerrainEnabled?.checked ?? true,
+        diffractionEnabled: dom.simDiffractionEnabled?.checked ?? true,
+        nvisEnabled: dom.simNvisEnabled?.checked ?? false,
+        ionoModel: dom.simIonoModel?.value ?? "simple",
+        timeDayEffects: dom.simTimeDayEffects?.checked ?? false,
+        solarIndex: Number(dom.simSolarIndex?.value ?? 80),
       },
     });
   } catch (error) {
@@ -10554,6 +10603,39 @@ function closeSimulationModal() {
   refreshActionButtons();
 }
 
+function syncSimPropFromAsset(asset) {
+  if (!asset) return;
+  const prop = asset.propModel ? {
+    model: asset.propModel,
+    clutter: asset.clutterType ?? "open",
+    terrainEnabled: asset.terrainEnabled ?? true,
+    diffractionEnabled: asset.diffractionEnabled ?? true,
+    nvisEnabled: asset.nvisEnabled ?? false,
+    ionoModel: asset.ionoModel ?? "simple",
+    timeDayEffects: asset.timeDayEffects ?? false,
+    solarIndex: asset.solarIndex ?? 80,
+  } : null;
+
+  if (prop) {
+    if (dom.propagationModel) dom.propagationModel.value = prop.model;
+    if (dom.simClutterType) dom.simClutterType.value = prop.clutter;
+    if (dom.simTerrainEnabled) dom.simTerrainEnabled.checked = prop.terrainEnabled;
+    if (dom.simDiffractionEnabled) dom.simDiffractionEnabled.checked = prop.diffractionEnabled;
+    if (dom.simNvisEnabled) dom.simNvisEnabled.checked = prop.nvisEnabled;
+    if (dom.simIonoModel) dom.simIonoModel.value = prop.ionoModel;
+    if (dom.simTimeDayEffects) dom.simTimeDayEffects.checked = prop.timeDayEffects;
+    if (dom.simSolarIndex) dom.simSolarIndex.value = String(prop.solarIndex);
+  }
+  syncSimHfSectionVisibility();
+}
+
+function syncSimHfSectionVisibility() {
+  const isHf = dom.propagationModel?.value === "hf-skywave";
+  document.querySelectorAll(".sim-hf-section").forEach((el) => {
+    el.classList.toggle("hf-active", isHf);
+  });
+}
+
 function setSimulationModalAsset(asset) {
   if (!asset) {
     dom.assetSelect.value = "";
@@ -10566,6 +10648,7 @@ function setSimulationModalAsset(asset) {
   if (dom.simulationAssetSummary) {
     dom.simulationAssetSummary.textContent = `${asset.name} | ${asset.frequencyMHz} MHz | ${asset.powerW} W`;
   }
+  syncSimPropFromAsset(asset);
 }
 
 function openSimulationForContent(contentId) {
@@ -12878,7 +12961,8 @@ function syncCesiumEntities() {
 
     const instances = [];
     for (let i = 0; i < latitudes.length; i++) {
-      const cssColor = rssiColor(rssi[i], Boolean(lineOfSight[i]), opacity);
+      const cssColor = rssiColor(rssi[i], Boolean(lineOfSight[i]), opacity, getSimLosRenderMode(), getSimBelowThresholdMode());
+      if (!cssColor) continue;
       const color = C.Color.fromCssColorString(cssColor);
       instances.push(new C.GeometryInstance({
         id: `viewshed:${viewshed.id}:${i}`,
@@ -13315,13 +13399,43 @@ function textSlice(bytes, start, end) {
   return new TextDecoder("ascii").decode(bytes.slice(start, end));
 }
 
-function rssiColor(rssi, lineOfSight, opacity = 0.7) {
+// losRenderMode: "transparent" = no color for no-LOS cells, "shadow" = gray, "gradient" = legacy subdued color
+// belowThresholdMode: "gradient" = show weak signal cells, "hidden" = skip cells below threshold
+const RSSI_THRESHOLD_DBM = -110; // cells below this are considered out-of-coverage
+
+function rssiColor(rssi, lineOfSight, opacity = 0.7, losRenderMode = "transparent", belowThresholdMode = "gradient") {
   const minRssi = -120;
   const maxRssi = -40;
+
+  if (!lineOfSight) {
+    if (losRenderMode === "transparent") return null; // caller skips this cell
+    if (losRenderMode === "shadow") return `rgba(160,160,160,${Math.max(0.08, opacity * 0.25)})`;
+    // legacy gradient fallback
+    const normalized = Math.min(1, Math.max(0, (rssi - minRssi) / (maxRssi - minRssi)));
+    return `hsla(${normalized * 250}, 82%, 58%, ${Math.max(0.12, opacity * 0.35)})`;
+  }
+
+  if (belowThresholdMode === "hidden" && rssi < RSSI_THRESHOLD_DBM) return null;
+
   const normalized = Math.min(1, Math.max(0, (rssi - minRssi) / (maxRssi - minRssi)));
-  const hue = normalized * 250;
-  const alpha = lineOfSight ? opacity : Math.max(0.12, opacity * 0.35);
-  return `hsla(${hue}, 82%, 58%, ${alpha})`;
+  return `hsla(${normalized * 250}, 82%, 58%, ${opacity})`;
+}
+
+function getSimLosRenderMode() {
+  return dom.simLosRenderMode?.value ?? "transparent";
+}
+
+function getSimBelowThresholdMode() {
+  return dom.simBelowThresholdMode?.value ?? "gradient";
+}
+
+function invalidateAllViewshedColorCaches() {
+  state.viewsheds.forEach((v) => {
+    if (v.layer) {
+      v.layer._colorCache = null;
+      v.layer._scheduleRedraw();
+    }
+  });
 }
 
 function propagationModelLabel(value) {
@@ -14172,15 +14286,21 @@ const CanvasViewshedLayer = L.Layer.extend({
   },
 
   _ensureColorCache() {
-    if (this._colorCache?.length === this.options.rssi?.length) {
+    const losMode = getSimLosRenderMode();
+    const threshMode = getSimBelowThresholdMode();
+    if (this._colorCache?.length === this.options.rssi?.length
+        && this._colorCacheLosMode === losMode
+        && this._colorCacheThreshMode === threshMode) {
       return;
     }
 
     const rssi = this.options.rssi ?? [];
     const lineOfSight = this.options.lineOfSight ?? [];
     this._colorCache = new Array(rssi.length);
+    this._colorCacheLosMode = losMode;
+    this._colorCacheThreshMode = threshMode;
     for (let index = 0; index < rssi.length; index += 1) {
-      this._colorCache[index] = rssiColor(rssi[index], Boolean(lineOfSight[index]), 1);
+      this._colorCache[index] = rssiColor(rssi[index], Boolean(lineOfSight[index]), 1, losMode, threshMode);
     }
   },
 
@@ -14242,6 +14362,7 @@ const CanvasViewshedLayer = L.Layer.extend({
       const width = Math.max(1, southEast.x - northWest.x);
       const height = Math.max(1, southEast.y - northWest.y);
 
+      if (!colors[index]) continue;
       context.fillStyle = colors[index];
       context.fillRect(northWest.x, northWest.y, width, height);
     }

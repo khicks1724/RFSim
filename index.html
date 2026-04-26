@@ -1287,6 +1287,8 @@
             <strong id="simulationAssetSummary">No emitter selected</strong>
             <select id="assetSelect" class="hidden" aria-hidden="true" tabindex="-1"></select>
           </div>
+
+          <div class="sim-section-label">Coverage</div>
           <div class="two-column simulation-config-grid">
             <label>
               Propagation Model
@@ -1295,6 +1297,18 @@
                 <option value="itu-p526">Terrain</option>
                 <option value="itu-hybrid">Terrain and Weather</option>
                 <option value="itu-buildings-weather">Buildings and Weather</option>
+                <option value="hf-skywave">HF Skywave / NVIS</option>
+              </select>
+            </label>
+            <label>
+              Clutter / Environment
+              <select id="simClutterType">
+                <option value="open">Open / Desert</option>
+                <option value="suburban">Suburban</option>
+                <option value="urban">Urban / Dense</option>
+                <option value="forest">Forest / Jungle</option>
+                <option value="maritime">Maritime</option>
+                <option value="mountainous">Mountainous</option>
               </select>
             </label>
             <label>
@@ -1317,11 +1331,43 @@
                 <option value="mi">Miles</option>
               </select>
             </label>
+            <label class="sim-checkbox-label">
+              <input id="simTerrainEnabled" type="checkbox" checked>
+              <span>Terrain-aware (DTED)</span>
+            </label>
+            <label class="sim-checkbox-label">
+              <input id="simDiffractionEnabled" type="checkbox" checked>
+              <span>Diffraction modeling</span>
+            </label>
             <label>
               Viewshed Opacity
               <input id="viewshedOpacity" type="range" min="0.15" max="1" step="0.05" value="0.7">
             </label>
           </div>
+
+          <div class="sim-section-label sim-hf-section">HF / NVIS</div>
+          <div class="two-column simulation-config-grid sim-hf-section">
+            <label class="sim-checkbox-label">
+              <input id="simNvisEnabled" type="checkbox">
+              <span>NVIS mode</span>
+            </label>
+            <label class="sim-checkbox-label">
+              <input id="simTimeDayEffects" type="checkbox">
+              <span>Time-of-day ionospheric effects</span>
+            </label>
+            <label>
+              Ionospheric Model
+              <select id="simIonoModel">
+                <option value="simple">Simple (fixed skip)</option>
+                <option value="itu-r">ITU-R (time/solar aware)</option>
+              </select>
+            </label>
+            <label>
+              Solar Activity Index (0–250)
+              <input id="simSolarIndex" type="number" min="0" max="250" step="1" value="80">
+            </label>
+          </div>
+
           <p class="fine-print simulation-modal-note">
             Free Space skips terrain sampling. Terrain uses terrain only. Terrain and Weather adds atmospheric attenuation. Buildings and Weather adds streamed OSM building obstruction and material loss on top of terrain and weather.
           </p>
@@ -1333,6 +1379,22 @@
               <button id="clearViewshedsBtn" class="ghost-button small" type="button">Clear Viewsheds</button>
               <button id="runSimulationBtn" class="primary-button small" type="button">Generate Coverage</button>
             </div>
+          </div>
+          <div class="sim-render-controls">
+            <label class="sim-render-label">
+              No-Signal Areas
+              <select id="simLosRenderMode">
+                <option value="transparent">Transparent (blank)</option>
+                <option value="shadow">Faded gray shadow</option>
+              </select>
+            </label>
+            <label class="sim-render-label">
+              Below-threshold color
+              <select id="simBelowThresholdMode">
+                <option value="gradient">Gradient (show weak signal)</option>
+                <option value="hidden">Hidden (threshold cutoff)</option>
+              </select>
+            </label>
           </div>
           <div class="list-shell">
             <div id="viewshedList" class="asset-list"></div>
