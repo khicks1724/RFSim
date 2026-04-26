@@ -2151,10 +2151,44 @@ function initRangeInputs() {
   });
 }
 
+function ensureMapContentsSearchUi() {
+  if (dom.mapContentsSearchInput && dom.mapContentsSearchClearBtn) {
+    return;
+  }
+  if (!dom.mapContentsCard || !dom.mapContentsList) {
+    return;
+  }
+
+  let row = dom.mapContentsCard.querySelector(".map-contents-search-row");
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "map-contents-search-row";
+    row.innerHTML = `
+      <label class="map-contents-search-shell" for="mapContentsSearchInput">
+        <span class="map-contents-search-icon" aria-hidden="true">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </span>
+        <input id="mapContentsSearchInput" type="text" placeholder="Search map contents">
+      </label>
+      <button id="mapContentsSearchClearBtn" class="ghost-button small icon-button map-contents-search-clear hidden" type="button" aria-label="Clear map contents search">
+        &#10005;
+      </button>
+    `;
+    dom.mapContentsList.parentElement?.insertBefore(row, dom.mapContentsList);
+  }
+
+  dom.mapContentsSearchInput = document.querySelector("#mapContentsSearchInput");
+  dom.mapContentsSearchClearBtn = document.querySelector("#mapContentsSearchClearBtn");
+}
+
 async function init() {
   initMap();
   initTopBarDropdowns();
   initRangeInputs();
+  ensureMapContentsSearchUi();
   initEmitterModal();
   loadAiProviderSettings();
   await hydrateSession();
