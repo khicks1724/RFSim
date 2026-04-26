@@ -1163,6 +1163,7 @@ const state = {
   undoStack: [],          // [{label, snapshots:[{contentId, restoreFn}]}]
   undoBannerTimerId: null,
   activeMapContentMenuId: null,
+  relocatingAssetId: null,
   renamingMapContentId: null,
   workspaceMenuOpen: false,
   mapContentsSearch: "",
@@ -3220,7 +3221,8 @@ function wireEvents() {
   dom.mapContentsRenameInput.addEventListener("keydown", onRenamePopoverKeyDown);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (state.settingsMenuOpen) closeSettingsMenu();
+      if (state.relocatingAssetId) { finishAssetRelocation(null); }
+      else if (state.settingsMenuOpen) closeSettingsMenu();
       else if (state.draw.mode) cancelDrawing();
       else if (state.mcSelectMode) toggleMcSelectMode();
       else closeShapeStylePanel();
@@ -7875,6 +7877,11 @@ function onMapClick(event) {
     onDrawClick(event.latlng);
     return;
   }
+  if (state.relocatingAssetId) {
+    finishAssetRelocation(event.latlng);
+    return;
+  }
+
   if (state.placingAsset) {
     placePendingAssetAt(event.latlng, "2D map");
     return;
@@ -7893,6 +7900,58 @@ function setAssetPlacementMode(enabled) {
   dom.mapStage?.classList.toggle("asset-placement-active", state.placingAsset);
   updatePlacementInteractionState();
   updateCenterCrosshairVisibility();
+}
+
+function startAssetRelocation(contentId) {
+  const assetId = contentId.replace(/^asset:/, "");
+  const asset = state.assets.find((a) => a.id === assetId);
+  if (!asset) return;
+  state.relocatingAssetId = assetId;
+  dom.map?.classList.add("asset-placement-active");
+  dom.cesiumContainer?.classList.add("asset-placement-active");
+  dom.mapStage?.classList.add("asset-placement-active");
+  if (state.map) {
+    state.map.dragging?.disable();
+    state.map.doubleClickZoom?.disable();
+    state.map.boxZoom?.disable();
+    state.map.keyboard?.disable();
+    state.map.getContainer().style.cursor = "crosshair";
+  }
+  updateCenterCrosshairVisibility();
+  setStatus(`Click map to relocate ${asset.name}. Press Esc to cancel.`);
+}
+
+function finishAssetRelocation(latlng) {
+  const assetId = state.relocatingAssetId;
+  state.relocatingAssetId = null;
+  dom.map?.classList.remove("asset-placement-active");
+  dom.cesiumContainer?.classList.remove("asset-placement-active");
+  dom.mapStage?.classList.remove("asset-placement-active");
+  if (state.map) {
+    state.map.dragging?.enable();
+    state.map.doubleClickZoom?.enable();
+    state.map.boxZoom?.enable();
+    state.map.keyboard?.enable();
+    state.map.getContainer().style.cursor = "";
+  }
+  updateCenterCrosshairVisibility();
+  if (!latlng) return;
+  const asset = state.assets.find((a) => a.id === assetId);
+  if (!asset) return;
+  asset.lat = latlng.lat;
+  asset.lon = latlng.lng;
+  asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+  const marker = state.assetMarkers.get(asset.id);
+  if (marker) marker.setLatLng([asset.lat, asset.lon]);
+  updateAssetMarker(asset);
+  renderAssets();
+  renderMapContents();
+  syncCesiumEntities();
+  if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
+    refreshAssetGroundElevation(asset).catch(() => {});
+  }
+  saveMapState();
+  setStatus(`${asset.name} relocated.`);
 }
 
 function updatePlacementInteractionState() {
@@ -10841,6 +10900,10 @@ function openMapContentsMenu(event, contentId) {
   if (simulateButton) {
     simulateButton.classList.toggle("hidden", !contentId.startsWith("asset:"));
   }
+  const relocateButton = dom.mapContentsMenu.querySelector('[data-map-content-action="relocate"]');
+  if (relocateButton) {
+    relocateButton.classList.toggle("hidden", !contentId.startsWith("asset:"));
+  }
   dom.mapContentsMenu.style.left = `${event.clientX}px`;
   dom.mapContentsMenu.style.top = `${event.clientY}px`;
   dom.mapContentsMenu.classList.remove("hidden");
@@ -10867,6 +10930,11 @@ function onMapContentsMenuAction(event) {
 
   if (action === "simulate") {
     openSimulationForContent(contentId);
+    return;
+  }
+
+  if (action === "relocate") {
+    startAssetRelocation(contentId);
     return;
   }
 
