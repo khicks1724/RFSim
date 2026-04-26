@@ -5088,8 +5088,26 @@ async function onAiChatSubmit(event) {
     const response = await callAiPlanningAssistant(prompt, images, files, contextIds, {
       onStatus: (statusText) => assistantMessageController.setStatus(statusText),
     });
-    const { results: executionSummary, placedAssets } = await executeAiActions(response.actions ?? []);
-    const assistantMsg = enrichAiResponseWithLinks(response.assistantMessage, placedAssets);
+    const { results: executionSummary, placedAssets, terrainSampleResults } = await executeAiActions(response.actions ?? []);
+
+    // If terrain was sampled, send the data back to the AI for a natural-language answer
+    let finalAssistantMsg = response.assistantMessage;
+    if (terrainSampleResults.length > 0) {
+      assistantMessageController.setStatus("Analyzing terrain data");
+      const terrainContext = terrainSampleResults.join("\n\n");
+      const followUp = await callAiPlanningAssistant(
+        `TERRAIN DATA (from sample-terrain action you just requested):\n${terrainContext}\n\nUsing only this data, answer the user's original question: "${prompt}"`,
+        [], [], contextIds,
+        { onStatus: (s) => assistantMessageController.setStatus(s) }
+      );
+      finalAssistantMsg = followUp.assistantMessage;
+      // Execute any additional actions the AI wants after seeing terrain data
+      const { results: extraResults, placedAssets: extraPlaced } = await executeAiActions(followUp.actions ?? []);
+      executionSummary.push(...extraResults);
+      placedAssets.push(...extraPlaced);
+    }
+
+    const assistantMsg = enrichAiResponseWithLinks(finalAssistantMsg, placedAssets);
     const reply = executionSummary.length
       ? `${assistantMsg}\n\n**Applied changes:**\n- ${executionSummary.join("\n- ")}`
       : assistantMsg;
@@ -6586,6 +6604,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  run-planning          → (no fields)",
     "  toggle-3d             → enabled?",
     "  check-los             → candidates: [{lat, lon, name, antennaHeightM?}] — checks terrain LOS between candidate positions BEFORE placement. Returns BLOCKED/CLEAR for each pair. Use this when you are uncertain about terrain obstruction.",
+    "  sample-terrain        → points?: [{lat, lon, name?}], bounds?: {north,south,east,west}, gridN?: number (default 5, max 20) — samples terrain elevation at the given points and/or a gridN×gridN grid over the given bounds. Returns peak, lowest, mean elevations plus per-point data. Use this to answer questions about elevation, highest/lowest terrain, or to find the best ridgeline placement. ALWAYS use this when the user asks about elevation, highest point, terrain, or similar geographic questions.",
     "",
     "═══════════════════════════════════════",
     "ADD-ASSET FIELD REFERENCE:",
@@ -6812,6 +6831,24 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "To place and simulate:",
       '{"assistantMessage":"Placed and simulated.","actions":[{"type":"add-asset","contentRef":"Capital Lawn","placementMode":"inside","name":"Radio 1","emitterType":"radio","force":"friendly","frequencyMHz":150,"powerW":5,"antennaHeightM":2,"antennaGainDbi":2.15,"receiverSensitivityDbm":-107,"systemLossDb":3},{"type":"run-simulation","placedIndex":0,"propagationModel":"itu-p526","radiusKm":5}]}',
       "",
+      "To draw a circle (center coordinate + radiusM in meters):",
+      '{"assistantMessage":"Drew a 2 km blue circle around the White House.","actions":[{"type":"draw-shape","shapeType":"circle","name":"White House 2km","color":"#0077ff","fillOpacity":0.15,"radiusM":2000,"coordinates":[{"lat":38.897957,"lon":-77.036560}]}]}',
+      "",
+      "To draw a polygon:",
+      '{"assistantMessage":"Drew boundary polygon.","actions":[{"type":"draw-shape","shapeType":"polygon","name":"AO Boundary","color":"#ff4444","fillOpacity":0.2,"coordinates":[{"lat":34.12,"lon":-116.55},{"lat":34.15,"lon":-116.52},{"lat":34.13,"lon":-116.48},{"lat":34.10,"lon":-116.50}]}]}',
+      "",
+      "To draw a polyline:",
+      '{"assistantMessage":"Drew route.","actions":[{"type":"draw-shape","shapeType":"polyline","name":"Route Blue","color":"#00ccff","weight":3,"coordinates":[{"lat":34.12,"lon":-116.55},{"lat":34.15,"lon":-116.52},{"lat":34.18,"lon":-116.50}]}]}',
+      "",
+      "DRAW-SHAPE RULES:",
+      "- shapeType must be: circle, rectangle, polyline, or polygon.",
+      "- circle: coordinates[0] is the center point. radiusM is radius in meters (e.g. 2000 for 2 km).",
+      "- polygon/rectangle: coordinates is an array of {lat,lon} corner points.",
+      "- color is a hex color string like #0077ff (blue), #ff4444 (red), #00cc44 (green), #ffaa00 (orange).",
+      "- fillOpacity is 0.0 to 1.0 (default 0.2).",
+      "- weight is line width in pixels (default 2).",
+      "- ALWAYS use draw-shape when the user asks to draw, mark, or highlight a circle, polygon, or line on the map.",
+      "",
       "RULES:",
       "- Use contentRef or contentId with placementMode when the user names an existing map area. Omit lat/lon in that case.",
       "- Map phrases this way: inside/within -> inside; within 500m of/near -> near plus distanceMeters; next to -> adjacent; above -> north-of; below -> south-of; left of -> west-of; right of -> east-of.",
@@ -6821,6 +6858,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "- propagationModel values: itu-p525 (free space), itu-p526 (terrain), itu-hybrid (terrain+weather), itu-buildings-weather (buildings).",
       "- For run-simulation after add-asset in the same response, use placedIndex:0 (not assetId).",
       "- If no polygon is found for the named area, say so in assistantMessage and use empty actions [].",
+      "- To answer elevation/terrain questions, use sample-terrain: {\"type\":\"sample-terrain\",\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":8}. Get the bounds from the relevant polygon in the scenario summary.",
       "- Do not include any text outside the JSON object.",
       "",
       "SCENARIO SUMMARY (read coordinates from here):",
@@ -6835,7 +6873,9 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "Answer briefly and precisely.",
       "If no map or simulation changes are needed, reply in plain text.",
       "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
-      "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, generate-document.",
+      "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, sample-terrain, generate-document.",
+      "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: coordinates[0] is center, radiusM is radius in meters. ALWAYS use this when user asks to draw/mark/highlight a circle, polygon, or line.",
+      "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
       "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
       "Use exact ids from the scenario summary.",
       "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
@@ -7511,13 +7551,18 @@ function enrichAiResponseWithLinks(text, placedAssets = []) {
 async function executeAiActions(actions) {
   const results = [];
   const placedAssetIds = [];
+  const terrainSampleResults = [];
   const hasAddAsset = actions.some((a) => a.type === "add-asset");
   for (const action of actions) {
     // Suppress set-emitter-form noise when add-asset is also in the batch
     if (action.type === "set-emitter-form" && hasAddAsset) continue;
     const result = await executeAiAction(action, { placedAssetIds });
     if (result) {
-      results.push(result);
+      if (action.type === "sample-terrain") {
+        terrainSampleResults.push(result);
+      } else {
+        results.push(result);
+      }
     }
   }
 
@@ -7551,7 +7596,7 @@ async function executeAiActions(actions) {
     }
   }
 
-  return { results, placedAssets };
+  return { results, placedAssets, terrainSampleResults };
 }
 
 async function executeAiAction(action, { placedAssetIds = [] } = {}) {
@@ -7980,6 +8025,73 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
           : `CLEAR: ${l.from} ↔ ${l.to} (${l.distanceKm} km, ${l.minClearanceM} m clearance)`
     );
     return `LOS check results${source}:\n${lines.join("\n")}`;
+  }
+
+  if (action.type === "sample-terrain") {
+    const points = Array.isArray(action.points) ? action.points : [];
+    const bounds = action.bounds; // {north,south,east,west} for grid sampling
+    const gridN = Math.min(Number(action.gridN) || 5, 20); // max 20×20 = 400 samples
+
+    const hasDted = Boolean(getActiveTerrain());
+    const hasCesium = usesConfiguredCesiumTerrain();
+
+    if (!hasDted && !hasCesium) {
+      return "Terrain sampling skipped: no terrain source available (no DTED loaded and no Cesium Ion terrain configured).";
+    }
+
+    // Build sample list: explicit points + optional grid over bounds
+    const sampleList = points.map((p, i) => ({
+      lat: Number(p.lat), lon: Number(p.lon ?? p.lng), label: p.name ?? `Point ${i + 1}`,
+    }));
+
+    if (bounds && Number.isFinite(bounds.north) && Number.isFinite(bounds.south)
+        && Number.isFinite(bounds.east) && Number.isFinite(bounds.west)) {
+      for (let r = 0; r < gridN; r++) {
+        for (let c = 0; c < gridN; c++) {
+          const lat = bounds.south + (bounds.north - bounds.south) * r / (gridN - 1);
+          const lon = bounds.west + (bounds.east - bounds.west) * c / (gridN - 1);
+          sampleList.push({ lat, lon, label: `grid(${r},${c})` });
+        }
+      }
+    }
+
+    if (sampleList.length === 0) {
+      return "Terrain sampling skipped: no points or bounds provided.";
+    }
+
+    // Sample each point using best available source
+    const results = await Promise.all(sampleList.map(async ({ lat, lon, label }) => {
+      let elevM = null;
+      if (hasDted) {
+        elevM = sampleTerrainElevationForTerrain(lat, lon, getActiveTerrain());
+      }
+      if ((elevM === null || !Number.isFinite(elevM)) && hasCesium) {
+        try { elevM = await sampleCesiumTerrainElevation(lat, lon); } catch (_) {}
+      }
+      return { label, lat, lon, elevM: Number.isFinite(elevM) ? Math.round(elevM) : null };
+    }));
+
+    const valid = results.filter((r) => r.elevM !== null);
+    if (valid.length === 0) {
+      return "Terrain sampling returned no data — terrain provider may not cover this area.";
+    }
+
+    const peak = valid.reduce((a, b) => (b.elevM > a.elevM ? b : a));
+    const lowest = valid.reduce((a, b) => (b.elevM < a.elevM ? b : a));
+    const avgElev = Math.round(valid.reduce((s, r) => s + r.elevM, 0) / valid.length);
+    const source = hasDted ? "DTED" : "Cesium Ion terrain";
+
+    const pointLines = valid.slice(0, 20).map((r) =>
+      `  ${r.label}: ${r.elevM} m (${(r.elevM * 3.28084).toFixed(0)} ft) @ ${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}`
+    ).join("\n");
+
+    return [
+      `Terrain elevation sample (${source}, ${valid.length} points):`,
+      `  Peak:   ${peak.label} — ${peak.elevM} m (${(peak.elevM * 3.28084).toFixed(0)} ft) @ ${peak.lat.toFixed(5)}, ${peak.lon.toFixed(5)}`,
+      `  Lowest: ${lowest.label} — ${lowest.elevM} m (${(lowest.elevM * 3.28084).toFixed(0)} ft) @ ${lowest.lat.toFixed(5)}, ${lowest.lon.toFixed(5)}`,
+      `  Mean:   ${avgElev} m (${(avgElev * 3.28084).toFixed(0)} ft)`,
+      valid.length <= 20 ? `\nAll samples:\n${pointLines}` : `\nTop 20 samples:\n${pointLines}`,
+    ].join("\n");
   }
 
   if (action.type === "generate-document") {
