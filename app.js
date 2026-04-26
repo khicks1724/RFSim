@@ -1785,13 +1785,24 @@ async function saveActiveProjectNow({ silent = false } = {}) {
   setAutosaveIndicator("saving");
   const animationDone = new Promise((resolve) => setTimeout(resolve, AUTOSAVE_RING_MS));
 
-  await Promise.all([
-    apiFetch(`/projects/${state.session.activeProjectId}`, {
+  let fetchError = null;
+  try {
+    await apiFetch(`/projects/${state.session.activeProjectId}`, {
       method: "PUT",
       body: JSON.stringify({ state: serializeCurrentMapState() }),
-    }),
-    animationDone,
-  ]);
+    });
+  } catch (err) {
+    fetchError = err;
+  }
+
+  // Always let the ring animation finish before changing the indicator
+  await animationDone;
+
+  if (fetchError) {
+    setAutosaveIndicator("error");
+    // Re-throw so the caller (queueActiveProjectAutosave) can also show status
+    throw fetchError;
+  }
 
   state.session.autosavePending = false;
   syncWorkspaceUi();
@@ -1809,6 +1820,7 @@ async function saveActiveProjectNow({ silent = false } = {}) {
 
 let _autosaveSavedTimerId = null;
 
+const AUTOSAVE_ERROR_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><line x1="8" y1="5" x2="8" y2="8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11" r="0.75" fill="currentColor"/></svg>`;
 const AUTOSAVE_SPINNER_SVG = `<svg class="workspace-autosave-spin" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle class="autosave-spinner-track" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle class="autosave-spinner-fill" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="37.7" stroke-dashoffset="37.7"/></svg>`;
 const AUTOSAVE_CHECK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="3,8 6.5,11.5 13,5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const AUTOSAVE_CLOCK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><polyline points="8,5 8,8 10.5,9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -1817,12 +1829,12 @@ function setAutosaveIndicator(state_) {
   // ── Top-bar chip indicator ──────────────────────────────────────────────
   const el = dom.autosaveIndicator;
   if (el) {
-    el.classList.remove("hidden", "is-pending", "is-saving", "is-saved");
+    el.classList.remove("hidden", "is-pending", "is-saving", "is-saved", "is-error");
     if (state_ === "hidden") {
       el.classList.add("hidden");
     } else {
       el.classList.add(`is-${state_}`);
-      const titles = { pending: "Autosave pending…", saving: "Saving to server…", saved: "All changes saved" };
+      const titles = { pending: "Autosave pending…", saving: "Saving to server…", saved: "All changes saved", error: "Save failed — changes kept in browser storage" };
       el.setAttribute("title", titles[state_] ?? "");
     }
   }
@@ -1852,6 +1864,10 @@ function setAutosaveIndicator(state_) {
     row.className = "workspace-autosave-status is-saved";
     icon.innerHTML = AUTOSAVE_CHECK_SVG;
     label.textContent = "All changes saved";
+  } else if (state_ === "error") {
+    row.className = "workspace-autosave-status is-error";
+    icon.innerHTML = AUTOSAVE_ERROR_SVG;
+    label.textContent = "Save failed — changes in browser storage";
   }
 }
 
@@ -3184,8 +3200,26 @@ async function loadMapState() {
   if (state.session.token && state.session.activeProjectId) {
     try {
       const payload = await apiFetch(`/projects/${state.session.activeProjectId}`);
-      applySavedMapState(payload.project?.latest_state_json ?? null);
-      return;
+      const serverState = payload.project?.latest_state_json ?? null;
+      // Only treat the server state as authoritative if it has actual content.
+      // An empty/null server state means the project was never successfully saved —
+      // fall through to localStorage so locally-stored work is not discarded.
+      const serverHasContent = serverState && (
+        (Array.isArray(serverState.assets) && serverState.assets.length > 0) ||
+        (Array.isArray(serverState.importedItems) && serverState.importedItems.length > 0) ||
+        serverState.mapView
+      );
+      if (serverHasContent) {
+        applySavedMapState(serverState);
+        // Keep localStorage in sync with whatever the server returned
+        try {
+          window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(serverState));
+        } catch { /* quota */ }
+        return;
+      }
+      if (serverState && !serverHasContent) {
+        setStatus("Server project has no saved state — loading from browser storage.", false);
+      }
     } catch (error) {
       setStatus(`Server project load failed, falling back to browser state: ${error.message}`, true);
     }

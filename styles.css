@@ -663,9 +663,11 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 /* Show only the relevant icon per state */
 .autosave-indicator .autosave-spinner { display: none; }
 .autosave-indicator .autosave-check   { display: none; }
+.autosave-indicator .autosave-error   { display: none; }
 .autosave-indicator.is-pending .autosave-spinner { display: block; color: var(--muted); opacity: 0.5; }
 .autosave-indicator.is-saving  .autosave-spinner { display: block; color: var(--accent); }
 .autosave-indicator.is-saved   .autosave-check   { display: block; color: #4caf7d; }
+.autosave-indicator.is-error   .autosave-error   { display: block; color: #e05252; }
 
 /* Ring starts at the top */
 .autosave-spinner { transform: rotate(-90deg); }
@@ -714,6 +716,10 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 .workspace-autosave-status.is-saved {
   background: color-mix(in srgb, #4caf7d 12%, transparent);
   color: #4caf7d;
+}
+.workspace-autosave-status.is-error {
+  background: color-mix(in srgb, #e05252 12%, transparent);
+  color: #e05252;
 }
 .workspace-autosave-icon {
   display: inline-flex;
