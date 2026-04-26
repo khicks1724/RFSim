@@ -3004,7 +3004,7 @@ async function init() {
   }, true);
 
   // Middle-mouse click on Leaflet map: switch to 3D with a tilted perspective
-  dom.map.addEventListener("mousedown", async (e) => {
+  dom.map.addEventListener("pointerdown", async (e) => {
     if (e.button !== 1) return;
     e.preventDefault();
     if (state.view3dEnabled) return;
@@ -3153,6 +3153,7 @@ function initMap() {
     // every scroll tick.
     wheelDebounceTime: 100,
   }).setView([34.744, -116.151], 10);
+  ensureSharedPanes();
   state.viewshedRootLayer.addTo(state.map);
 }
 
@@ -10858,16 +10859,41 @@ function refreshActionButtons() {
   dom.runSimulationBtn.textContent = state.editingViewshedId ? "Update Coverage" : "Generate Coverage";
 }
 
+// Shared panes by content category. One pane per *type* rather than one pane
+// per item prevents thousands of DOM nodes being created for large KMZ imports,
+// which was the root cause of pan jitter and marker misalignment.
+const PANE_DEFS = [
+  { name: "pane-assets",   zIndex: "620", pointerEvents: "auto"  },
+  { name: "pane-imported", zIndex: "415", pointerEvents: "auto"  },
+  { name: "pane-viewshed", zIndex: "410", pointerEvents: "none"  },
+  { name: "pane-planning", zIndex: "408", pointerEvents: "none"  },
+  { name: "pane-terrain",  zIndex: "405", pointerEvents: "none"  },
+];
+
+function ensureSharedPanes() {
+  for (const def of PANE_DEFS) {
+    if (!state.map.getPane(def.name)) {
+      const pane = state.map.createPane(def.name);
+      pane.style.zIndex = def.zIndex;
+      pane.style.pointerEvents = def.pointerEvents;
+    }
+  }
+}
+
 function getMapContentPaneName(contentId) {
+  ensureSharedPanes();
+  if (contentId.startsWith("asset:"))    return "pane-assets";
+  if (contentId.startsWith("imported:")) return "pane-imported";
+  if (contentId.startsWith("viewshed:")) return "pane-viewshed";
+  if (contentId.startsWith("planning"))  return "pane-planning";
+  if (contentId.startsWith("terrain:"))  return "pane-terrain";
+  // Fallback for any other content type — create a unique pane as before.
   const safeId = contentId.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   const paneName = `content-${safeId}`;
   if (!state.map.getPane(paneName)) {
     const pane = state.map.createPane(paneName);
-    // Asset markers need pointer events for popups/drag; everything else
-    // (viewsheds, terrain coverage, planning overlays) must not absorb clicks.
-    const isAsset = contentId.startsWith("asset:");
-    pane.style.zIndex = isAsset ? "620" : "410";
-    if (!isAsset) pane.style.pointerEvents = "none";
+    pane.style.zIndex = "410";
+    pane.style.pointerEvents = "none";
   }
   return paneName;
 }
