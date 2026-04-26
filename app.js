@@ -4899,7 +4899,7 @@ async function onAiChatSubmit(event) {
   } catch (error) {
     stopThinkingIndicator();
     assistantMessageController.setStatus("Request failed");
-    assistantMessageController.setText(`Request failed: ${error.message}`);
+    assistantMessageController.setText(`I couldn't complete that request. ${error.message}`);
     state.ai.statusMessage = error.message;
   } finally {
     state.ai.requestInFlight = false;
@@ -5773,7 +5773,17 @@ function wantsMgrsLookup(rawPrompt) {
 }
 
 function isLookupPrompt(rawPrompt) {
-  return /\b(where|location|locations|locate|find|coords|coordinates|grid|mgrs)\b/i.test(String(rawPrompt ?? ""));
+  const raw = String(rawPrompt ?? "").trim();
+  if (!raw) {
+    return false;
+  }
+  const hasLookupIntent = /\b(where|location|locations|locate|find|coords|coordinates|mgrs)\b/i.test(raw)
+    || /\bgrid\s+location\b/i.test(raw);
+  if (!hasLookupIntent) {
+    return false;
+  }
+  const hasActionIntent = /\b(place|add|create|draw|run|simulate|simulation|propagation|coverage|configure|set|update|remove|inside|within|radius|grid\s+step)\b/i.test(raw);
+  return !hasActionIntent;
 }
 
 function formatLookupCoordinateOnly(record, preferMgrs = false) {
@@ -6363,7 +6373,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  set-weather           → temperatureC?, humidity?, pressure?, windSpeed?",
     "  set-imagery           → basemap?",
     "  set-emitter-form      → (emitter fields — pre-fills the UI form only, does NOT place an asset. Do NOT use this when placing assets — use add-asset instead.)",
-    "  add-asset             → lat, lon, emitterType, name, force?, unit?, frequencyMHz, powerW, antennaHeightM, antennaGainDbi, receiverSensitivityDbm, systemLossDb, notes?",
+    "  add-asset             → lat, lon OR contentId/contentRef/inside/nameRef + placementMode + distanceMeters, emitterType, name, force?, unit?, frequencyMHz, powerW, antennaHeightM, antennaGainDbi, receiverSensitivityDbm, systemLossDb, notes?",
     "  update-asset          → assetId (exact id), lat?, lon?, emitterType?, name?, force?, unit?, frequencyMHz?, powerW?, antennaHeightM?, antennaGainDbi?, receiverSensitivityDbm?, systemLossDb?",
     "  remove-asset          → assetId (exact id)",
     "  draw-shape            → shapeType (circle|rectangle|polyline|polygon), name?, color?, fillOpacity?, weight?, coordinates [{lat,lon}], radiusM? (circle only)",
@@ -6381,6 +6391,9 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "═══════════════════════════════════════",
     "  emitterType           → Equipment category string: \"radio\", \"jammer\", \"radar\", \"relay\", \"sensor\", or a model name like \"PRC-163\"",
     "                          ⚠ This is DIFFERENT from the action \"type\" field. Use \"emitterType\" for the equipment label.",
+    "  contentId/contentRef  → Use when the user refers to an existing map item by link, exact id, or name (for example a selected polygon such as Capital Lawn).",
+    "  placementMode         → Use \"inside\", \"center\", \"point\", \"near\", \"adjacent\", \"north-of\", \"south-of\", \"east-of\", or \"west-of\".",
+    "  distanceMeters        → Optional offset for relative placement. Use with phrases like \"within 500m of\", \"next to\", \"just above\", \"left of\", etc.",
     "  force                 → \"friendly\" | \"enemy\" | \"host-nation\" | \"civilian\"  (default: \"friendly\")",
     "  name                  → Display name, e.g. \"PRC-163 Alpha\", \"Radio 1\"",
     "  unit                  → Unit/callsign, e.g. \"1-68 AR\", \"K 1\"",
@@ -6472,8 +6485,11 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "═══════════════════════════════════════",
     "- Polygon boundaries (AO Boundary, drawn polygons) are in importedItems[].geometry.coordinates[0] as [{lat,lon}].",
     "- The importedItems[] array in the scenario summary contains ACTUAL coordinates. Read the geometry.coordinates from the named polygon (e.g., 'Range 400') and use those real lat/lon values.",
+    "- Prefer contentId/contentRef + placementMode when the user references an existing linked polygon or map content. Let the app resolve the final placement point deterministically.",
+    "- Map natural language to placementMode: inside/within → inside; within 500m of/near → near + distanceMeters=500; next to/beside → adjacent; above → north-of; below → south-of; left of → west-of; right of → east-of.",
     "- CRITICAL: lat and lon in add-asset MUST be plain JSON numbers (e.g. 34.1234, -116.5678). Never use null, strings, or omit these fields.",
-    "- CRITICAL: If the user references a named polygon (e.g. 'Range 400', 'AO Boundary') but that polygon is NOT present in importedItems[], do NOT guess or fabricate coordinates. Instead, set actions:[] and tell the user in assistantMessage that the named overlay is not currently loaded on the map and they need to re-import their KMZ/KML file before you can place assets inside it.",
+    "- EXCEPTION: when using contentId/contentRef + placementMode, you may omit lat/lon and the app will resolve them from the referenced map item.",
+    "- CRITICAL: If the user references a named polygon (e.g. 'Range 400', 'AO Boundary') but that polygon is NOT present in importedItems[] or map contents, do NOT guess or fabricate coordinates. Instead, set actions:[] and tell the user in assistantMessage that the named overlay is not currently loaded on the map and they need to re-import their KMZ/KML file before you can place assets inside it.",
     "- Compute the polygon centroid and bounding box. Place assets distributed inside — NOT outside.",
     "- For 'highest elevation': examine the polygon vertex coordinates. Vertices at the extremes of the bounding box (especially corners) tend to be on ridgelines. Avoid placing in the center of a large polygon — that's often a valley or flat plain.",
     "- Separation check: compute haversine distance between all pairs. With 1 km minimum and 3 assets, use a triangle with ~1.5–3 km sides.",
@@ -6590,15 +6606,16 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       '{"assistantMessage":"Your reply to the user here.","actions":[]}',
       "",
       "To place an asset:",
-      '{"assistantMessage":"Placed PRC-163 in Range 400.","actions":[{"type":"add-asset","lat":34.1234,"lon":-116.5678,"name":"PRC-163 Alpha","emitterType":"PRC-163","force":"friendly","frequencyMHz":150,"powerW":5,"antennaHeightM":2,"antennaGainDbi":2.15,"receiverSensitivityDbm":-107,"systemLossDb":3}]}',
+      '{"assistantMessage":"Placed PRC-163 in the selected area.","actions":[{"type":"add-asset","contentRef":"Capital Lawn","placementMode":"inside","name":"PRC-163 Alpha","emitterType":"PRC-163","force":"friendly","frequencyMHz":150,"powerW":5,"antennaHeightM":2,"antennaGainDbi":2.15,"receiverSensitivityDbm":-107,"systemLossDb":3}]}',
       "",
       "To place and simulate:",
-      '{"assistantMessage":"Placed and simulated.","actions":[{"type":"add-asset","lat":34.12,"lon":-116.56,"name":"Radio 1","emitterType":"radio","force":"friendly","frequencyMHz":150,"powerW":5,"antennaHeightM":2,"antennaGainDbi":2.15,"receiverSensitivityDbm":-107,"systemLossDb":3},{"type":"run-simulation","placedIndex":0,"propagationModel":"itu-p526","radiusKm":5}]}',
+      '{"assistantMessage":"Placed and simulated.","actions":[{"type":"add-asset","contentRef":"Capital Lawn","placementMode":"inside","name":"Radio 1","emitterType":"radio","force":"friendly","frequencyMHz":150,"powerW":5,"antennaHeightM":2,"antennaGainDbi":2.15,"receiverSensitivityDbm":-107,"systemLossDb":3},{"type":"run-simulation","placedIndex":0,"propagationModel":"itu-p526","radiusKm":5}]}',
       "",
       "RULES:",
-      "- lat and lon MUST be plain numbers from the scenario geometry. NEVER null or strings.",
-      "- If the user references a named area (e.g. Range 400), read its coordinates from importedItems[].geometry.coordinates in the scenario summary.",
-      "- Compute the centroid of the polygon: average all vertex lats, average all vertex lons.",
+      "- Use contentRef or contentId with placementMode when the user names an existing map area. Omit lat/lon in that case.",
+      "- Map phrases this way: inside/within -> inside; within 500m of/near -> near plus distanceMeters; next to -> adjacent; above -> north-of; below -> south-of; left of -> west-of; right of -> east-of.",
+      "- Otherwise lat and lon MUST be plain numbers from the scenario geometry. NEVER null or strings.",
+      "- If the user references a named area (e.g. Range 400), prefer contentRef plus placementMode over manual coordinates.",
       "- force must be: friendly, enemy, host-nation, or civilian.",
       "- propagationModel values: itu-p525 (free space), itu-p526 (terrain), itu-hybrid (terrain+weather), itu-buildings-weather (buildings).",
       "- For run-simulation after add-asset in the same response, use placedIndex:0 (not assetId).",
@@ -6841,6 +6858,40 @@ function extractMgrsTokens(text) {
     .map((match) => match[0].toUpperCase());
 }
 
+function looksLikeStructuredPayloadText(text) {
+  const normalized = String(text ?? "").trim();
+  if (!normalized) {
+    return false;
+  }
+  return normalized.startsWith("{")
+    || normalized.startsWith("[")
+    || /^```(?:json)?/i.test(normalized)
+    || /"actions"\s*:/.test(normalized)
+    || /"assistantMessage"\s*:/.test(normalized);
+}
+
+function summarizeAssistantFailureText(text) {
+  const normalized = String(text ?? "").trim();
+  if (!normalized) {
+    return "I couldn't interpret the response.";
+  }
+  const unresolvedMatch = normalized.match(/could(?:n't| not)\s+(?:find|resolve)\s+(.+?)(?:[\.!\n]|$)/i);
+  if (unresolvedMatch?.[1]) {
+    return `I couldn't resolve ${unresolvedMatch[1].trim()}.`;
+  }
+  const invalidMatch = normalized.match(/invalid\s+([a-z0-9\s_-]+)(?:[\.!\n]|$)/i);
+  if (invalidMatch?.[1]) {
+    return `I couldn't use the ${invalidMatch[1].trim()}.`;
+  }
+  if (/unsupported|not supported/i.test(normalized)) {
+    return "I couldn't apply part of that request because the action was not supported.";
+  }
+  if (/malformed|parse|json|schema/i.test(normalized)) {
+    return "I understood the request, but the model response was not in a usable format.";
+  }
+  return "I couldn't complete that request because part of it could not be interpreted.";
+}
+
 function normalizeAssistantMessageForPrompt(prompt, message) {
   const rawPrompt = String(prompt ?? "").trim();
   const rawMessage = String(message ?? "").trim();
@@ -6870,6 +6921,10 @@ function normalizeAssistantMessageForPrompt(prompt, message) {
     return lines.slice(0, 3).join("\n");
   }
 
+  if (looksLikeStructuredPayloadText(rawMessage)) {
+    return summarizeAssistantFailureText(rawMessage);
+  }
+
   return rawMessage
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -6878,7 +6933,7 @@ function normalizeAssistantMessageForPrompt(prompt, message) {
 function parseAiAssistantResponse(text, prompt = "") {
   const normalized = typeof text === "string" ? text.trim() : "";
   if (!normalized) {
-    return { assistantMessage: "", actions: [] };
+    return { assistantMessage: "I couldn't interpret the model response.", actions: [] };
   }
 
   // 1. Try direct parse
@@ -6914,11 +6969,19 @@ function normalizeAiAssistantPayload(payload, rawText = "", prompt = "") {
     return { assistantMessage: normalizeAssistantMessageForPrompt(prompt, rawText), actions: [] };
   }
 
+  const fallbackIssue = typeof payload.error === "string"
+    ? payload.error
+    : typeof payload.reason === "string"
+      ? payload.reason
+      : Array.isArray(payload.issues) && payload.issues.length
+        ? payload.issues.join("; ")
+        : "";
+
   const assistantMessage = typeof payload.assistantMessage === "string"
     ? payload.assistantMessage
     : typeof payload.message === "string"
       ? payload.message
-      : rawText;
+      : fallbackIssue || rawText;
 
   return {
     assistantMessage: normalizeAssistantMessageForPrompt(prompt, assistantMessage),
@@ -7292,7 +7355,7 @@ async function executeAiActions(actions) {
 
 async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   if (!action || typeof action.type !== "string") {
-    return "Skipped malformed action.";
+    return "I couldn't apply one action because it was malformed.";
   }
 
   if (action.type === "set-map-view") {
@@ -7300,16 +7363,17 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const lon = Number(action.lon ?? action.center?.lon);
     const zoom = Number.isFinite(Number(action.zoom)) ? Number(action.zoom) : state.map.getZoom();
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      return "Skipped map view update with invalid coordinates.";
+      return "I couldn't move the map because the requested coordinates were invalid.";
     }
     state.map.setView([lat, lon], clamp(zoom, 2, 18));
     return `Moved map to ${lat.toFixed(4)}, ${lon.toFixed(4)}.`;
   }
 
   if (action.type === "focus-map-content") {
-    const contentId = resolveMapContentId(action.contentId ?? action.name);
+    const focusReference = action.contentId ?? action.name;
+    const contentId = resolveMapContentId(focusReference);
     if (!contentId) {
-      return "Skipped focus request because the map content was not found.";
+      return `I couldn't find the requested map item${focusReference ? `: ${focusReference}` : ""}.`;
     }
     focusMapContent(contentId);
     return `Focused ${contentId}.`;
@@ -7384,10 +7448,32 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   }
 
   if (action.type === "add-asset") {
-    const assetLat = Number(action.lat);
-    const assetLon = Number(action.lon);
+    let assetLat = Number(action.lat);
+    let assetLon = Number(action.lon);
+    let placementSource = "";
+    let placementRelation = "";
     if (!Number.isFinite(assetLat) || !Number.isFinite(assetLon)) {
-      return "Skipped asset placement because coordinates were invalid.";
+      const placementReference = action.contentId
+        ?? action.contentRef
+        ?? action.relativeTo
+        ?? action.reference
+        ?? action.anchorRef
+        ?? action.inside
+        ?? action.within
+        ?? action.nameRef
+        ?? action.targetArea;
+      const placementMode = action.placementMode
+        ?? action.relativePosition
+        ?? action.relation
+        ?? (typeof action.withinMeters !== "undefined" ? "near" : "inside");
+      const placement = resolveMapPlacementPoint(placementReference, placementMode, action);
+      if (!placement) {
+        return `I couldn't place the asset because I couldn't resolve ${placementReference ? `the map reference "${placementReference}"` : "a valid placement location"}.`;
+      }
+      assetLat = placement.lat;
+      assetLon = placement.lon;
+      placementSource = placement.source;
+      placementRelation = placement.relation;
     }
     const emitterData = normalizeAiEmitterData(action.asset ?? action);
     // Build asset directly — do NOT route through the shared emitter form so we
@@ -7428,13 +7514,18 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     }
     // Track so subsequent run-simulation actions in this batch can target it
     placedAssetIds.push(newAsset.id);
-    return `[**${newAsset.name}**](asset:${newAsset.id}) placed — ${newAsset.frequencyMHz} MHz, ${newAsset.powerW} W at ${assetLat.toFixed(5)}, ${assetLon.toFixed(5)}`;
+    const relationLabel = placementRelation
+      ? placementRelation.replace(/-/g, " ")
+      : "near";
+    const placementLabel = placementSource ? ` ${relationLabel} ${placementSource}` : "";
+    return `[**${newAsset.name}**](asset:${newAsset.id}) placed${placementLabel} — ${newAsset.frequencyMHz} MHz, ${newAsset.powerW} W at ${assetLat.toFixed(5)}, ${assetLon.toFixed(5)}`;
   }
 
   if (action.type === "update-asset") {
-    const asset = findAssetByReference(action.assetId ?? action.name);
+    const assetReference = action.assetId ?? action.name;
+    const asset = findAssetByReference(assetReference);
     if (!asset) {
-      return "Skipped asset update because the asset was not found.";
+      return `I couldn't update the asset${assetReference ? ` "${assetReference}"` : ""} because it was not found.`;
     }
     Object.assign(asset, normalizeAiEmitterData(action.changes ?? action));
     if (Number.isFinite(Number(action.lat))) {
@@ -7459,9 +7550,10 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   }
 
   if (action.type === "remove-asset") {
-    const asset = findAssetByReference(action.assetId ?? action.name);
+    const assetReference = action.assetId ?? action.name;
+    const asset = findAssetByReference(assetReference);
     if (!asset) {
-      return "Skipped asset removal because the asset was not found.";
+      return `I couldn't remove the asset${assetReference ? ` "${assetReference}"` : ""} because it was not found.`;
     }
     removeAsset(asset.id);
     return `Removed ${asset.name}.`;
@@ -7500,7 +7592,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   if (action.type === "set-planning-region") {
     const polygon = Array.isArray(action.polygon) ? action.polygon : [];
     if (polygon.length < 3) {
-      return "Skipped planning region update because the polygon was invalid.";
+      return "I couldn't update the planning region because the polygon had fewer than 3 points.";
     }
     if (state.planning.regionLayer) {
       state.map.removeLayer(state.planning.regionLayer);
@@ -7538,7 +7630,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const targetId = simAsset?.id ?? dom.assetSelect.value;
     const targetAsset = state.assets.find((a) => a.id === targetId);
     if (!targetAsset) {
-      return "Skipped run-simulation: no valid asset selected.";
+      return `I couldn't run the simulation because no valid asset was selected${action.assetId || action.assetName ? ` for ${action.assetId ?? action.assetName}` : ""}.`;
     }
     dom.assetSelect.value = targetAsset.id;
     if (typeof action.propagationModel === "string") {
@@ -7583,7 +7675,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
 
   if (action.type === "draw-shape") {
     const rawCoords = Array.isArray(action.coordinates) ? action.coordinates : [];
-    if (rawCoords.length === 0) return "Skipped draw-shape: no coordinates provided.";
+    if (rawCoords.length === 0) return "I couldn't draw the shape because no coordinates were provided.";
     const toLatLng = (c) => ({ lat: Number(c.lat ?? c[0]), lng: Number(c.lon ?? c.lng ?? c[1]) });
     const shapeStyle = {
       color: typeof action.color === "string" ? action.color : DRAW_DEFAULTS.color,
@@ -7631,7 +7723,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   if (action.type === "update-shape") {
     const ref = action.shapeId ?? action.name;
     const item = state.importedItems.find((i) => i.drawn && (i.id === ref || i.name === ref));
-    if (!item) return `Skipped update-shape: shape "${ref}" not found.`;
+    if (!item) return `I couldn't update the shape "${ref}" because it was not found.`;
     if (typeof action.color === "string") {
       item.shapeStyle.color = action.color;
       item.shapeStyle.fillColor = action.color;
@@ -7652,7 +7744,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   if (action.type === "remove-shape") {
     const ref = action.shapeId ?? action.name;
     const item = state.importedItems.find((i) => i.drawn && (i.id === ref || i.name === ref));
-    if (!item) return `Skipped remove-shape: shape "${ref}" not found.`;
+    if (!item) return `I couldn't remove the shape "${ref}" because it was not found.`;
     removeImportedItem(item.id);
     return `Removed shape "${ref}".`;
   }
@@ -7691,7 +7783,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const docType = action.docType ?? "document";
     const title = action.title ?? docType.toUpperCase();
     const content = action.content ?? "";
-    if (!content.trim()) return "Skipped generate-document: no content provided.";
+    if (!content.trim()) return "I couldn't generate the document because the content was empty.";
 
     // Render a copyable document block into the chat
     const docId = `ai-doc-${Date.now()}`;
@@ -7733,7 +7825,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     return `Generated ${docType}: "${title}".`;
   }
 
-  return `Skipped unsupported action type ${action.type}.`;
+  return `I couldn't apply the action type "${action.type}" because it is not supported.`;
 }
 
 function normalizeAiEmitterData(source) {
@@ -7798,17 +7890,397 @@ function findAssetByReference(reference) {
   return null;
 }
 
-function resolveMapContentId(reference) {
+function normalizeContentReference(reference) {
   if (!reference) {
+    return "";
+  }
+  if (typeof reference === "string") {
+    return reference.trim();
+  }
+  if (typeof reference === "object") {
+    return String(
+      reference.contentId
+      ?? reference.id
+      ?? reference.name
+      ?? reference.label
+      ?? reference.title
+      ?? "",
+    ).trim();
+  }
+  return String(reference).trim();
+}
+
+function resolveMapContentId(reference) {
+  const normalizedReference = normalizeContentReference(reference);
+  if (!normalizedReference) {
     return null;
   }
   const entries = getMapContentEntries();
-  const direct = entries.find((entry) => entry.id === reference);
+  const direct = entries.find((entry) => entry.id === normalizedReference);
   if (direct) {
     return direct.id;
   }
-  const byName = entries.find((entry) => entry.name.toLowerCase() === String(reference).toLowerCase());
-  return byName?.id ?? null;
+  const byName = entries.find((entry) => entry.name.toLowerCase() === normalizedReference.toLowerCase());
+  if (byName) {
+    return byName.id;
+  }
+  const fuzzyMatches = findMapContentLookupMatches(normalizedReference, 1);
+  return fuzzyMatches[0]?.id ?? null;
+}
+
+function getMapContentEntryByReference(reference) {
+  const contentId = resolveMapContentId(reference);
+  if (!contentId) {
+    return null;
+  }
+  return getMapContentEntries().find((entry) => entry.id === contentId) ?? null;
+}
+
+function getImportedItemByReference(reference) {
+  const entry = getMapContentEntryByReference(reference);
+  if (!entry?.id?.startsWith("imported:")) {
+    return null;
+  }
+  return state.importedItems.find((item) => `imported:${item.id}` === entry.id) ?? null;
+}
+
+function normalizeLeafletPoint(point) {
+  if (!point) {
+    return null;
+  }
+  const lat = Number(point.lat);
+  const lng = Number(point.lng ?? point.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+function flattenLeafletLatLngs(latLngs) {
+  if (!Array.isArray(latLngs)) {
+    return [];
+  }
+  if (!latLngs.length) {
+    return [];
+  }
+  if (Array.isArray(latLngs[0])) {
+    return flattenLeafletLatLngs(latLngs[0]);
+  }
+  return latLngs.map(normalizeLeafletPoint).filter(Boolean);
+}
+
+function computePolygonCentroid(latLngs) {
+  const points = flattenLeafletLatLngs(latLngs);
+  if (points.length < 3) {
+    return points[0] ?? null;
+  }
+
+  let areaFactor = 0;
+  let centroidLat = 0;
+  let centroidLng = 0;
+
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    const cross = (current.lng * next.lat) - (next.lng * current.lat);
+    areaFactor += cross;
+    centroidLng += (current.lng + next.lng) * cross;
+    centroidLat += (current.lat + next.lat) * cross;
+  }
+
+  if (Math.abs(areaFactor) < 1e-12) {
+    const avgLat = points.reduce((sum, point) => sum + point.lat, 0) / points.length;
+    const avgLng = points.reduce((sum, point) => sum + point.lng, 0) / points.length;
+    return { lat: avgLat, lng: avgLng };
+  }
+
+  return {
+    lat: centroidLat / (3 * areaFactor),
+    lng: centroidLng / (3 * areaFactor),
+  };
+}
+
+function isPointInsidePolygon(point, polygonLatLngs) {
+  const target = normalizeLeafletPoint(point);
+  const polygon = flattenLeafletLatLngs(polygonLatLngs);
+  if (!target || polygon.length < 3) {
+    return false;
+  }
+
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const current = polygon[index];
+    const prior = polygon[previous];
+    const intersects = ((current.lat > target.lat) !== (prior.lat > target.lat))
+      && (target.lng < ((prior.lng - current.lng) * (target.lat - current.lat)) / ((prior.lat - current.lat) || Number.EPSILON) + current.lng);
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function normalizePlacementMode(mode) {
+  const raw = String(mode ?? "inside").trim().toLowerCase();
+  if (!raw) {
+    return "inside";
+  }
+  if (/^within\s+\d+(?:\.\d+)?\s*m(?:eters?)?\s+of$/.test(raw) || /^within\s+\d+(?:\.\d+)?\s*km\s+of$/.test(raw)) {
+    return "near";
+  }
+  if (/^left\s+of$/.test(raw)) {
+    return "west-of";
+  }
+  if (/^right\s+of$/.test(raw)) {
+    return "east-of";
+  }
+  if (/^just\s+above$/.test(raw)) {
+    return "north-of";
+  }
+  if (/^just\s+below$/.test(raw)) {
+    return "south-of";
+  }
+  if (["inside", "within", "in"].includes(raw)) {
+    return "inside";
+  }
+  if (["center", "centroid", "middle"].includes(raw)) {
+    return "center";
+  }
+  if (["point", "exact", "on"].includes(raw)) {
+    return "point";
+  }
+  if (["near", "nearby", "within-distance", "close", "close-to"].includes(raw)) {
+    return "near";
+  }
+  if (["next-to", "adjacent", "adjacent-to", "beside"].includes(raw)) {
+    return "adjacent";
+  }
+  if (["above", "north", "north-of", "just-above", "top-of"].includes(raw)) {
+    return "north-of";
+  }
+  if (["below", "south", "south-of", "just-below", "bottom-of"].includes(raw)) {
+    return "south-of";
+  }
+  if (["left-of", "left", "west", "west-of"].includes(raw)) {
+    return "west-of";
+  }
+  if (["right-of", "right", "east", "east-of"].includes(raw)) {
+    return "east-of";
+  }
+  return raw;
+}
+
+function offsetLatLon(point, northMeters = 0, eastMeters = 0) {
+  const base = normalizeLeafletPoint(point);
+  if (!base) {
+    return null;
+  }
+  return {
+    lat: base.lat + metersToLatitudeDegrees(northMeters),
+    lng: base.lng + metersToLongitudeDegrees(eastMeters, base.lat),
+  };
+}
+
+function getPlacementDistanceMeters(options = {}) {
+  const modeText = String(options.placementMode ?? options.relativePosition ?? options.relation ?? "").trim().toLowerCase();
+  const modeDistanceMatch = modeText.match(/^within\s+(\d+(?:\.\d+)?)\s*(m|meter|meters|km)\s+of$/);
+  if (modeDistanceMatch) {
+    const value = Number(modeDistanceMatch[1]);
+    const unit = modeDistanceMatch[2];
+    if (Number.isFinite(value)) {
+      return unit === "km" ? value * 1000 : value;
+    }
+  }
+  const numericDistance = Number(
+    options.distanceMeters
+    ?? options.offsetMeters
+    ?? options.withinMeters
+    ?? options.radiusMeters
+    ?? options.distanceM
+    ?? Number.NaN,
+  );
+  return Number.isFinite(numericDistance) ? Math.max(0, numericDistance) : 50;
+}
+
+function buildPlacementReferenceGeometry(entry, importedItem = null) {
+  if (entry.id.startsWith("asset:")) {
+    const asset = state.assets.find((item) => `asset:${item.id}` === entry.id);
+    if (!asset) {
+      return null;
+    }
+    const point = { lat: asset.lat, lng: asset.lon };
+    return {
+      kind: "point",
+      point,
+      center: point,
+      bounds: null,
+      source: entry.name,
+      contentId: entry.id,
+    };
+  }
+
+  if (importedItem?.layer) {
+    if (importedItem.geometryType === "Point") {
+      const point = normalizeLeafletPoint(importedItem.layer.getLatLng?.());
+      if (!point) {
+        return null;
+      }
+      return {
+        kind: "point",
+        point,
+        center: point,
+        bounds: importedItem.layer.getBounds?.() ?? null,
+        source: entry.name,
+        contentId: entry.id,
+      };
+    }
+
+    if (importedItem.geometryType === "LineString") {
+      const linePoints = flattenLeafletLatLngs(importedItem.layer.getLatLngs?.() ?? []);
+      if (!linePoints.length) {
+        return null;
+      }
+      const center = linePoints[Math.floor(linePoints.length / 2)];
+      return {
+        kind: "line",
+        point: center,
+        center,
+        bounds: importedItem.layer.getBounds?.() ?? null,
+        source: entry.name,
+        contentId: entry.id,
+      };
+    }
+
+    const polygon = flattenLeafletLatLngs(importedItem.layer.getLatLngs?.() ?? []);
+    if (!polygon.length) {
+      return null;
+    }
+    const centroid = computePolygonCentroid(polygon);
+    const bounds = importedItem.layer.getBounds?.() ?? null;
+    const center = normalizeLeafletPoint(bounds?.getCenter?.()) ?? centroid ?? polygon[0];
+    return {
+      kind: "polygon",
+      polygon,
+      point: centroid ?? center,
+      center,
+      bounds,
+      source: entry.name,
+      contentId: entry.id,
+    };
+  }
+
+  if (entry.id === "planning-region" && state.planning.regionLayer) {
+    const polygon = flattenLeafletLatLngs(state.planning.regionLayer.getLatLngs?.() ?? []);
+    const centroid = computePolygonCentroid(polygon);
+    const bounds = state.planning.regionLayer.getBounds?.() ?? null;
+    const center = normalizeLeafletPoint(bounds?.getCenter?.()) ?? centroid ?? polygon[0];
+    if (!center) {
+      return null;
+    }
+    return {
+      kind: "polygon",
+      polygon,
+      point: centroid ?? center,
+      center,
+      bounds,
+      source: entry.name,
+      contentId: entry.id,
+    };
+  }
+
+  return null;
+}
+
+function getReferenceEdgePoint(geometry, direction) {
+  if (!geometry) {
+    return null;
+  }
+  if (!geometry.bounds?.isValid?.()) {
+    return geometry.point ?? geometry.center ?? null;
+  }
+  const southWest = geometry.bounds.getSouthWest();
+  const northEast = geometry.bounds.getNorthEast();
+  const center = geometry.bounds.getCenter();
+  if (direction === "north") {
+    return { lat: northEast.lat, lng: center.lng };
+  }
+  if (direction === "south") {
+    return { lat: southWest.lat, lng: center.lng };
+  }
+  if (direction === "west") {
+    return { lat: center.lat, lng: southWest.lng };
+  }
+  if (direction === "east") {
+    return { lat: center.lat, lng: northEast.lng };
+  }
+  return normalizeLeafletPoint(center);
+}
+
+function resolveMapPlacementPoint(reference, placementMode = "inside", options = {}) {
+  const normalizedPlacementMode = normalizePlacementMode(placementMode);
+  const entry = getMapContentEntryByReference(reference);
+  if (!entry) {
+    return null;
+  }
+  const importedItem = getImportedItemByReference(entry.id);
+  const geometry = buildPlacementReferenceGeometry(entry, importedItem);
+  if (!geometry) {
+    return null;
+  }
+
+  const pointResult = (point, relation = normalizedPlacementMode) => {
+    const normalized = normalizeLeafletPoint(point);
+    return normalized
+      ? { lat: normalized.lat, lon: normalized.lng, source: geometry.source, contentId: geometry.contentId, relation }
+      : null;
+  };
+
+  if (["inside", "center", "point"].includes(normalizedPlacementMode)) {
+    if (normalizedPlacementMode === "center") {
+      return pointResult(geometry.center, "center");
+    }
+    if (normalizedPlacementMode === "point") {
+      return pointResult(geometry.point ?? geometry.center, "point");
+    }
+    if (geometry.kind === "polygon") {
+      if (geometry.point && isPointInsidePolygon(geometry.point, geometry.polygon)) {
+        return pointResult(geometry.point, "inside");
+      }
+      if (geometry.center && isPointInsidePolygon(geometry.center, geometry.polygon)) {
+        return pointResult(geometry.center, "inside");
+      }
+      return pointResult(geometry.polygon?.[0], "inside");
+    }
+    return pointResult(geometry.point ?? geometry.center, "inside");
+  }
+
+  const distanceMeters = getPlacementDistanceMeters(options);
+  if (normalizedPlacementMode === "near") {
+    const edgePoint = getReferenceEdgePoint(geometry, "east");
+    return pointResult(offsetLatLon(edgePoint, 0, distanceMeters), "near");
+  }
+  if (normalizedPlacementMode === "adjacent") {
+    const edgePoint = getReferenceEdgePoint(geometry, "east");
+    return pointResult(offsetLatLon(edgePoint, 0, Math.max(15, distanceMeters)), "adjacent");
+  }
+  if (normalizedPlacementMode === "north-of") {
+    const edgePoint = getReferenceEdgePoint(geometry, "north");
+    return pointResult(offsetLatLon(edgePoint, distanceMeters, 0), "north-of");
+  }
+  if (normalizedPlacementMode === "south-of") {
+    const edgePoint = getReferenceEdgePoint(geometry, "south");
+    return pointResult(offsetLatLon(edgePoint, -distanceMeters, 0), "south-of");
+  }
+  if (normalizedPlacementMode === "east-of") {
+    const edgePoint = getReferenceEdgePoint(geometry, "east");
+    return pointResult(offsetLatLon(edgePoint, 0, distanceMeters), "east-of");
+  }
+  if (normalizedPlacementMode === "west-of") {
+    const edgePoint = getReferenceEdgePoint(geometry, "west");
+    return pointResult(offsetLatLon(edgePoint, 0, -distanceMeters), "west-of");
+  }
+
+  return null;
 }
 
 function updateClock() {
