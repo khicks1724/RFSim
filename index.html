@@ -1251,6 +1251,7 @@
                 <option value="">Disabled</option>
                 <option value="genai-mil">GenAI.mil (STARK)</option>
                 <option value="anthropic">Anthropic (Claude)</option>
+                <option value="local-model">Local Model (Ollama / LM Studio)</option>
               </select>
             </label>
             <label id="aiApiKeyLabel">
@@ -1258,9 +1259,33 @@
               <input id="aiApiKeyInput" type="password" placeholder="Paste API key">
             </label>
           </div>
+
+          <div id="aiLocalModelSection" class="ai-local-model-section hidden">
+            <div class="ai-local-model-header">
+              <span class="ai-local-model-title">Local Model Settings</span>
+              <span class="ai-local-model-hint">Requires <code>node genai-proxy.js --local-model</code> running on this machine</span>
+            </div>
+            <div class="ai-local-model-fields">
+              <label class="ai-local-model-url-label">
+                Model Server URL
+                <input id="aiLocalModelUrlInput" type="text" placeholder="http://localhost:11434/v1/chat/completions (Ollama default)">
+              </label>
+              <button id="aiLocalModelDetectBtn" class="ghost-button small" type="button">Detect Models</button>
+            </div>
+            <div class="ai-local-model-instructions">
+              <strong>Quick start:</strong>
+              <ol>
+                <li>Install <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a>, or llama.cpp and start it locally.</li>
+                <li>Run <code>node genai-proxy.js --local-model</code> — follow the one-time certificate trust prompt.</li>
+                <li>Enter the model name above (e.g. <code>llama3</code>, <code>mistral</code>) or click <strong>Detect Models</strong>.</li>
+                <li>Click <strong>Test Connection</strong>.</li>
+              </ol>
+            </div>
+          </div>
+
           <div class="button-row compact-button-row settings-modal-actions">
             <button id="saveAiProviderBtn" class="ghost-button small" type="button">Save Key</button>
-            <button id="testAiConnectionBtn" class="primary-button small" type="button">Test Key</button>
+            <button id="testAiConnectionBtn" class="primary-button small" type="button">Test Connection</button>
             <button id="clearAiProviderBtn" class="ghost-button small" type="button">Clear Draft</button>
           </div>
           <div class="weather-summary ai-summary" id="aiProviderSummary">Add a provider and API key to enable the AI planning assistant.</div>

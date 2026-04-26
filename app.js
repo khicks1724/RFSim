@@ -794,6 +794,8 @@ const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
 const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
 const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
 const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
+const LOCAL_MODEL_PROXY_ENDPOINT = "https://127.0.0.1:8788/v1/local/chat/completions";
+const LOCAL_MODEL_HEALTH_ENDPOINT = "https://127.0.0.1:8788/v1/local/health";
 const INITIAL_GUEST_SESSION = window.sessionStorage.getItem(GUEST_SESSION_STORAGE_KEY) === "1";
 const AI_PROVIDER_CATALOG = {
   "genai-mil": {
@@ -815,6 +817,14 @@ const AI_PROVIDER_CATALOG = {
       { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
       { value: "claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet" },
     ],
+  },
+  "local-model": {
+    shortLabel: "Local Model",
+    keyLabel: "Model Name",
+    keyPlaceholder: "e.g. llama3, mistral, phi3",
+    defaultModel: "",
+    models: [],
+    isLocalModel: true,
   },
 };
 
@@ -889,6 +899,9 @@ const dom = {
   aiApiKeyInput: document.querySelector("#aiApiKeyInput"),
   aiApiKeyLabelText: document.querySelector("#aiApiKeyLabelText"),
   aiProviderSummary: document.querySelector("#aiProviderSummary"),
+  aiLocalModelSection: document.querySelector("#aiLocalModelSection"),
+  aiLocalModelUrlInput: document.querySelector("#aiLocalModelUrlInput"),
+  aiLocalModelDetectBtn: document.querySelector("#aiLocalModelDetectBtn"),
   saveAiProviderBtn: document.querySelector("#saveAiProviderBtn"),
   deleteAiProviderBtn: document.querySelector("#deleteAiProviderBtn"),
   testAiConnectionBtn: document.querySelector("#testAiConnectionBtn"),
@@ -1221,6 +1234,7 @@ const state = {
     provider: "",
     apiKey: "",
     model: "",
+    localModelUrl: "",
     status: "offline",
     statusMessage: "Add a provider and API key to enable the AI planning assistant.",
     pendingImages: [],    // [{dataUrl, mediaType}]
@@ -1574,13 +1588,11 @@ function getDefaultAiModel(provider) {
 }
 
 function ensureAiModelForProvider(provider, model = "") {
+  const meta = getAiProviderMeta(provider);
+  if (meta?.isLocalModel) return typeof model === "string" ? model : "";
   const models = getAiProviderModels(provider);
-  if (!models.length) {
-    return "";
-  }
-  if (models.some((entry) => entry.value === model)) {
-    return model;
-  }
+  if (!models.length) return "";
+  if (models.some((entry) => entry.value === model)) return model;
   return getDefaultAiModel(provider);
 }
 
@@ -1615,15 +1627,17 @@ function sanitizeAiSavedConfig(config) {
   }
   const provider = typeof config.provider === "string" ? config.provider : "";
   const apiKey = typeof config.apiKey === "string" ? config.apiKey.trim() : "";
-  if (!getAiProviderMeta(provider) || !apiKey) {
-    return null;
-  }
+  const meta = getAiProviderMeta(provider);
+  if (!meta) return null;
+  // Local model doesn't require an API key — model name is stored in the apiKey field
+  if (!meta.isLocalModel && !apiKey) return null;
   return {
     id: typeof config.id === "string" && config.id ? config.id : generateAiConfigId(),
     label: typeof config.label === "string" ? config.label.trim() : "",
     provider,
     apiKey,
     model: ensureAiModelForProvider(provider, typeof config.model === "string" ? config.model : ""),
+    localModelUrl: typeof config.localModelUrl === "string" ? config.localModelUrl.trim() : "",
   };
 }
 
@@ -1718,6 +1732,14 @@ function renderAiSavedConfigOptions() {
 
 function renderAiModelOptions() {
   if (!dom.aiChatModelSelect) {
+    return;
+  }
+  const isLocal = getAiProviderMeta(state.ai.provider)?.isLocalModel;
+  if (isLocal) {
+    // For local models the model name is free-form — show a single editable option
+    const modelName = state.ai.apiKey.trim() || state.ai.model.trim() || "default";
+    dom.aiChatModelSelect.innerHTML = `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`;
+    dom.aiChatModelSelect.value = modelName;
     return;
   }
   const models = getAiProviderModels(state.ai.provider);
@@ -3243,6 +3265,8 @@ function wireEvents() {
   dom.aiSavedConfigSelect.addEventListener("change", onAiSavedConfigChanged);
   dom.aiSavedConfigLabelInput.addEventListener("change", onAiSavedConfigLabelChanged);
   dom.aiApiKeyInput.addEventListener("change", onAiProviderChanged);
+  dom.aiLocalModelUrlInput?.addEventListener("change", onLocalModelUrlChanged);
+  dom.aiLocalModelDetectBtn?.addEventListener("click", onLocalModelDetect);
   dom.saveAiProviderBtn.addEventListener("click", saveAiProvider);
   dom.deleteAiProviderBtn?.addEventListener("click", deleteAiProvider);
   dom.testAiConnectionBtn.addEventListener("click", testAiProviderConnection);
@@ -4434,7 +4458,11 @@ function loadAiProviderSettings() {
         typeof parsed.configLabel === "string" ? parsed.configLabel.trim() : "",
       );
     }
-    if (state.ai.provider && state.ai.apiKey) {
+    if (typeof parsed.localModelUrl === "string") {
+      state.ai.localModelUrl = parsed.localModelUrl.trim();
+    }
+    const isLocalProvider = getAiProviderMeta(state.ai.provider)?.isLocalModel;
+    if (state.ai.provider && (state.ai.apiKey || isLocalProvider)) {
       state.ai.status = "pending";
       state.ai.statusMessage = "Stored provider found. Revalidating access...";
     }
@@ -4465,6 +4493,7 @@ function persistAiProviderSettings() {
     provider: state.ai.provider,
     apiKey: state.ai.apiKey,
     model: state.ai.model,
+    localModelUrl: state.ai.localModelUrl,
     panelOpen: state.ai.panelOpen,
     aiPanelWidth: state.ui.aiPanelWidth,
   }));
@@ -4477,8 +4506,43 @@ async function onAiProviderChanged() {
   setAiStatusFromCurrentConfig();
   persistAiProviderSettings();
   syncAiUi();
-  if (state.ai.provider && state.ai.apiKey) {
+  const isLocal = getAiProviderMeta(state.ai.provider)?.isLocalModel;
+  if (state.ai.provider && (state.ai.apiKey || isLocal)) {
     await testAiProviderConnection();
+  }
+}
+
+function onLocalModelUrlChanged() {
+  state.ai.localModelUrl = dom.aiLocalModelUrlInput?.value.trim() ?? "";
+  persistAiProviderSettings();
+}
+
+async function onLocalModelDetect() {
+  if (dom.aiLocalModelDetectBtn) {
+    dom.aiLocalModelDetectBtn.disabled = true;
+    dom.aiLocalModelDetectBtn.textContent = "Detecting...";
+  }
+  const health = await fetchLocalModelList();
+  if (dom.aiLocalModelDetectBtn) {
+    dom.aiLocalModelDetectBtn.disabled = false;
+    dom.aiLocalModelDetectBtn.textContent = "Detect Models";
+  }
+  if (!health.reachable) {
+    state.ai.statusMessage = "Proxy reachable but local model server is not responding. Is Ollama / LM Studio running?";
+    syncAiUi();
+    return;
+  }
+  if (health.models.length > 0) {
+    // Auto-fill the model name field with the first discovered model
+    if (!state.ai.apiKey) {
+      state.ai.apiKey = health.models[0];
+      if (dom.aiApiKeyInput) dom.aiApiKeyInput.value = health.models[0];
+    }
+    state.ai.statusMessage = `Found ${health.models.length} model${health.models.length > 1 ? "s" : ""}: ${health.models.slice(0, 5).join(", ")}`;
+    syncAiUi();
+  } else {
+    state.ai.statusMessage = "Connected to local model server but no models found. Pull a model first (e.g. ollama pull llama3).";
+    syncAiUi();
   }
 }
 
@@ -4509,7 +4573,8 @@ function onAiSavedConfigLabelChanged() {
 }
 
 function saveAiProvider() {
-  if (!state.ai.provider || !state.ai.apiKey) {
+  const isLocal = getAiProviderMeta(state.ai.provider)?.isLocalModel;
+  if (!state.ai.provider || (!isLocal && !state.ai.apiKey)) {
     state.ai.status = "offline";
     state.ai.statusMessage = "Select a provider and enter an API key before saving.";
     syncAiUi();
@@ -4655,8 +4720,17 @@ function syncAiUi() {
       ? "Connected"
       : "Offline";
   }
+  // Show/hide local model fields
+  const isLocalModel = getAiProviderMeta(state.ai.provider)?.isLocalModel;
+  if (dom.aiLocalModelSection) {
+    dom.aiLocalModelSection.classList.toggle("hidden", !isLocalModel);
+  }
+  if (dom.aiLocalModelUrlInput && isLocalModel) {
+    dom.aiLocalModelUrlInput.value = state.ai.localModelUrl;
+  }
+
   renderAiEmptyState();
-  const hasConfiguredProvider = Boolean(state.ai.provider && state.ai.apiKey);
+  const hasConfiguredProvider = Boolean(state.ai.provider && (state.ai.apiKey || isLocalModel));
   const controlsEnabled = hasConfiguredProvider && state.ai.status !== "testing";
   const actionButtonsEnabled = controlsEnabled && !state.ai.requestInFlight;
   const sendEnabled = actionButtonsEnabled;
@@ -4664,7 +4738,7 @@ function syncAiUi() {
     dom.aiChatModelSelect.disabled = !state.ai.provider || state.ai.status === "testing";
   }
   if (dom.saveAiProviderBtn) {
-    dom.saveAiProviderBtn.disabled = !state.ai.provider || !state.ai.apiKey;
+    dom.saveAiProviderBtn.disabled = !state.ai.provider || (!isLocalModel && !state.ai.apiKey);
   }
   if (dom.deleteAiProviderBtn) {
     dom.deleteAiProviderBtn.disabled = !state.ai.activeConfigId;
@@ -4682,7 +4756,7 @@ function syncAiUi() {
     dom.aiVoiceBtn.disabled = !actionButtonsEnabled || !("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
   }
   if (dom.testAiConnectionBtn) {
-    dom.testAiConnectionBtn.disabled = !state.ai.provider || !state.ai.apiKey || state.ai.status === "testing";
+    dom.testAiConnectionBtn.disabled = !state.ai.provider || state.ai.status === "testing";
   }
   if (dom.collapseAiPanelIcon) {
     dom.collapseAiPanelIcon.innerHTML = state.ai.panelOpen ? "&#9654;" : "&#9664;";
@@ -6141,6 +6215,36 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
     return;
   }
 
+  if (provider === "local-model") {
+    state.ai.status = "testing";
+    state.ai.statusMessage = "Checking local model proxy and model availability...";
+    syncAiUi();
+    try {
+      const health = await fetchLocalModelList();
+      if (!health.reachable) {
+        state.ai.status = "error";
+        state.ai.statusMessage =
+          "Local model proxy is running but could not reach the model server. " +
+          "Make sure Ollama, LM Studio, or llama.cpp is running.";
+        syncAiUi();
+        return;
+      }
+      // Try a quick completion
+      await callLocalModel([{ role: "user", content: "Reply with READY only." }], 16, 0);
+      const modelName = state.ai.apiKey.trim() || state.ai.model.trim() || "default";
+      const modelList = health.models.length ? ` Available: ${health.models.slice(0, 5).join(", ")}.` : "";
+      state.ai.status = "ready";
+      state.ai.statusMessage = `Local model connected (${modelName}).${modelList}`;
+      syncAiUi();
+      if (openPanelOnSuccess) openAiPanel();
+    } catch (error) {
+      state.ai.status = "error";
+      state.ai.statusMessage = error.message;
+      syncAiUi();
+    }
+    return;
+  }
+
   state.ai.status = "error";
   state.ai.statusMessage = "Unknown provider selected.";
   syncAiUi();
@@ -6428,7 +6532,9 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   onStatus?.("Contacting provider");
   const raw = state.ai.provider === "anthropic"
     ? await callAnthropic(messages, 1200, 0.2)
-    : await callGenAiMil(messages, 1200, 0.2);
+    : state.ai.provider === "local-model"
+      ? await callLocalModel(messages, 1200, 0.2)
+      : await callGenAiMil(messages, 1200, 0.2);
   onStatus?.("Parsing response");
   const parsed = parseAiAssistantResponse(raw, prompt);
   return {
@@ -6551,6 +6657,65 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
   const content = parsed?.content?.[0]?.text;
   if (!content) throw new Error("Anthropic returned an empty completion.");
   return content;
+}
+
+async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2) {
+  const modelName = state.ai.apiKey.trim() || state.ai.model.trim();
+  const customUrl = state.ai.localModelUrl.trim();
+
+  const payload = {
+    model: modelName || "default",
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+  };
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(customUrl ? { "X-Local-Model-Url": customUrl } : {}),
+  };
+
+  let response;
+  try {
+    response = await fetch(LOCAL_MODEL_PROXY_ENDPOINT, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error(
+        "Cannot reach the local model proxy at 127.0.0.1:8788. " +
+        "Start it with: node genai-proxy.js --local-model"
+      );
+    }
+    throw err;
+  }
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    let message;
+    try { message = JSON.parse(bodyText)?.error?.message; } catch {}
+    throw new Error(message || `Local model returned HTTP ${response.status}.`);
+  }
+
+  let parsed;
+  try { parsed = JSON.parse(bodyText); } catch {
+    throw new Error("Local model returned a non-JSON response.");
+  }
+  const content = parsed?.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Local model returned an empty completion.");
+  return content;
+}
+
+async function fetchLocalModelList() {
+  try {
+    const res = await fetch(LOCAL_MODEL_HEALTH_ENDPOINT, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return { reachable: false, models: [] };
+    return await res.json();
+  } catch {
+    return { reachable: false, models: [] };
+  }
 }
 
 function extractMgrsTokens(text) {
