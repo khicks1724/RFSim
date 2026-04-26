@@ -1775,16 +1775,24 @@ async function onWorkspaceProjectSelectChanged() {
   window.location.reload();
 }
 
+const AUTOSAVE_RING_MS = 1400; // must match the CSS animation duration
+
 async function saveActiveProjectNow({ silent = false } = {}) {
   if (!state.session.token || !state.session.activeProjectId) {
     return false;
   }
 
   setAutosaveIndicator("saving");
-  await apiFetch(`/projects/${state.session.activeProjectId}`, {
-    method: "PUT",
-    body: JSON.stringify({ state: serializeCurrentMapState() }),
-  });
+  const animationDone = new Promise((resolve) => setTimeout(resolve, AUTOSAVE_RING_MS));
+
+  await Promise.all([
+    apiFetch(`/projects/${state.session.activeProjectId}`, {
+      method: "PUT",
+      body: JSON.stringify({ state: serializeCurrentMapState() }),
+    }),
+    animationDone,
+  ]);
+
   state.session.autosavePending = false;
   syncWorkspaceUi();
   if (!silent) {
@@ -1795,13 +1803,13 @@ async function saveActiveProjectNow({ silent = false } = {}) {
   _autosaveSavedTimerId = window.setTimeout(() => {
     _autosaveSavedTimerId = null;
     if (!state.session.autosavePending) setAutosaveIndicator("hidden");
-  }, 2500);
+  }, 2000);
   return true;
 }
 
 let _autosaveSavedTimerId = null;
 
-const AUTOSAVE_SPINNER_SVG = `<svg class="workspace-autosave-spin" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="28" stroke-dashoffset="10" stroke-linecap="round"/></svg>`;
+const AUTOSAVE_SPINNER_SVG = `<svg class="workspace-autosave-spin" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle class="autosave-spinner-track" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle class="autosave-spinner-fill" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="37.7" stroke-dashoffset="37.7"/></svg>`;
 const AUTOSAVE_CHECK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="3,8 6.5,11.5 13,5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const AUTOSAVE_CLOCK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><polyline points="8,5 8,8 10.5,9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 

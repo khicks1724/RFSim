@@ -663,13 +663,29 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 /* Show only the relevant icon per state */
 .autosave-indicator .autosave-spinner { display: none; }
 .autosave-indicator .autosave-check   { display: none; }
-.autosave-indicator.is-pending .autosave-spinner { display: block; color: var(--muted); opacity: 0.6; }
-.autosave-indicator.is-saving  .autosave-spinner { display: block; color: var(--accent); animation: autosave-spin 0.9s linear infinite; }
+.autosave-indicator.is-pending .autosave-spinner { display: block; color: var(--muted); opacity: 0.5; }
+.autosave-indicator.is-saving  .autosave-spinner { display: block; color: var(--accent); }
 .autosave-indicator.is-saved   .autosave-check   { display: block; color: #4caf7d; }
 
-@keyframes autosave-spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+/* Ring starts at the top */
+.autosave-spinner { transform: rotate(-90deg); }
+
+/* Faint track ring always visible when spinner is shown */
+.autosave-spinner-track { opacity: 0.15; }
+
+/* Fill ring draws from 0 → full circle in one shot */
+.autosave-indicator.is-saving .autosave-spinner-fill {
+  stroke-dashoffset: 37.7;
+  animation: autosave-fill 1.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.autosave-indicator.is-pending .autosave-spinner-fill {
+  stroke-dashoffset: 37.7; /* stays empty while pending */
+  animation: none;
+}
+
+@keyframes autosave-fill {
+  from { stroke-dashoffset: 37.7; }
+  to   { stroke-dashoffset: 0; }
 }
 
 /* ── Autosave status row inside the workspace dropdown ── */
@@ -711,7 +727,12 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
   height: 14px;
 }
 .workspace-autosave-spin {
-  animation: autosave-spin 0.9s linear infinite;
+  transform: rotate(-90deg);
+}
+.workspace-autosave-spin .autosave-spinner-track { opacity: 0.15; }
+.workspace-autosave-spin .autosave-spinner-fill {
+  stroke-dashoffset: 37.7;
+  animation: autosave-fill 1.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .status-chip-clock {
