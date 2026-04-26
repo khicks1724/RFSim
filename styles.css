@@ -644,33 +644,74 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 }
 
 /* Autosave indicator dot in the workspace chip */
+/* ── Autosave indicator in the top-bar workspace chip ── */
 .autosave-indicator {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
-  transition: opacity 0.4s;
 }
 .autosave-indicator.hidden {
   display: none;
 }
-.autosave-indicator.is-pending {
-  background: var(--muted);
-  opacity: 0.7;
+.autosave-indicator svg {
+  width: 14px;
+  height: 14px;
 }
-.autosave-indicator.is-saving {
-  background: var(--accent);
-  animation: autosave-pulse 0.7s ease-in-out infinite alternate;
+/* Show only the relevant icon per state */
+.autosave-indicator .autosave-spinner { display: none; }
+.autosave-indicator .autosave-check   { display: none; }
+.autosave-indicator.is-pending .autosave-spinner { display: block; color: var(--muted); opacity: 0.6; }
+.autosave-indicator.is-saving  .autosave-spinner { display: block; color: var(--accent); animation: autosave-spin 0.9s linear infinite; }
+.autosave-indicator.is-saved   .autosave-check   { display: block; color: #4caf7d; }
+
+@keyframes autosave-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
-.autosave-indicator.is-saved {
-  background: #4caf7d;
-  opacity: 1;
-  animation: none;
+
+/* ── Autosave status row inside the workspace dropdown ── */
+.workspace-autosave-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  margin-bottom: 4px;
+  transition: background 0.2s, color 0.2s;
 }
-@keyframes autosave-pulse {
-  from { opacity: 0.35; }
-  to   { opacity: 1; }
+.workspace-autosave-status.hidden {
+  display: none;
+}
+.workspace-autosave-status.is-pending {
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  color: var(--muted);
+}
+.workspace-autosave-status.is-saving {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.workspace-autosave-status.is-saved {
+  background: color-mix(in srgb, #4caf7d 12%, transparent);
+  color: #4caf7d;
+}
+.workspace-autosave-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+.workspace-autosave-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.workspace-autosave-spin {
+  animation: autosave-spin 0.9s linear infinite;
 }
 
 .status-chip-clock {

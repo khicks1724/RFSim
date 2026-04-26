@@ -79,7 +79,14 @@
             <span>Workspace</span>
             <div class="status-chip-action-row">
               <strong id="workspaceMenuValue">Sign In</strong>
-              <span id="autosaveIndicator" class="autosave-indicator hidden" aria-label="Autosave status"></span>
+              <span id="autosaveIndicator" class="autosave-indicator hidden" title="Autosave status">
+                <svg class="autosave-spinner" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="28" stroke-dashoffset="10" stroke-linecap="round"/>
+                </svg>
+                <svg class="autosave-check" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <polyline points="3,8 6.5,11.5 13,5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
               <span class="status-chip-chevron">&#9662;</span>
             </div>
           </button>
@@ -138,6 +145,10 @@
                 <button id="workspaceProjectReloadBtn" class="ghost-button small" type="button">Reload</button>
                 <button id="workspaceProjectSnapshotBtn" class="ghost-button small" type="button">Snapshot</button>
                 <button id="workspaceProjectDeleteBtn" class="ghost-button small danger-button" type="button">Delete Project</button>
+              </div>
+              <div id="workspaceAutosaveStatus" class="workspace-autosave-status hidden">
+                <span id="workspaceAutosaveIcon" class="workspace-autosave-icon"></span>
+                <span id="workspaceAutosaveLabel"></span>
               </div>
               <div id="workspaceProjectStatus" class="weather-summary workspace-summary">Projects load after sign-in. Selecting a project reloads the page into that project.</div>
             </div>

@@ -564,6 +564,9 @@ const dom = {
   workspaceProjectCreateBtn: document.querySelector("#workspaceProjectCreateBtn"),
   workspaceProjectSaveBtn: document.querySelector("#workspaceProjectSaveBtn"),
   autosaveIndicator: document.querySelector("#autosaveIndicator"),
+  workspaceAutosaveStatus: document.querySelector("#workspaceAutosaveStatus"),
+  workspaceAutosaveIcon: document.querySelector("#workspaceAutosaveIcon"),
+  workspaceAutosaveLabel: document.querySelector("#workspaceAutosaveLabel"),
   workspaceProjectReloadBtn: document.querySelector("#workspaceProjectReloadBtn"),
   workspaceProjectSnapshotBtn: document.querySelector("#workspaceProjectSnapshotBtn"),
   workspaceProjectDeleteBtn: document.querySelector("#workspaceProjectDeleteBtn"),
@@ -1657,10 +1660,8 @@ function syncWorkspaceUi() {
   dom.workspaceMenuHeadline.textContent = state.session.activeProjectId ? "Server Project" : "Workspace";
   dom.workspaceProjectMode.textContent = state.session.activeProjectId ? "Server" : "Local";
   dom.workspaceProjectStatus.textContent = state.session.activeProjectId
-    ? state.session.autosavePending
-      ? "Autosave queued for the selected server project."
-      : "Autosave is active for the selected server project."
-    : "No server project selected. The app is still using browser-local storage.";
+    ? "Changes autosave to the server. Use Snapshot to save a named version you can restore later."
+    : "No server project selected. Map contents are saved to browser storage only.";
 
   dom.workspaceProjectSelect.innerHTML = "";
   const localOption = document.createElement("option");
@@ -1800,16 +1801,49 @@ async function saveActiveProjectNow({ silent = false } = {}) {
 
 let _autosaveSavedTimerId = null;
 
+const AUTOSAVE_SPINNER_SVG = `<svg class="workspace-autosave-spin" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="28" stroke-dashoffset="10" stroke-linecap="round"/></svg>`;
+const AUTOSAVE_CHECK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polyline points="3,8 6.5,11.5 13,5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const AUTOSAVE_CLOCK_SVG = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><polyline points="8,5 8,8 10.5,9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 function setAutosaveIndicator(state_) {
+  // ── Top-bar chip indicator ──────────────────────────────────────────────
   const el = dom.autosaveIndicator;
-  if (!el) return;
-  el.classList.remove("hidden", "is-pending", "is-saving", "is-saved");
+  if (el) {
+    el.classList.remove("hidden", "is-pending", "is-saving", "is-saved");
+    if (state_ === "hidden") {
+      el.classList.add("hidden");
+    } else {
+      el.classList.add(`is-${state_}`);
+      const titles = { pending: "Autosave pending…", saving: "Saving to server…", saved: "All changes saved" };
+      el.setAttribute("title", titles[state_] ?? "");
+    }
+  }
+
+  // ── Workspace dropdown status row ───────────────────────────────────────
+  const row = dom.workspaceAutosaveStatus;
+  const icon = dom.workspaceAutosaveIcon;
+  const label = dom.workspaceAutosaveLabel;
+  if (!row || !icon || !label) return;
+
   if (state_ === "hidden") {
-    el.classList.add("hidden");
-  } else {
-    el.classList.add(`is-${state_}`);
-    const labels = { pending: "Autosave pending…", saving: "Saving…", saved: "Saved" };
-    el.setAttribute("aria-label", labels[state_] ?? "");
+    row.classList.add("hidden");
+    row.className = "workspace-autosave-status hidden";
+    return;
+  }
+
+  row.classList.remove("hidden");
+  if (state_ === "saving") {
+    row.className = "workspace-autosave-status is-saving";
+    icon.innerHTML = AUTOSAVE_SPINNER_SVG;
+    label.textContent = "Saving to server…";
+  } else if (state_ === "pending") {
+    row.className = "workspace-autosave-status is-pending";
+    icon.innerHTML = AUTOSAVE_CLOCK_SVG;
+    label.textContent = "Autosave queued…";
+  } else if (state_ === "saved") {
+    row.className = "workspace-autosave-status is-saved";
+    icon.innerHTML = AUTOSAVE_CHECK_SVG;
+    label.textContent = "All changes saved";
   }
 }
 
