@@ -6288,6 +6288,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "- Polygon boundaries (AO Boundary, drawn polygons) are in importedItems[].geometry.coordinates[0] as [{lat,lon}].",
     "- The importedItems[] array in the scenario summary contains ACTUAL coordinates. Read the geometry.coordinates from the named polygon (e.g., 'Range 400') and use those real lat/lon values.",
     "- CRITICAL: lat and lon in add-asset MUST be plain JSON numbers (e.g. 34.1234, -116.5678). Never use null, strings, or omit these fields.",
+    "- CRITICAL: If the user references a named polygon (e.g. 'Range 400', 'AO Boundary') but that polygon is NOT present in importedItems[], do NOT guess or fabricate coordinates. Instead, set actions:[] and tell the user in assistantMessage that the named overlay is not currently loaded on the map and they need to re-import their KMZ/KML file before you can place assets inside it.",
     "- Compute the polygon centroid and bounding box. Place assets distributed inside — NOT outside.",
     "- For 'highest elevation': examine the polygon vertex coordinates. Vertices at the extremes of the bounding box (especially corners) tend to be on ridgelines. Avoid placing in the center of a large polygon — that's often a valley or flat plain.",
     "- Separation check: compute haversine distance between all pairs. With 1 km minimum and 3 assets, use a triangle with ~1.5–3 km sides.",
