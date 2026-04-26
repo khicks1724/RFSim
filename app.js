@@ -4502,13 +4502,33 @@ function persistAiProviderSettings() {
 }
 
 async function onAiProviderChanged() {
-  state.ai.provider = dom.aiProviderSelect.value;
-  state.ai.apiKey = dom.aiApiKeyInput.value.trim();
+  const newProvider = dom.aiProviderSelect.value;
+  const isLocal = getAiProviderMeta(newProvider)?.isLocalModel;
+
+  // Switching to local-model: reset apiKey and activeConfigId so we don't
+  // inherit a cloud API key from a previously selected saved config.
+  if (isLocal && newProvider !== state.ai.provider) {
+    state.ai.apiKey = "";
+    state.ai.model = "";
+    state.ai.activeConfigId = "";
+    state.ai.configLabel = "";
+    if (dom.aiApiKeyInput) dom.aiApiKeyInput.value = "";
+    if (dom.aiLocalModelPicker) {
+      dom.aiLocalModelPicker.innerHTML = '<option value="">— click Detect to load —</option>';
+    }
+  }
+
+  state.ai.provider = newProvider;
+  if (!isLocal) {
+    state.ai.apiKey = dom.aiApiKeyInput.value.trim();
+  }
   state.ai.model = ensureAiModelForProvider(state.ai.provider, state.ai.model);
-  setAiStatusFromCurrentConfig();
+  state.ai.status = "offline";
+  state.ai.statusMessage = isLocal
+    ? "Click Detect to find available local models, then select one and Test Connection."
+    : "Enter your API key and test the connection.";
   persistAiProviderSettings();
   syncAiUi();
-  const isLocal = getAiProviderMeta(state.ai.provider)?.isLocalModel;
   if (state.ai.provider && (state.ai.apiKey || isLocal)) {
     await testAiProviderConnection();
   }
@@ -4741,16 +4761,25 @@ function syncAiUi() {
   if (dom.aiLocalModelUrlInput && isLocalModel) {
     dom.aiLocalModelUrlInput.value = state.ai.localModelUrl;
   }
-  if (dom.aiLocalModelPicker && isLocalModel && state.ai.apiKey) {
-    const existing = [...dom.aiLocalModelPicker.options].some((o) => o.value === state.ai.apiKey);
-    if (!existing) {
-      const opt = document.createElement("option");
-      opt.value = state.ai.apiKey;
-      opt.textContent = state.ai.apiKey;
-      dom.aiLocalModelPicker.innerHTML = "";
-      dom.aiLocalModelPicker.appendChild(opt);
+  if (dom.aiLocalModelPicker && isLocalModel) {
+    const modelName = state.ai.apiKey.trim();
+    // Only restore into picker if it looks like a model name, not a cloud API key
+    const looksLikeApiKey = modelName.startsWith("sk-") || modelName.startsWith("STARK_") || modelName.length > 80;
+    if (modelName && !looksLikeApiKey) {
+      const existing = [...dom.aiLocalModelPicker.options].some((o) => o.value === modelName);
+      if (!existing) {
+        const opt = document.createElement("option");
+        opt.value = modelName;
+        opt.textContent = modelName;
+        dom.aiLocalModelPicker.innerHTML = "";
+        dom.aiLocalModelPicker.appendChild(opt);
+      }
+      dom.aiLocalModelPicker.value = modelName;
+    } else if (looksLikeApiKey) {
+      // Clear the leaked key
+      state.ai.apiKey = "";
+      dom.aiLocalModelPicker.innerHTML = '<option value="">— click Detect to load —</option>';
     }
-    dom.aiLocalModelPicker.value = state.ai.apiKey;
   }
 
   if (dom.aiProviderSummary) {
