@@ -1998,11 +1998,15 @@ body:not(.ai-panel-open) .ai-panel {
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  height: 30px;
+  height: 34px;
   background: var(--bg-overlay, rgba(15,20,30,0.92));
   border: 1px solid rgba(120,140,168,0.35);
+  border-radius: 6px;
   box-shadow: var(--shadow);
   cursor: text;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .map-geo-search-shell:focus-within {
@@ -2020,6 +2024,7 @@ body:not(.ai-panel-open) .ai-panel {
 .map-geo-search-shell input {
   flex: 1;
   min-width: 0;
+  width: 0;
   border: none;
   background: transparent;
   color: var(--text);
@@ -2027,6 +2032,9 @@ body:not(.ai-panel-open) .ai-panel {
   padding: 0;
   outline: none;
   box-shadow: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .map-geo-search-shell input::placeholder {
