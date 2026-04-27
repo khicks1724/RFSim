@@ -13204,7 +13204,7 @@ function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle 
       pane,
       renderer,
       color: style.color,
-      opacity: style.opacity,
+      opacity: 1,
       weight: style.weight,
       dashArray,
     });
@@ -13214,7 +13214,7 @@ function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle 
     pane,
     renderer,
     color: style.color,
-    opacity: style.opacity,
+    opacity: 1,
     fillColor: style.fillColor ?? style.color,
     fillOpacity: style.fillOpacity,
     weight: style.weight,
@@ -13698,13 +13698,13 @@ function applyShapeStyleToLayer(item) {
     return;
   }
 
-  const { color, fillColor, fillOpacity, opacity, weight, lineStyle } = item.shapeStyle;
+  const { color, fillColor, fillOpacity, weight, lineStyle } = item.shapeStyle;
   const dashArray = getLeafletDashArray(lineStyle);
   if (item.geometryType === "Polygon" || item.geometryType === "MultiPolygon") {
-    item.layer.setStyle({ color, opacity, fillColor: fillColor ?? color, fillOpacity, weight, dashArray });
+    item.layer.setStyle({ color, opacity: 1, fillColor: fillColor ?? color, fillOpacity, weight, dashArray });
     applyPolygonClickThrough(item.layer, fillOpacity);
   } else {
-    item.layer.setStyle({ color, opacity, weight, dashArray });
+    item.layer.setStyle({ color, opacity: 1, weight, dashArray });
   }
 }
 
