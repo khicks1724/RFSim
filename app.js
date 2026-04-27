@@ -1298,6 +1298,7 @@ const state = {
   mcSelectedIds: new Set(),
   mcLastClickedId: null,
   undoStack: [],          // [{label, snapshots:[{contentId, restoreFn}]}]
+  redoStack: [],          // [{label, snapshots:[{contentId, restoreFn}]}]
   undoBannerTimerId: null,
   activeMapContentMenuId: null,
   relocatingAssetId: null,
@@ -3418,6 +3419,14 @@ function wireEvents() {
         performUndo();
       }
     }
+    if ((e.key === "y" && (e.ctrlKey || e.metaKey)) ||
+        (e.key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey)) {
+      const tag = document.activeElement?.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
+        e.preventDefault();
+        performRedo();
+      }
+    }
     if (e.key === "Delete" || e.key === "Backspace") {
       const tag = document.activeElement?.tagName;
       if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") {
@@ -3817,13 +3826,7 @@ function applySavedMapState(rawSaved) {
         item.layer.bindPopup(renderImportedItemPopup(item));
         item.layer.on?.("click", () => focusMapContent(contentId));
         item.layer.on?.("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
-        item.layer.on?.("dragend edit", () => {
-          item.layer.setPopupContent(renderImportedItemPopup(item));
-          renderMapContents();
-          saveMapState();
-          syncCesiumEntities();
-          syncShapeVertexEditUi(item);
-        });
+        attachImportedLayerEditUndo(item);
         state.importedItems.push(item);
       } catch (err) {
         skipped++;
@@ -8792,6 +8795,10 @@ function startAssetRelocation(contentId) {
 
 function finishAssetRelocation(latlng) {
   const assetId = state.relocatingAssetId;
+  const preRelocateSnapshot = latlng ? (() => {
+    const asset = state.assets.find((a) => a.id === assetId);
+    return asset ? snapshotAssetForEdit(asset) : null;
+  })() : null;
   state.relocatingAssetId = null;
   dom.map?.classList.remove("asset-placement-active");
   dom.cesiumContainer?.classList.remove("asset-placement-active");
@@ -8819,6 +8826,10 @@ function finishAssetRelocation(latlng) {
   if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
     refreshAssetGroundElevation(asset).catch(() => {});
   }
+  if (preRelocateSnapshot) {
+    const after = snapshotAssetForEdit(asset);
+    pushEditUndoEntry(`Relocated ${asset.name}`, [preRelocateSnapshot], () => [after]);
+  }
   saveMapState();
   setStatus(`${asset.name} relocated.`);
 }
@@ -8840,6 +8851,10 @@ function startImportedPointRelocation(itemId) {
 
 function finishImportedPointRelocation(latlng) {
   const itemId = state.relocatingImportedItemId;
+  const preRelocateSnapshot = latlng ? (() => {
+    const item = state.importedItems.find((entry) => entry.id === itemId);
+    return item ? snapshotImportedItemForEdit(item) : null;
+  })() : null;
   state.relocatingImportedItemId = null;
   state.ui.suppressImportedRelocateClick = false;
   dom.map?.classList.remove("asset-placement-active");
@@ -8852,6 +8867,10 @@ function finishImportedPointRelocation(latlng) {
   if (!item) return;
   item.lastModified = nowIso();
   item.layer.setLatLng([latlng.lat, latlng.lng]);
+  if (preRelocateSnapshot) {
+    const after = snapshotImportedItemForEdit(item);
+    pushEditUndoEntry(`Relocated ${item.name}`, [preRelocateSnapshot], () => [after]);
+  }
   refreshImportedItemPopup(item);
   renderMapContents();
   syncCesiumEntities();
@@ -12554,16 +12573,97 @@ function pushUndoSnapshot(contentIds, label) {
   const snapshots = contentIds.map(snapshotContentId).filter(Boolean);
   if (!snapshots.length) return;
   state.undoStack.push({ label, snapshots });
-  if (state.undoStack.length > 20) state.undoStack.shift();
+  if (state.undoStack.length > 50) state.undoStack.shift();
+  state.redoStack = [];   // new action clears redo history
+}
+
+// Push an already-built snapshot entry (for edit operations).
+// `before` and `after` are both snapshot arrays; undo restores `before`, redo restores `after`.
+function pushEditUndoEntry(label, beforeSnapshots, afterSnapshotsFn) {
+  if (!beforeSnapshots.length) return;
+  state.undoStack.push({ label, snapshots: beforeSnapshots, afterSnapshotsFn });
+  if (state.undoStack.length > 50) state.undoStack.shift();
+  state.redoStack = [];
 }
 
 function performUndo() {
   const entry = state.undoStack.pop();
   if (!entry) return;
-  // Restore in reverse order to preserve ordering
+  // Capture after-state for redo before restoring
+  const afterSnapshots = entry.afterSnapshotsFn ? entry.afterSnapshotsFn() : [];
   [...entry.snapshots].reverse().forEach((s) => s.restore());
+  if (afterSnapshots.length) {
+    state.redoStack.push({ label: entry.label, snapshots: afterSnapshots, afterSnapshotsFn: () => entry.snapshots });
+  }
   dismissUndoBanner();
   setStatus(`Undid: ${entry.label}`);
+}
+
+function performRedo() {
+  const entry = state.redoStack.pop();
+  if (!entry) return;
+  const afterSnapshots = entry.afterSnapshotsFn ? entry.afterSnapshotsFn() : [];
+  [...entry.snapshots].reverse().forEach((s) => s.restore());
+  if (afterSnapshots.length) {
+    state.undoStack.push({ label: entry.label, snapshots: afterSnapshots, afterSnapshotsFn: () => entry.snapshots });
+  }
+  setStatus(`Redid: ${entry.label}`);
+}
+
+// ── Edit snapshots (in-place restore — item stays, state reverts) ─────────────
+
+function snapshotImportedItemForEdit(item) {
+  const savedCoords = JSON.parse(JSON.stringify(item.layer.getLatLngs ? item.layer.getLatLngs() : item.layer.getLatLng()));
+  const savedStyle = item.shapeStyle ? { ...item.shapeStyle } : null;
+  const savedMarkerStyle = item.markerStyle ? { ...item.markerStyle } : null;
+  const savedProperties = { ...(item.properties ?? {}) };
+  const isPoint = item.geometryType === "Point";
+  const contentId = `imported:${item.id}`;
+  return {
+    contentId,
+    restore() {
+      if (isPoint) {
+        item.layer.setLatLng(savedCoords);
+      } else {
+        item.layer.setLatLngs(savedCoords);
+      }
+      item.shapeStyle = savedStyle;
+      item.markerStyle = savedMarkerStyle;
+      item.properties = savedProperties;
+      if (!isPoint) {
+        applyShapeStyleToLayer(item);
+      } else {
+        const icon = buildImportedPointIcon(savedMarkerStyle);
+        if (icon) item.layer.setIcon(icon);
+      }
+      item.layer.setPopupContent(renderImportedItemPopup(item));
+      renderMapContents();
+      syncCesiumEntities();
+      saveMapState();
+    },
+  };
+}
+
+function snapshotAssetForEdit(asset) {
+  const savedLat = asset.lat;
+  const savedLon = asset.lon;
+  const savedData = JSON.parse(JSON.stringify(asset));
+  const contentId = `asset:${asset.id}`;
+  return {
+    contentId,
+    restore() {
+      Object.assign(asset, savedData);
+      asset.lat = savedLat;
+      asset.lon = savedLon;
+      const marker = state.assetMarkers.get(asset.id);
+      if (marker) marker.setLatLng([asset.lat, asset.lon]);
+      updateAssetMarker(asset);
+      renderAssets();
+      renderMapContents();
+      syncCesiumEntities();
+      saveMapState();
+    },
+  };
 }
 
 function showUndoBanner(label) {
@@ -13449,12 +13549,7 @@ function addDrawnFeature(feature, folderId = null) {
   item.layer.bindPopup(renderImportedItemPopup(item));
   item.layer.on("click", () => focusMapContent(contentId));
   item.layer.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
-  item.layer.on("dragend edit", () => {
-    item.layer.setPopupContent(renderImportedItemPopup(item));
-    renderMapContents();
-    saveMapState();
-    syncShapeVertexEditUi(item);
-  });
+  attachImportedLayerEditUndo(item);
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId ?? null);
   state.mapContentOrder.push(contentId);
@@ -13463,10 +13558,35 @@ function addDrawnFeature(feature, folderId = null) {
   saveMapState();
 }
 
+// ── Edit-undo helpers ─────────────────────────────────────────────────────────
+
+// Attach drag/vertex-edit listeners that push undo entries.
+function attachImportedLayerEditUndo(item) {
+  if (!item.layer?.on) return;
+  item.layer.on("dragstart editstart", () => {
+    item._undoPendingSnapshot = snapshotImportedItemForEdit(item);
+  });
+  item.layer.on("dragend edit", () => {
+    if (item._undoPendingSnapshot) {
+      const before = item._undoPendingSnapshot;
+      item._undoPendingSnapshot = null;
+      const after = snapshotImportedItemForEdit(item);
+      pushEditUndoEntry(`Moved ${item.name}`, [before], () => [after]);
+    }
+    item.layer.setPopupContent(renderImportedItemPopup(item));
+    renderMapContents();
+    saveMapState();
+    syncCesiumEntities();
+    syncShapeVertexEditUi(item);
+  });
+}
+
 // ── Shape style panel ─────────────────────────────────────────────────────────
 
 function openShapeStylePanel(item, anchorEl) {
   state.draw.editingItemId = item.id;
+  // Snapshot the item's current state so Done/close can push an undo entry
+  state.draw.preEditSnapshot = snapshotImportedItemForEdit(item);
   const isPoint = item.geometryType === "Point";
   const isCircle = Boolean(item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM)));
 
@@ -13545,6 +13665,13 @@ function closeShapeStylePanel({ stopEditing = true, clearEditing = true } = {}) 
   if (item && stopEditing) {
     stopShapeVertexEdit(item);
   }
+  // Push undo entry if the item actually changed since the panel opened
+  if (item && state.draw.preEditSnapshot) {
+    const before = state.draw.preEditSnapshot;
+    const after = snapshotImportedItemForEdit(item);
+    pushEditUndoEntry(`Edited ${item.name}`, [before], () => [after]);
+  }
+  state.draw.preEditSnapshot = null;
   if (clearEditing) {
     state.draw.editingItemId = null;
   }
@@ -14043,18 +14170,9 @@ function addImportedFeature(feature, folderId, index, options = {}) {
 
   item.layer.addTo(state.map);
   item.layer.bindPopup(renderImportedItemPopup(item));
-  if (item.layer.on) {
-    item.layer.on("dragend edit", () => {
-      item.layer.setPopupContent(renderImportedItemPopup(item));
-      renderMapContents();
-      saveMapState();
-      syncCesiumEntities();
-      syncShapeVertexEditUi(item);
-    });
-  }
-
   item.layer.on?.("click", () => focusMapContent(contentId));
   item.layer.on?.("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
+  attachImportedLayerEditUndo(item);
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId);
   state.mapContentOrder.push(contentId);
