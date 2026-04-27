@@ -912,6 +912,9 @@ const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
 const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
 const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
 const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
+const DEFAULT_CESIUM_ION_TOKEN = typeof window.EW_SIM_CONFIG?.cesiumIonDefaultToken === "string"
+  ? window.EW_SIM_CONFIG.cesiumIonDefaultToken.trim()
+  : "";
 const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
 const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
 const LOCAL_MODEL_PROXY_ENDPOINT = "https://127.0.0.1:8788/v1/local/chat/completions";
@@ -4464,16 +4467,13 @@ function onWorkerMessage(event) {
 }
 
 function loadCesiumIonToken() {
-  if (!canUsePersistentBrowserStorage()) {
-    dom.cesiumIonToken.value = "";
-    return;
-  }
-  const stored = window.localStorage.getItem(CESIUM_ION_TOKEN_STORAGE_KEY);
-  if (stored) {
-    dom.cesiumIonToken.value = stored;
-    if (dom.terrainSourceSelect.value === "ellipsoid") {
-      dom.terrainSourceSelect.value = "cesium-world";
-    }
+  const stored = canUsePersistentBrowserStorage()
+    ? window.localStorage.getItem(CESIUM_ION_TOKEN_STORAGE_KEY)
+    : "";
+  const effectiveToken = (stored && stored.trim()) || DEFAULT_CESIUM_ION_TOKEN;
+  dom.cesiumIonToken.value = effectiveToken || "";
+  if (effectiveToken && dom.terrainSourceSelect.value === "ellipsoid") {
+    dom.terrainSourceSelect.value = "cesium-world";
   }
 }
 
@@ -12053,6 +12053,11 @@ function openMapContentsMenu(event, contentId) {
   event.preventDefault();
   event.stopPropagation();
   state.activeMapContentMenuId = contentId;
+  const isFolder = contentId.startsWith("folder:");
+  const editButton = dom.mapContentsMenu.querySelector('[data-map-content-action="edit"]');
+  if (editButton) {
+    editButton.classList.toggle("hidden", isFolder);
+  }
   const simulateButton = dom.mapContentsMenu.querySelector('[data-map-content-action="simulate"]');
   if (simulateButton) {
     simulateButton.classList.toggle("hidden", !contentId.startsWith("asset:"));
@@ -12313,8 +12318,9 @@ function editMapContent(contentId) {
     if (item.geometryType === "Point") {
       focusMapContent(contentId);
     } else {
-      const menuEl = dom.mapContentsMenu;
-      openShapeStylePanel(item, menuEl);
+      closeMapContentsMenu();
+      openShapeStylePanel(item);
+      setStatus(`Editing ${item.name}.`);
     }
   }
 }

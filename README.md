@@ -123,6 +123,8 @@ Includes the following emitter types:
 
 A Cesium Ion token unlocks streamed terrain, Google Photorealistic 3D Tiles, and OSM building RF modeling.
 
+For a site-wide default token in a deployed build, set `window.EW_SIM_CONFIG.cesiumIonDefaultToken` in [app-config.js](app-config.js). User-saved local tokens still override the default. Do not commit a sensitive unrestricted token to source control; use a restricted token scoped to your deployed origin.
+
 **Without a token** — the app defaults to:
 - Ellipsoid terrain (flat earth in 3D)
 - Google Satellite basemap
