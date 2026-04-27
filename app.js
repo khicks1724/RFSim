@@ -1232,6 +1232,7 @@ const state = {
     mode: null,        // "circle" | "rectangle" | "polyline" | null
     points: [],        // accumulated latlngs for polyline/rectangle
     previewLayer: null,
+    closeGuideLayer: null,
     editingItemId: null,
   },
   assetMarkers: new Map(),
@@ -1345,6 +1346,7 @@ const state = {
     aiPanelWidth: 400,
     panelMode: "edit",
     lastPlacementEventKey: "",
+    suppressImportedRelocateClick: false,
   },
   session: {
     guest: INITIAL_GUEST_SESSION,
@@ -3068,6 +3070,11 @@ async function init() {
   state.map.on("dblclick", onMapDblClick);
   state.map.on("mousemove", onMapMouseMove);
   state.map.on("contextmenu", onMapContextMenu);
+  state.map.on("movestart", () => {
+    if (state.relocatingImportedItemId) {
+      state.ui.suppressImportedRelocateClick = true;
+    }
+  });
   state.map.on("moveend zoomend resize", updateMapOverlayMetrics);
   state.map.on("moveend zoomend", saveMapViewPosition);
   window.addEventListener("beforeunload", flushPendingAutosave);
@@ -8709,6 +8716,10 @@ function onMapClick(event) {
     return;
   }
   if (state.relocatingImportedItemId) {
+    if (state.ui.suppressImportedRelocateClick) {
+      state.ui.suppressImportedRelocateClick = false;
+      return;
+    }
     finishImportedPointRelocation(event.latlng);
     return;
   }
@@ -8791,16 +8802,11 @@ function startImportedPointRelocation(itemId) {
   if (!item) return;
   finishAssetRelocation(null);
   state.relocatingImportedItemId = itemId;
+  state.ui.suppressImportedRelocateClick = false;
   dom.map?.classList.add("asset-placement-active");
   dom.cesiumContainer?.classList.add("asset-placement-active");
   dom.mapStage?.classList.add("asset-placement-active");
-  if (state.map) {
-    state.map.dragging?.disable();
-    state.map.doubleClickZoom?.disable();
-    state.map.boxZoom?.disable();
-    state.map.keyboard?.disable();
-    state.map.getContainer().style.cursor = "crosshair";
-  }
+  if (state.map) state.map.getContainer().style.cursor = "crosshair";
   item.layer.closePopup?.();
   updateCenterCrosshairVisibility();
   setStatus(`Click map to relocate ${item.name}. Press Esc to cancel.`);
@@ -8809,16 +8815,11 @@ function startImportedPointRelocation(itemId) {
 function finishImportedPointRelocation(latlng) {
   const itemId = state.relocatingImportedItemId;
   state.relocatingImportedItemId = null;
+  state.ui.suppressImportedRelocateClick = false;
   dom.map?.classList.remove("asset-placement-active");
   dom.cesiumContainer?.classList.remove("asset-placement-active");
   dom.mapStage?.classList.remove("asset-placement-active");
-  if (state.map) {
-    state.map.dragging?.enable();
-    state.map.doubleClickZoom?.enable();
-    state.map.boxZoom?.enable();
-    state.map.keyboard?.enable();
-    state.map.getContainer().style.cursor = "";
-  }
+  if (state.map) state.map.getContainer().style.cursor = "";
   updateCenterCrosshairVisibility();
   if (!latlng || !itemId) return;
   const item = state.importedItems.find((entry) => entry.id === itemId && entry.geometryType === "Point");
@@ -12995,6 +12996,7 @@ const IMPORTED_VECTOR_DEFAULTS = {
   LineString: { color: "#f7b955", fillColor: "#f7b955", fillOpacity: 0, opacity: 1, weight: 3, lineStyle: "solid" },
   Polygon: { color: "#34d399", fillColor: "#34d399", fillOpacity: 0.12, opacity: 1, weight: 2, lineStyle: "solid" },
 };
+const POLYLINE_CLOSE_SNAP_PX = 18;
 
 function getDefaultImportedShapeStyle(geometryType) {
   return geometryType === "Polygon"
@@ -13202,6 +13204,10 @@ function cancelDrawing() {
     state.draw.previewLayer.remove();
     state.draw.previewLayer = null;
   }
+  if (state.draw.closeGuideLayer) {
+    state.draw.closeGuideLayer.remove();
+    state.draw.closeGuideLayer = null;
+  }
   state.draw.mode = null;
   state.draw.points = [];
   dom.map.classList.remove("leaflet-drawing-active");
@@ -13253,9 +13259,19 @@ function onDrawClick(latlng) {
   }
 
   if (mode === "polyline") {
+    if (shouldAutoClosePolyline(latlng)) {
+      const polygonCoords = points.map((p) => [p.lat, p.lng]);
+      cancelDrawing();
+      commitDrawnShape("Polygon", "Polygon", polygonCoords);
+      return;
+    }
     state.draw.points.push(latlng);
     updateDrawPreview(latlng);
-    setStatus(`${state.draw.points.length} point(s). Double-click to finish.`);
+    if (state.draw.points.length >= 3) {
+      setStatus(`${state.draw.points.length} point(s). Double-click to finish as a line, or click near the white start marker to close into a polygon.`);
+    } else {
+      setStatus(`${state.draw.points.length} point(s). Double-click to finish.`);
+    }
   }
 }
 
@@ -13273,10 +13289,51 @@ function onMapDblClick(event) {
   commitDrawnShape("Polyline", "LineString", coords);
 }
 
+function shouldAutoClosePolyline(latlng) {
+  if (state.draw.mode !== "polyline" || state.draw.points.length < 3 || !state.map) {
+    return false;
+  }
+  const start = state.draw.points[0];
+  const startPx = state.map.latLngToContainerPoint(start);
+  const clickPx = state.map.latLngToContainerPoint(latlng);
+  return startPx.distanceTo(clickPx) <= POLYLINE_CLOSE_SNAP_PX;
+}
+
+function updatePolylineCloseGuide(cursor) {
+  if (state.draw.closeGuideLayer) {
+    state.draw.closeGuideLayer.remove();
+    state.draw.closeGuideLayer = null;
+  }
+  if (state.draw.mode !== "polyline" || state.draw.points.length < 3 || !cursor) {
+    return false;
+  }
+  const start = state.draw.points[0];
+  const startPx = state.map.latLngToContainerPoint(start);
+  const cursorPx = state.map.latLngToContainerPoint(cursor);
+  const withinSnap = startPx.distanceTo(cursorPx) <= POLYLINE_CLOSE_SNAP_PX;
+  if (!withinSnap) {
+    return false;
+  }
+  state.draw.closeGuideLayer = L.circleMarker(start, {
+    radius: 6,
+    color: "#ffffff",
+    weight: 2,
+    fillColor: "#ffffff",
+    fillOpacity: 0.95,
+    interactive: false,
+    pane: "markerPane",
+  }).addTo(state.map);
+  return true;
+}
+
 function updateDrawPreview(cursor) {
   if (state.draw.previewLayer) {
     state.draw.previewLayer.remove();
     state.draw.previewLayer = null;
+  }
+  if (state.draw.closeGuideLayer) {
+    state.draw.closeGuideLayer.remove();
+    state.draw.closeGuideLayer = null;
   }
   const { mode, points } = state.draw;
   const opts = { color: DRAW_DEFAULTS.color, weight: DRAW_DEFAULTS.weight, dashArray: "6 4", fillOpacity: 0.12, interactive: false, renderer: state.canvasRenderer };
@@ -13288,6 +13345,10 @@ function updateDrawPreview(cursor) {
     state.draw.previewLayer = L.rectangle([points[0], cursor], opts).addTo(state.map);
   } else if (mode === "polyline" && points.length >= 1) {
     state.draw.previewLayer = L.polyline([...points, cursor], opts).addTo(state.map);
+    const canClose = updatePolylineCloseGuide(cursor);
+    if (canClose) {
+      setStatus("Click the white start marker, or nearby, to close this shape into a polygon.");
+    }
   }
 }
 
