@@ -3055,6 +3055,85 @@ button:focus {
   pointer-events: none;
 }
 
+.point-edit-popup {
+  min-width: 260px;
+}
+
+.point-edit-popup-title {
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.point-edit-popup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.point-edit-popup-grid-compact {
+  align-items: end;
+}
+
+.point-edit-popup-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.point-edit-popup-row > span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.point-edit-popup-row input {
+  min-height: 34px;
+  padding: 7px 8px;
+}
+
+.point-edit-popup-row input[type="color"] {
+  min-height: 34px;
+  padding: 2px;
+}
+
+.point-edit-popup-icons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.point-popup-icon-btn {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.point-popup-icon-btn.active {
+  border-color: color-mix(in srgb, var(--accent) 76%, white 24%);
+  background: rgba(143, 183, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(143, 183, 255, 0.18);
+}
+
+.point-popup-icon-btn svg {
+  display: block;
+}
+
+.point-edit-popup-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .emitter-divicon-wrapper {
   background: none !important;
   border: none !important;

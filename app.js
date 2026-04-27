@@ -3407,6 +3407,8 @@ function wireEvents() {
   dom.map.addEventListener("dragover", onMapFileDragOver);
   dom.map.addEventListener("dragleave", onMapFileDragLeave);
   dom.map.addEventListener("drop", onMapFileDrop);
+  dom.map.addEventListener("click", onPointPopupClick);
+  dom.map.addEventListener("keydown", onPointPopupKeyDown);
   dom.measurementUnitsSelect.addEventListener("change", onSettingsChanged);
   dom.themeSelect.addEventListener("change", onSettingsChanged);
   dom.coordinateSystemSelect.addEventListener("change", onSettingsChanged);
@@ -12232,7 +12234,7 @@ function editMapContent(contentId) {
     const item = state.importedItems.find((entry) => `imported:${entry.id}` === contentId);
     if (!item) return;
     if (item.geometryType === "Point") {
-      toggleImportedItemEditing(item);
+      focusMapContent(contentId);
     } else {
       const menuEl = dom.mapContentsMenu;
       openShapeStylePanel(item, menuEl);
@@ -12645,11 +12647,67 @@ function removeAsset(assetId, options = {}) {
 }
 
 function renderImportedItemPopup(item) {
+  if (item?.geometryType === "Point") {
+    return renderImportedPointPopup(item);
+  }
   const detailLines = buildImportedItemDetailLines(item);
   return `
     <strong>${escapeHtml(item.name)}</strong><br>
     ${escapeHtml(item.subtitle)}
     ${detailLines.length ? `<br>${detailLines.map((line) => escapeHtml(line)).join("<br>")}` : ""}
+  `;
+}
+
+function renderImportedPointPopup(item) {
+  const latLng = item?.layer?.getLatLng?.();
+  const markerStyle = normalizeDrawnPointMarkerStyle(item.markerStyle);
+  const dragging = Boolean(item?.layer?.dragging?.enabled?.());
+  const iconButtons = POINT_ICONS.map((icon) => `
+    <button
+      type="button"
+      class="point-popup-icon-btn${markerStyle.icon === icon ? " active" : ""}"
+      data-point-popup-action="select-icon"
+      data-icon="${escapeHtml(icon)}"
+      title="${escapeHtml(icon)}"
+      aria-label="${escapeHtml(icon)}"
+    >${buildDrawnPointSvg(icon, markerStyle.color, 18)}</button>
+  `).join("");
+  return `
+    <div class="point-edit-popup" data-item-id="${escapeHtml(item.id)}">
+      <div class="point-edit-popup-title">Edit Point</div>
+      <label class="point-edit-popup-row">
+        <span>Name</span>
+        <input type="text" data-point-field="name" value="${escapeHtml(item.name ?? "")}">
+      </label>
+      <div class="point-edit-popup-grid">
+        <label class="point-edit-popup-row">
+          <span>Latitude</span>
+          <input type="number" data-point-field="lat" step="0.000001" value="${Number.isFinite(latLng?.lat) ? latLng.lat.toFixed(6) : ""}">
+        </label>
+        <label class="point-edit-popup-row">
+          <span>Longitude</span>
+          <input type="number" data-point-field="lng" step="0.000001" value="${Number.isFinite(latLng?.lng) ? latLng.lng.toFixed(6) : ""}">
+        </label>
+      </div>
+      <div class="point-edit-popup-grid point-edit-popup-grid-compact">
+        <label class="point-edit-popup-row">
+          <span>Color</span>
+          <input type="color" data-point-field="color" value="${escapeHtml(markerStyle.color)}">
+        </label>
+        <label class="point-edit-popup-row">
+          <span>Size</span>
+          <input type="number" data-point-field="size" min="8" max="40" step="2" value="${markerStyle.size}">
+        </label>
+      </div>
+      <div class="point-edit-popup-row">
+        <span>Icon</span>
+        <div class="point-edit-popup-icons">${iconButtons}</div>
+      </div>
+      <div class="point-edit-popup-actions">
+        <button type="button" class="ghost-button small" data-point-popup-action="toggle-drag">${dragging ? "Stop Dragging" : "Drag on Map"}</button>
+        <button type="button" class="primary-button small" data-point-popup-action="save">Apply</button>
+      </div>
+    </div>
   `;
 }
 
@@ -12686,6 +12744,121 @@ function buildImportedItemDetailLines(item) {
   }
 
   return lines;
+}
+
+function getImportedItemById(itemId) {
+  return state.importedItems.find((entry) => entry.id === itemId) ?? null;
+}
+
+function getPointPopupRoot(target) {
+  return target?.closest?.(".point-edit-popup") ?? null;
+}
+
+function getPointPopupItem(target) {
+  const root = getPointPopupRoot(target);
+  if (!root) {
+    return null;
+  }
+  return getImportedItemById(root.dataset.itemId);
+}
+
+function refreshImportedItemPopup(item, { keepOpen = true } = {}) {
+  if (!item?.layer?.setPopupContent) {
+    return;
+  }
+  item.layer.setPopupContent(renderImportedItemPopup(item));
+  if (keepOpen) {
+    item.layer.openPopup?.();
+  }
+}
+
+function applyPointPopupEdits(itemId, root) {
+  const item = getImportedItemById(itemId);
+  if (!item || item.geometryType !== "Point" || !root) {
+    return;
+  }
+
+  const name = root.querySelector('[data-point-field="name"]')?.value?.trim() ?? "";
+  const lat = Number.parseFloat(root.querySelector('[data-point-field="lat"]')?.value ?? "");
+  const lng = Number.parseFloat(root.querySelector('[data-point-field="lng"]')?.value ?? "");
+  const color = root.querySelector('[data-point-field="color"]')?.value ?? "#ffffff";
+  const rawSize = Number.parseFloat(root.querySelector('[data-point-field="size"]')?.value ?? "");
+  const activeIcon = root.querySelector('.point-popup-icon-btn.active')?.dataset.icon ?? item.markerStyle?.icon ?? "dot";
+
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    setStatus("Enter a valid latitude between -90 and 90.", true);
+    return;
+  }
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+    setStatus("Enter a valid longitude between -180 and 180.", true);
+    return;
+  }
+
+  item.name = name || item.name || "Point";
+  item.markerStyle = normalizeDrawnPointMarkerStyle({
+    icon: activeIcon,
+    color,
+    size: Number.isFinite(rawSize) ? rawSize : undefined,
+  });
+  item.lastModified = nowIso();
+
+  const nextLatLng = L.latLng(lat, lng);
+  item.layer.setLatLng(nextLatLng);
+  const icon = buildImportedPointIcon(item.markerStyle);
+  if (icon) {
+    item.layer.setIcon(icon);
+  }
+
+  refreshImportedItemPopup(item);
+  renderMapContents();
+  syncCesiumEntities();
+  saveMapState();
+  setStatus(`Updated ${item.name}.`);
+}
+
+function onPointPopupClick(event) {
+  const actionEl = event.target.closest("[data-point-popup-action]");
+  if (!actionEl) {
+    return;
+  }
+
+  const item = getPointPopupItem(actionEl);
+  if (!item) {
+    return;
+  }
+
+  const root = getPointPopupRoot(actionEl);
+  const action = actionEl.dataset.pointPopupAction;
+  if (action === "select-icon") {
+    event.preventDefault();
+    root?.querySelectorAll(".point-popup-icon-btn").forEach((btn) => btn.classList.remove("active"));
+    actionEl.classList.add("active");
+    return;
+  }
+
+  if (action === "toggle-drag") {
+    event.preventDefault();
+    toggleImportedItemEditing(item);
+    refreshImportedItemPopup(item);
+    return;
+  }
+
+  if (action === "save") {
+    event.preventDefault();
+    applyPointPopupEdits(item.id, root);
+  }
+}
+
+function onPointPopupKeyDown(event) {
+  if (event.key !== "Enter") {
+    return;
+  }
+  const root = getPointPopupRoot(event.target);
+  if (!root) {
+    return;
+  }
+  event.preventDefault();
+  applyPointPopupEdits(root.dataset.itemId, root);
 }
 
 function measureLatLngPath(latLngs, closeRing = false) {
