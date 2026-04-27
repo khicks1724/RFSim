@@ -2437,11 +2437,14 @@ input[type="range"]::-moz-range-progress {
 }
 
 /* Drawing cursor feedback */
-.leaflet-drawing-active {
-  cursor: crosshair !important;
-}
-
-.leaflet-drawing-active .leaflet-interactive {
+.leaflet-drawing-active,
+.leaflet-drawing-active .leaflet-container,
+.leaflet-drawing-active .leaflet-pane,
+.leaflet-drawing-active .leaflet-tile-pane,
+.leaflet-drawing-active .leaflet-overlay-pane,
+.leaflet-drawing-active .leaflet-marker-pane,
+.leaflet-drawing-active .leaflet-interactive,
+.leaflet-drawing-active * {
   cursor: crosshair !important;
 }
 

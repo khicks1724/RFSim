@@ -3353,7 +3353,7 @@ function wireEvents() {
   initGeocoderOnSearchInput();
 
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
-  document.querySelector("#drawPointBtn")?.addEventListener("click", () => startDrawing("point"));
+  document.querySelector("#drawPointBtn")?.addEventListener("click", (e) => { e.stopPropagation(); startDrawing("point"); });
   buildPointIconPickerSvgs();
   dom.drawCircleBtn.addEventListener("click", () => startDrawing("circle"));
   dom.drawRectangleBtn.addEventListener("click", () => startDrawing("rectangle"));
@@ -12944,6 +12944,7 @@ function startDrawing(mode) {
   cancelDrawing();
   state.draw.mode = mode;
   dom.map.classList.add("leaflet-drawing-active");
+  state.map?.getContainer()?.classList.add("leaflet-drawing-active");
   const hints = { point: "Click on the map to place a point.", circle: "Click to set center, click again to set radius.", rectangle: "Click two corners to draw a rectangle.", polyline: "Click to add points. Double-click to finish." };
   setStatus(hints[mode] ?? "Click on the map.");
 }
@@ -12956,10 +12957,12 @@ function cancelDrawing() {
   state.draw.mode = null;
   state.draw.points = [];
   dom.map.classList.remove("leaflet-drawing-active");
+  state.map?.getContainer()?.classList.remove("leaflet-drawing-active");
 }
 
 function onDrawClick(latlng) {
   const { mode, points } = state.draw;
+  console.log("[draw] onDrawClick mode=", mode, latlng);
 
   if (mode === "point") {
     cancelDrawing();
