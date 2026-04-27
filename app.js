@@ -6714,6 +6714,23 @@ function parseGenAiMilModelsPayload(payload) {
   })));
 }
 
+function isHtmlLikeResponse(text = "") {
+  const normalized = String(text).trimStart();
+  return normalized.startsWith("<!doctype")
+    || normalized.startsWith("<!DOCTYPE")
+    || normalized.startsWith("<html")
+    || normalized.startsWith("<head")
+    || normalized.startsWith("<body");
+}
+
+function summarizeGenAiMilErrors(errors, fallbackMessage) {
+  const messages = errors
+    .map((error) => error?.message)
+    .filter(Boolean)
+    .filter((message, index, list) => list.indexOf(message) === index);
+  return new Error(messages.length ? messages[0] : fallbackMessage);
+}
+
 function shouldPreferHostedGenAiMilSiteProxy() {
   const { protocol, hostname } = window.location;
   if (!/^https?:$/.test(protocol)) {
@@ -6736,6 +6753,9 @@ async function fetchGenAiMilModelsFrom(url, apiKey) {
   const bodyText = await response.text();
   if (!response.ok) {
     throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil model discovery failed (HTTP ${response.status}).`);
+  }
+  if (isHtmlLikeResponse(bodyText)) {
+    throw new Error("GenAI.mil model discovery returned HTML instead of JSON. The hosted reverse-proxy path may not be deployed yet.");
   }
   let parsed;
   try {
@@ -6770,38 +6790,32 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
   }
 
   let models;
-  let siteProxyError = null;
+  const attemptErrors = [];
   if (shouldPreferHostedGenAiMilSiteProxy()) {
     try {
       models = await fetchGenAiMilModelsFrom(GENAI_MIL_SITE_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
     } catch (error) {
-      siteProxyError = error;
+      attemptErrors.push(error);
     }
   }
-  let backendError = null;
   if (!models && state.session.token) {
     try {
       models = await fetchGenAiMilModelsFromBackend(state.ai.apiKey);
     } catch (error) {
-      backendError = error;
+      attemptErrors.push(error);
     }
   }
   if (!models) {
     try {
       models = await fetchGenAiMilModelsFrom(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey);
     } catch (error) {
-      if (error instanceof TypeError) {
-        try {
+      attemptErrors.push(error);
+      try {
         models = await fetchGenAiMilModelsFrom(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
         state.ai.statusMessage = "GenAI.mil model discovery succeeded through the local proxy on 127.0.0.1:8787.";
-        } catch (proxyError) {
-          if (proxyError instanceof TypeError) {
-            throw siteProxyError ?? backendError ?? new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
-          }
-          throw proxyError;
-        }
-      } else {
-        throw error;
+      } catch (proxyError) {
+        attemptErrors.push(proxyError);
+        throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil model discovery failed.");
       }
     }
   }
@@ -7276,12 +7290,17 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
     temperature,
   };
 
+  const attemptErrors = [];
+
   if (shouldPreferHostedGenAiMilSiteProxy()) {
     try {
       const response = await callGenAiMilEndpoint(GENAI_MIL_SITE_PROXY_ENDPOINT, state.ai.apiKey, payload);
       const bodyText = await response.text();
       if (!response.ok) {
         throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil request failed (HTTP ${response.status}).`);
+      }
+      if (isHtmlLikeResponse(bodyText)) {
+        throw new Error("GenAI.mil chat returned HTML instead of JSON. The hosted reverse-proxy path may not be deployed yet.");
       }
       const parsed = JSON.parse(bodyText);
       const content = parsed?.choices?.[0]?.message?.content;
@@ -7290,7 +7309,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
       }
       return content;
     } catch (error) {
-      // Fall through to backend relay and browser-direct paths.
+      attemptErrors.push(error);
     }
   }
 
@@ -7309,7 +7328,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
       }
       return content;
     } catch (error) {
-      // Fall back to direct access for browser-only/local modes.
+      attemptErrors.push(error);
     }
   }
 
@@ -7317,24 +7336,27 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
   try {
     response = await callGenAiMilEndpoint(GENAI_MIL_ENDPOINT, state.ai.apiKey, payload);
   } catch (error) {
+    attemptErrors.push(error);
     if (error instanceof TypeError) {
       try {
         response = await callGenAiMilEndpoint(GENAI_MIL_PROXY_ENDPOINT, state.ai.apiKey, payload);
         state.ai.statusMessage = "GenAI.mil connected through the local proxy on 127.0.0.1:8787.";
         syncAiUi();
       } catch (proxyError) {
-        if (proxyError instanceof TypeError) {
-          throw new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
-        }
-        throw proxyError;
+        attemptErrors.push(proxyError);
+        throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed.");
       }
+    } else {
+      throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed.");
     }
-    throw error;
   }
 
   const bodyText = await response.text();
   if (!response.ok) {
     throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil request failed (HTTP ${response.status}).`);
+  }
+  if (isHtmlLikeResponse(bodyText)) {
+    throw new Error("GenAI.mil chat returned HTML instead of JSON.");
   }
 
   let parsed;
