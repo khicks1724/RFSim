@@ -413,37 +413,11 @@ images/                 README images
 
 ## Contributing
 
-Contributions are welcome — bug reports, feature ideas, refactors, and operational chores all help.
+Contributions are welcome — bug reports, feature ideas, refactors, and operational chores all help. AI-assisted contributions are welcome too.
 
-### Filing an issue
+If you're new here, the short version is: file an issue first, wait for a maintainer thumbs-up, then open a PR. There is no public roadmap yet, so the issue-first step matters.
 
-The easiest way to contribute is to **open an issue**. On GitHub, click the **Issues** tab → **New issue**, and you'll be offered a set of templates that match the kind of work you have in mind:
-
-| Template | Use when |
-|---|---|
-| **Bug Fix** | Something is broken or behaving incorrectly |
-| **Feature Upgrade** | You want to enhance or extend existing functionality |
-| **Refactoring** | The code structure should improve without changing behavior |
-| **Chore** | Dependency bumps, CI tweaks, migrations, infra, docs |
-| **Epic** | A larger initiative that will spawn several child issues |
-
-Pick the closest match — don't worry about getting it perfect. Each template has a few short prompts (what's happening, steps to reproduce, acceptance criteria, etc.). Fill in what you know and leave the rest blank; a partial issue is much better than no issue.
-
-### New to contributing through GitHub?
-
-If this is your first time, the short version is:
-
-1. Make a free GitHub account if you don't already have one.
-2. Go to the [Issues tab](../../issues) on this repo and click **New issue**.
-3. Pick a template, fill in the prompts, and submit. That's it — no code required.
-
-Once an issue is filed, anyone (including you) can pick it up. If you'd like to take a swing at the implementation yourself, fork the repo, create a branch, and open a pull request that references the issue (e.g. `Closes #42`). If you'd rather just describe the problem and let someone else handle the code, that's equally welcome.
-
-### What makes a good issue
-
-- **One thing per issue.** If you find two unrelated bugs, file two issues.
-- **Be specific about what you saw vs. what you expected.** Screenshots, console errors, and reproduction steps are gold.
-- **Link related issues** when you spot connections, especially under an Epic.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide — issue templates, PR scope rules, and the policy on AI-generated contributions.
 
 ## Notes
 
