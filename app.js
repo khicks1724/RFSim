@@ -1273,6 +1273,7 @@ const state = {
   cesiumPointElevationCache: new Map(),
   centerElevationRequestId: null,
   cesiumTerrainProviderKey: null,
+  relocatingImportedItemId: null,
   worker: createSimulationWorker(),
   pendingInspection: null,
   pendingPlanningRequestId: null,
@@ -3382,6 +3383,7 @@ function wireEvents() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       if (state.relocatingAssetId) { finishAssetRelocation(null); }
+      else if (state.relocatingImportedItemId) { finishImportedPointRelocation(null); }
       else if (state.settingsMenuOpen) closeSettingsMenu();
       else if (state.draw.mode) cancelDrawing();
       else if (state.mcSelectMode) toggleMcSelectMode();
@@ -8706,6 +8708,10 @@ function onMapClick(event) {
     finishAssetRelocation(event.latlng);
     return;
   }
+  if (state.relocatingImportedItemId) {
+    finishImportedPointRelocation(event.latlng);
+    return;
+  }
 
   if (state.placingAsset) {
     placePendingAssetAt(event.latlng, "2D map");
@@ -8731,6 +8737,7 @@ function startAssetRelocation(contentId) {
   const assetId = contentId.replace(/^asset:/, "");
   const asset = state.assets.find((a) => a.id === assetId);
   if (!asset) return;
+  finishImportedPointRelocation(null);
   state.relocatingAssetId = assetId;
   dom.map?.classList.add("asset-placement-active");
   dom.cesiumContainer?.classList.add("asset-placement-active");
@@ -8777,6 +8784,52 @@ function finishAssetRelocation(latlng) {
   }
   saveMapState();
   setStatus(`${asset.name} relocated.`);
+}
+
+function startImportedPointRelocation(itemId) {
+  const item = state.importedItems.find((entry) => entry.id === itemId && entry.geometryType === "Point");
+  if (!item) return;
+  finishAssetRelocation(null);
+  state.relocatingImportedItemId = itemId;
+  dom.map?.classList.add("asset-placement-active");
+  dom.cesiumContainer?.classList.add("asset-placement-active");
+  dom.mapStage?.classList.add("asset-placement-active");
+  if (state.map) {
+    state.map.dragging?.disable();
+    state.map.doubleClickZoom?.disable();
+    state.map.boxZoom?.disable();
+    state.map.keyboard?.disable();
+    state.map.getContainer().style.cursor = "crosshair";
+  }
+  item.layer.closePopup?.();
+  updateCenterCrosshairVisibility();
+  setStatus(`Click map to relocate ${item.name}. Press Esc to cancel.`);
+}
+
+function finishImportedPointRelocation(latlng) {
+  const itemId = state.relocatingImportedItemId;
+  state.relocatingImportedItemId = null;
+  dom.map?.classList.remove("asset-placement-active");
+  dom.cesiumContainer?.classList.remove("asset-placement-active");
+  dom.mapStage?.classList.remove("asset-placement-active");
+  if (state.map) {
+    state.map.dragging?.enable();
+    state.map.doubleClickZoom?.enable();
+    state.map.boxZoom?.enable();
+    state.map.keyboard?.enable();
+    state.map.getContainer().style.cursor = "";
+  }
+  updateCenterCrosshairVisibility();
+  if (!latlng || !itemId) return;
+  const item = state.importedItems.find((entry) => entry.id === itemId && entry.geometryType === "Point");
+  if (!item) return;
+  item.lastModified = nowIso();
+  item.layer.setLatLng([latlng.lat, latlng.lng]);
+  refreshImportedItemPopup(item);
+  renderMapContents();
+  syncCesiumEntities();
+  saveMapState();
+  setStatus(`${item.name} relocated.`);
 }
 
 function updatePlacementInteractionState() {
@@ -12661,7 +12714,7 @@ function renderImportedItemPopup(item) {
 function renderImportedPointPopup(item) {
   const latLng = item?.layer?.getLatLng?.();
   const markerStyle = normalizeDrawnPointMarkerStyle(item.markerStyle);
-  const dragging = Boolean(item?.layer?.dragging?.enabled?.());
+  const relocating = state.relocatingImportedItemId === item.id;
   const coordinateSystem = state.settings.coordinateSystem;
   const coordinateLabel = coordinateSystem === "mgrs" ? "Grid" : coordinateSystem === "dms" ? "Position (DMS)" : "Position (Lat/Lon)";
   const coordinatePlaceholder = coordinateSystem === "mgrs"
@@ -12715,7 +12768,7 @@ function renderImportedPointPopup(item) {
         <div class="point-edit-popup-icons">${iconButtons}</div>
       </div>
       <div class="point-edit-popup-actions">
-        <button type="button" class="ghost-button small" data-point-popup-action="toggle-drag">${dragging ? "Stop Dragging" : "Drag on Map"}</button>
+        <button type="button" class="ghost-button small" data-point-popup-action="relocate">${relocating ? "Cancel Relocate" : "Relocate"}</button>
         <button type="button" class="primary-button small" data-point-popup-action="save">Apply</button>
       </div>
     </div>
@@ -12849,10 +12902,14 @@ function onPointPopupClick(event) {
     return;
   }
 
-  if (action === "toggle-drag") {
+  if (action === "relocate") {
     event.preventDefault();
-    toggleImportedItemEditing(item);
-    refreshImportedItemPopup(item);
+    if (state.relocatingImportedItemId === item.id) {
+      finishImportedPointRelocation(null);
+      refreshImportedItemPopup(item);
+    } else {
+      startImportedPointRelocation(item.id);
+    }
     return;
   }
 
