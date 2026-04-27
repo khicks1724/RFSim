@@ -3383,6 +3383,7 @@ function wireEvents() {
   initGeocoderOnSearchInput();
   initMapGeoSearch();
   initAnalytics();
+  initOfflineDownload();
 
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
   document.querySelector("#drawPointBtn")?.addEventListener("click", (e) => { e.stopPropagation(); startDrawing("point"); });
@@ -16731,6 +16732,490 @@ const CanvasViewshedLayer = L.Layer.extend({
     }
   },
 });
+
+// ─── Offline Data Download ────────────────────────────────────────────────────
+
+const LOCAL_DATA_SERVER = "http://127.0.0.1:8789";
+
+const _offline = {
+  bbox: null,           // { north, south, east, west }
+  drawLayer: null,      // Leaflet rectangle layer while drawing
+  rectLayer: null,      // Leaflet rectangle showing selected area
+  drawing: false,
+  serverOnline: false,
+  abortController: null,
+};
+
+// ── Tile math ────────────────────────────────────────────────────────────────
+
+function lonToTileX(lon, zoom) {
+  return Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
+}
+
+function latToTileY(lat, zoom) {
+  const r = lat * Math.PI / 180;
+  return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, zoom));
+}
+
+function tileXToLon(x, zoom) {
+  return x / Math.pow(2, zoom) * 360 - 180;
+}
+
+function tileYToLat(y, zoom) {
+  const n = Math.PI - 2 * Math.PI * y / Math.pow(2, zoom);
+  return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+}
+
+function getTilesForBbox(bbox, zoom) {
+  const xMin = lonToTileX(bbox.west,  zoom);
+  const xMax = lonToTileX(bbox.east,  zoom);
+  const yMin = latToTileY(bbox.north, zoom);
+  const yMax = latToTileY(bbox.south, zoom);
+  const tiles = [];
+  for (let x = xMin; x <= xMax; x++) {
+    for (let y = yMin; y <= yMax; y++) {
+      tiles.push({ z: zoom, x, y });
+    }
+  }
+  return tiles;
+}
+
+function countTilesForBbox(bbox, zoomMin, zoomMax) {
+  let total = 0;
+  for (let z = zoomMin; z <= zoomMax; z++) {
+    total += getTilesForBbox(bbox, z).length;
+  }
+  return total;
+}
+
+function getTileUrl(z, x, y) {
+  const basemap = state.basemap || "esri";
+  const template = BASEMAPS[basemap]?.url || BASEMAPS.esri.url;
+  return template
+    .replace("{z}", z)
+    .replace("{x}", x)
+    .replace("{y}", y)
+    .replace("{s}", ["a","b","c"][Math.abs(x + y) % 3])
+    .replace("{r}", "");
+}
+
+// ── Server detection ─────────────────────────────────────────────────────────
+
+async function checkLocalDataServer() {
+  try {
+    const res = await fetch(`${LOCAL_DATA_SERVER}/health`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    _offline.serverOnline = true;
+    return data;
+  } catch {
+    _offline.serverOnline = false;
+    return null;
+  }
+}
+
+async function refreshOfflineServerStatus() {
+  const dot   = document.getElementById("offlineServerDot");
+  const label = document.getElementById("offlineServerLabel");
+  const badge = document.getElementById("offlineStatusBadge");
+  const data  = await checkLocalDataServer();
+  if (data) {
+    dot?.classList.remove("offline-dot-unknown", "offline-dot-err");
+    dot?.classList.add("offline-dot-ok");
+    if (label) label.textContent = `Server online — ${data.tileCount} tiles, ${data.osmCount} OSM files`;
+    badge?.classList.remove("hidden");
+    updateOfflineCacheStats(data);
+  } else {
+    dot?.classList.remove("offline-dot-unknown", "offline-dot-ok");
+    dot?.classList.add("offline-dot-err");
+    if (label) label.textContent = "Local server offline — run local_run.bat to start";
+    badge?.classList.add("hidden");
+  }
+}
+
+function updateOfflineCacheStats(data) {
+  const el = document.getElementById("offlineCacheStats");
+  if (!el || !data) return;
+  el.textContent = `${data.tileCount} tiles  |  ${data.elevCount} elev  |  ${data.osmCount} OSM`;
+}
+
+// ── Draw rectangle on map ────────────────────────────────────────────────────
+
+function startOfflineDraw() {
+  if (!window.map) return;
+  _offline.drawing = true;
+
+  // Remove old rect
+  if (_offline.rectLayer) { window.map.removeLayer(_offline.rectLayer); _offline.rectLayer = null; }
+
+  const drawBtn = document.getElementById("offlineDrawRectBtn");
+  if (drawBtn) drawBtn.textContent = "Click map: drag to draw…";
+
+  window.map.getContainer().style.cursor = "crosshair";
+
+  let startLatLng = null;
+  let previewLayer = null;
+
+  function onMouseDown(e) {
+    startLatLng = e.latlng;
+    window.map.dragging.disable();
+  }
+
+  function onMouseMove(e) {
+    if (!startLatLng) return;
+    const bounds = L.latLngBounds(startLatLng, e.latlng);
+    if (previewLayer) window.map.removeLayer(previewLayer);
+    previewLayer = L.rectangle(bounds, {
+      color: "#8fb7ff", weight: 2, dashArray: "6 4", fillOpacity: 0.12, interactive: false,
+    }).addTo(window.map);
+  }
+
+  function onMouseUp(e) {
+    window.map.dragging.enable();
+    window.map.off("mousedown", onMouseDown);
+    window.map.off("mousemove", onMouseMove);
+    window.map.off("mouseup", onMouseUp);
+    window.map.getContainer().style.cursor = "";
+    _offline.drawing = false;
+
+    if (previewLayer) window.map.removeLayer(previewLayer);
+    if (!startLatLng) return;
+
+    const bounds = L.latLngBounds(startLatLng, e.latlng);
+    _offline.bbox = {
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east:  bounds.getEast(),
+      west:  bounds.getWest(),
+    };
+
+    _offline.rectLayer = L.rectangle(bounds, {
+      color: "#8fb7ff", weight: 2, fillOpacity: 0.08, interactive: false,
+    }).addTo(window.map);
+
+    updateOfflineUI();
+    if (drawBtn) drawBtn.textContent = "Redraw Rectangle";
+  }
+
+  window.map.on("mousedown", onMouseDown);
+  window.map.on("mousemove", onMouseMove);
+  window.map.on("mouseup", onMouseUp);
+}
+
+// ── UI helpers ───────────────────────────────────────────────────────────────
+
+function updateOfflineUI() {
+  const bbox    = _offline.bbox;
+  const bboxEl  = document.getElementById("offlineBboxDisplay");
+  const estEl   = document.getElementById("offlineEstimate");
+  const startBtn = document.getElementById("offlineStartBtn");
+  const zipBtn   = document.getElementById("offlineDownloadZipBtn");
+
+  if (!bbox) return;
+
+  if (bboxEl) {
+    bboxEl.textContent =
+      `N ${bbox.north.toFixed(4)}  S ${bbox.south.toFixed(4)}\n` +
+      `E ${bbox.east.toFixed(4)}  W ${bbox.west.toFixed(4)}`;
+  }
+
+  const zMin = parseInt(document.getElementById("offlineZoomMin")?.value) || 8;
+  const zMax = parseInt(document.getElementById("offlineZoomMax")?.value) || 14;
+  const tileCount = countTilesForBbox(bbox, zMin, zMax);
+  const estMb = (tileCount * 18 / 1024).toFixed(1); // ~18 KB average per tile
+  if (estEl) estEl.textContent = `~${tileCount.toLocaleString()} tiles  ≈ ${estMb} MB`;
+
+  startBtn?.removeAttribute("disabled");
+  zipBtn?.removeAttribute("disabled");
+}
+
+function offlineLog(msg, type = "info") {
+  const log = document.getElementById("offlineProgressLog");
+  if (!log) return;
+  const line = document.createElement("div");
+  line.className = type === "ok" ? "log-ok" : type === "err" ? "log-err" : type === "warn" ? "log-warn" : "";
+  line.textContent = msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function offlineSetProgress(pct) {
+  const wrap = document.getElementById("offlineProgressBar");
+  const fill = document.getElementById("offlineProgressFill");
+  wrap?.classList.remove("hidden");
+  if (fill) fill.style.width = `${Math.min(100, pct)}%`;
+}
+
+// ── Download logic ───────────────────────────────────────────────────────────
+
+async function fetchTileBlob(z, x, y) {
+  const url = getTileUrl(z, x, y);
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.arrayBuffer();
+}
+
+async function fetchElevationGrid(bbox) {
+  // Use OpenTopoData SRTM30m for a coarse elevation grid over the bbox
+  const pts = [];
+  const steps = 8;
+  const latStep = (bbox.north - bbox.south) / steps;
+  const lonStep = (bbox.east  - bbox.west)  / steps;
+  for (let i = 0; i <= steps; i++) {
+    for (let j = 0; j <= steps; j++) {
+      pts.push(`${(bbox.south + i * latStep).toFixed(5)},${(bbox.west + j * lonStep).toFixed(5)}`);
+    }
+  }
+  // OpenTopoData allows up to 100 locations per request
+  const chunks = [];
+  for (let i = 0; i < pts.length; i += 100) chunks.push(pts.slice(i, i + 100));
+
+  const results = [];
+  for (const chunk of chunks) {
+    const res = await fetch(
+      `https://api.opentopodata.org/v1/srtm30m?locations=${chunk.join("|")}`,
+      { signal: AbortSignal.timeout(15000) }
+    );
+    if (!res.ok) throw new Error(`Elevation API HTTP ${res.status}`);
+    const data = await res.json();
+    results.push(...(data.results || []));
+  }
+  return { bbox, points: results, steps };
+}
+
+async function fetchOsmBuildings(bbox) {
+  const query = `[out:json][timeout:60];
+(
+  way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
+  relation["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
+);
+out body;>;out skel qt;`;
+
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    body: query,
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!res.ok) throw new Error(`Overpass API HTTP ${res.status}`);
+  const osm = await res.json();
+
+  // Convert OSM to simple GeoJSON FeatureCollection
+  const nodes = {};
+  osm.elements.filter((e) => e.type === "node").forEach((n) => { nodes[n.id] = [n.lon, n.lat]; });
+
+  const features = osm.elements
+    .filter((e) => e.type === "way" && e.nodes && e.tags?.building)
+    .map((way) => {
+      const coords = way.nodes.map((id) => nodes[id]).filter(Boolean);
+      if (coords.length < 3) return null;
+      if (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1]) {
+        coords.push(coords[0]);
+      }
+      return {
+        type: "Feature",
+        properties: { ...way.tags, osm_id: way.id },
+        geometry: { type: "Polygon", coordinates: [coords] },
+      };
+    })
+    .filter(Boolean);
+
+  return { type: "FeatureCollection", features };
+}
+
+function bboxKey(bbox) {
+  return `${bbox.south.toFixed(4)}_${bbox.west.toFixed(4)}_${bbox.north.toFixed(4)}_${bbox.east.toFixed(4)}`;
+}
+
+async function runOfflineDownload(mode) {
+  const bbox = _offline.bbox;
+  if (!bbox) return;
+
+  const includeTiles = document.getElementById("offlineIncludeTiles")?.checked ?? true;
+  const includeElev  = document.getElementById("offlineIncludeElevation")?.checked ?? true;
+  const includeOsm   = document.getElementById("offlineIncludeOsm")?.checked ?? true;
+  const zMin = parseInt(document.getElementById("offlineZoomMin")?.value) || 8;
+  const zMax = parseInt(document.getElementById("offlineZoomMax")?.value) || 14;
+
+  const startBtn  = document.getElementById("offlineStartBtn");
+  const zipBtn    = document.getElementById("offlineDownloadZipBtn");
+  startBtn?.setAttribute("disabled", "true");
+  zipBtn?.setAttribute("disabled", "true");
+
+  _offline.abortController = new AbortController();
+  const log = (m, t) => offlineLog(m, t);
+  const prog = offlineSetProgress;
+
+  // ZIP mode setup
+  let zip = null;
+  if (mode === "zip") zip = new JSZip();
+
+  let done = 0;
+  const allTiles = [];
+  if (includeTiles) {
+    for (let z = zMin; z <= zMax; z++) allTiles.push(...getTilesForBbox(bbox, z));
+  }
+  const totalSteps = allTiles.length + (includeElev ? 1 : 0) + (includeOsm ? 1 : 0);
+
+  log(`Starting download — ${totalSteps} items`, "info");
+
+  // ── Tiles ────────────────────────────────────────────────────────────────
+  if (includeTiles) {
+    const source = state.basemap || "esri";
+    log(`Fetching ${allTiles.length} tiles (zoom ${zMin}–${zMax}, source: ${source})…`);
+    const CONCURRENCY = 6;
+    let idx = 0;
+    let errors = 0;
+
+    async function worker() {
+      while (idx < allTiles.length) {
+        if (_offline.abortController.signal.aborted) return;
+        const { z, x, y } = allTiles[idx++];
+        try {
+          const buf = await fetchTileBlob(z, x, y);
+          if (mode === "server") {
+            await fetch(`${LOCAL_DATA_SERVER}/store/tiles/${source}/${z}/${x}/${y}.png`, {
+              method: "POST", body: buf,
+              signal: _offline.abortController.signal,
+            });
+          } else {
+            zip.folder(`tiles/${source}/${z}/${x}`).file(`${y}.png`, buf);
+          }
+        } catch {
+          errors++;
+        }
+        done++;
+        prog((done / totalSteps) * 100);
+        if (done % 50 === 0) log(`  ${done}/${allTiles.length} tiles…`);
+      }
+    }
+
+    const workers = Array.from({ length: CONCURRENCY }, worker);
+    await Promise.all(workers);
+    log(`Tiles done — ${errors} errors`, errors > 0 ? "warn" : "ok");
+  }
+
+  // ── Elevation ────────────────────────────────────────────────────────────
+  if (includeElev) {
+    log("Fetching elevation grid…");
+    try {
+      const elevData = await fetchElevationGrid(bbox);
+      const key = bboxKey(bbox);
+      const json = JSON.stringify(elevData);
+      if (mode === "server") {
+        await fetch(`${LOCAL_DATA_SERVER}/store/elevation/0/0/${key}.json`, {
+          method: "POST", body: json,
+        });
+      } else {
+        zip.folder("elevation").file(`${key}.json`, json);
+      }
+      log(`Elevation grid saved (${elevData.points.length} pts)`, "ok");
+    } catch (err) {
+      log(`Elevation failed: ${err.message}`, "err");
+    }
+    done++;
+    prog((done / totalSteps) * 100);
+  }
+
+  // ── OSM buildings ────────────────────────────────────────────────────────
+  if (includeOsm) {
+    log("Fetching OSM buildings via Overpass…");
+    try {
+      const geojson = await fetchOsmBuildings(bbox);
+      const key = bboxKey(bbox);
+      const json = JSON.stringify(geojson);
+      if (mode === "server") {
+        await fetch(`${LOCAL_DATA_SERVER}/store/osm/${key}.geojson`, {
+          method: "POST", body: json,
+        });
+      } else {
+        zip.folder("osm").file(`${key}.geojson`, json);
+      }
+      log(`OSM buildings: ${geojson.features.length} features saved`, "ok");
+    } catch (err) {
+      log(`OSM failed: ${err.message}`, "err");
+    }
+    done++;
+    prog((done / totalSteps) * 100);
+  }
+
+  prog(100);
+
+  if (mode === "zip") {
+    log("Building ZIP file…");
+    try {
+      const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `rf-planner-offline-${bboxKey(bbox)}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      log("ZIP downloaded!", "ok");
+    } catch (err) {
+      log(`ZIP failed: ${err.message}`, "err");
+    }
+  } else {
+    log("All data saved to local server.", "ok");
+    await refreshOfflineServerStatus();
+  }
+
+  startBtn?.removeAttribute("disabled");
+  zipBtn?.removeAttribute("disabled");
+  _offline.abortController = null;
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+function initOfflineDownload() {
+  const openBtn = document.getElementById("offlineDownloadBtn");
+  const closeBtn = document.getElementById("offlineModalCloseBtn");
+  const modal    = document.getElementById("offlineModal");
+  const drawBtn  = document.getElementById("offlineDrawRectBtn");
+  const startBtn = document.getElementById("offlineStartBtn");
+  const zipBtn   = document.getElementById("offlineDownloadZipBtn");
+  const clearBtn = document.getElementById("offlineClearCacheBtn");
+  const zoomMin  = document.getElementById("offlineZoomMin");
+  const zoomMax  = document.getElementById("offlineZoomMax");
+
+  openBtn?.addEventListener("click", () => {
+    modal?.classList.remove("hidden");
+    refreshOfflineServerStatus();
+  });
+
+  closeBtn?.addEventListener("click", () => modal?.classList.add("hidden"));
+  modal?.addEventListener("click", (e) => { if (e.target === modal) modal.classList.add("hidden"); });
+
+  drawBtn?.addEventListener("click", () => {
+    modal?.classList.add("hidden");
+    startOfflineDraw();
+  });
+
+  zoomMin?.addEventListener("change", updateOfflineUI);
+  zoomMax?.addEventListener("change", updateOfflineUI);
+
+  startBtn?.addEventListener("click", () => {
+    if (!_offline.serverOnline) {
+      offlineLog("Local server not running. Use 'Save as ZIP' or start local_run.bat.", "err");
+      return;
+    }
+    runOfflineDownload("server");
+  });
+
+  zipBtn?.addEventListener("click", () => runOfflineDownload("zip"));
+
+  clearBtn?.addEventListener("click", async () => {
+    if (!_offline.serverOnline) {
+      offlineLog("Local server not running.", "err");
+      return;
+    }
+    await fetch(`${LOCAL_DATA_SERVER}/cache`, { method: "DELETE" });
+    offlineLog("Cache cleared.", "ok");
+    await refreshOfflineServerStatus();
+  });
+
+  // Check server status in background
+  setTimeout(refreshOfflineServerStatus, 1500);
+}
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 

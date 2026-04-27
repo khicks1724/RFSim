@@ -546,6 +546,11 @@
           <span class="center-grid-crosshair-line center-grid-crosshair-line-vertical"></span>
         </div>
         <button id="view3dToggleBtn" class="map-view-toggle ghost-button small" type="button">3D View</button>
+        <button id="offlineDownloadBtn" class="map-offline-btn ghost-button small" type="button" title="Download area for offline use">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="21" x2="12" y2="3"/><rect x="2" y="3" width="8" height="6" rx="1"/><rect x="14" y="3" width="8" height="6" rx="1"/></svg>
+          Offline
+        </button>
+        <div id="offlineStatusBadge" class="offline-status-badge hidden" title="Local data server connected — offline data available">&#x25CF; Local</div>
         <div class="map-geo-search-wrap">
           <label class="map-geo-search-shell" for="mapGeoSearchInput">
             <span class="map-geo-search-icon" aria-hidden="true">
@@ -1712,6 +1717,87 @@
           <canvas id="analyticsVisitChart" class="analytics-chart" width="220" height="120"></canvas>
           <div class="analytics-chart-title" style="margin-top:18px">Token Usage by User</div>
           <canvas id="analyticsTokenChart" class="analytics-chart" width="220" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Offline Download Modal -->
+  <div id="offlineModal" class="emitter-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="offlineModalTitle">
+    <div class="emitter-modal offline-modal">
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <h2 id="offlineModalTitle">Download for Offline Use</h2>
+          <p>Draw a rectangle on the map, then download imagery, terrain, and building data.</p>
+        </div>
+        <button id="offlineModalCloseBtn" class="ghost-button small icon-button" type="button" aria-label="Close">&#10005;</button>
+      </div>
+
+      <div class="offline-modal-body">
+        <!-- Left: controls -->
+        <div class="offline-controls">
+          <div class="offline-step">
+            <div class="offline-step-label">1. Draw bounding box</div>
+            <button id="offlineDrawRectBtn" class="ghost-button small" type="button">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+              Draw Rectangle
+            </button>
+            <div id="offlineBboxDisplay" class="offline-bbox-display">No area selected</div>
+          </div>
+
+          <div class="offline-step">
+            <div class="offline-step-label">2. Choose data types</div>
+            <label class="offline-check-row">
+              <input type="checkbox" id="offlineIncludeTiles" checked>
+              <span>Map imagery tiles</span>
+            </label>
+            <label class="offline-check-row" style="padding-left:16px; font-size:0.78rem; color:var(--muted)">
+              <span>Zoom levels:</span>
+              <input id="offlineZoomMin" type="number" min="1" max="18" value="8" class="offline-zoom-input">
+              <span>to</span>
+              <input id="offlineZoomMax" type="number" min="1" max="18" value="14" class="offline-zoom-input">
+            </label>
+            <label class="offline-check-row">
+              <input type="checkbox" id="offlineIncludeElevation" checked>
+              <span>Terrain elevation data</span>
+            </label>
+            <label class="offline-check-row">
+              <input type="checkbox" id="offlineIncludeOsm" checked>
+              <span>OSM building footprints</span>
+            </label>
+          </div>
+
+          <div class="offline-step">
+            <div class="offline-step-label">3. Estimate &amp; download</div>
+            <div id="offlineEstimate" class="offline-estimate">Select an area first</div>
+            <button id="offlineStartBtn" class="ghost-button small" type="button" disabled>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+              Download to local server
+            </button>
+            <button id="offlineDownloadZipBtn" class="ghost-button small" type="button" disabled>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+              Save as ZIP file
+            </button>
+          </div>
+
+          <div class="offline-step">
+            <div class="offline-step-label">Cached data</div>
+            <div id="offlineCacheStats" class="offline-cache-stats">—</div>
+            <button id="offlineClearCacheBtn" class="ghost-button small" type="button" style="color:var(--enemy)">Clear cache</button>
+          </div>
+        </div>
+
+        <!-- Right: progress -->
+        <div class="offline-progress-panel">
+          <div class="offline-progress-title">Progress</div>
+          <div id="offlineProgressBar" class="offline-progress-bar-wrap hidden">
+            <div id="offlineProgressFill" class="offline-progress-fill" style="width:0%"></div>
+          </div>
+          <div id="offlineProgressLog" class="offline-progress-log"></div>
+          <div id="offlineServerStatus" class="offline-server-status">
+            <span id="offlineServerDot" class="offline-server-dot offline-dot-unknown">&#x25CF;</span>
+            <span id="offlineServerLabel">Checking local server…</span>
+          </div>
         </div>
       </div>
     </div>

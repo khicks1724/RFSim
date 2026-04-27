@@ -2016,7 +2016,13 @@ body:not(.ai-panel-open) .ai-panel {
 }
 
 .map-geo-search-shell:focus-within {
+  border-color: rgba(120,140,168,0.35);
   box-shadow: var(--shadow);
+}
+
+.map-geo-search-shell input:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .map-geo-search-icon {
@@ -4683,3 +4689,191 @@ body.emitter-modal-open {
 .workspace-analytics-link:hover {
   color: var(--accent);
 }
+
+/* ─── Offline Download ───────────────────────────────────────────────────── */
+
+.map-offline-btn {
+  position: absolute;
+  top: 14px;
+  /* 138px = search wrap left; 340px = search wrap width; 8px gap */
+  left: calc(138px + 340px + 8px);
+  z-index: 650;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.offline-status-badge {
+  position: absolute;
+  top: 14px;
+  left: calc(138px + 340px + 8px + 86px + 6px);
+  z-index: 650;
+  height: 32px;
+  padding: 0 9px;
+  background: rgba(16, 36, 20, 0.92);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: #34d399;
+  gap: 5px;
+  box-shadow: var(--shadow);
+  cursor: default;
+}
+
+.offline-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.offline-modal-body {
+  display: flex;
+  gap: 20px;
+  padding: 16px 20px 20px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.offline-controls {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.offline-step {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.offline-step-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.offline-bbox-display {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-family: monospace;
+  padding: 4px 0;
+}
+
+.offline-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.offline-check-row input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.offline-zoom-input {
+  width: 48px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 0.78rem;
+  padding: 2px 5px;
+  text-align: center;
+}
+
+.offline-estimate {
+  font-size: 0.8rem;
+  color: var(--accent);
+  padding: 2px 0;
+}
+
+.offline-cache-stats {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-family: monospace;
+}
+
+.offline-progress-panel {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 1px solid var(--border);
+  padding-left: 18px;
+}
+
+.offline-progress-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.offline-progress-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: var(--bg-soft);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.offline-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.2s;
+}
+
+.offline-progress-log {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-family: monospace;
+  line-height: 1.6;
+  min-height: 120px;
+  max-height: 260px;
+}
+
+.offline-progress-log .log-ok   { color: #34d399; }
+.offline-progress-log .log-warn { color: var(--host-nation); }
+.offline-progress-log .log-err  { color: var(--enemy); }
+
+.offline-server-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.offline-server-dot { font-size: 10px; }
+.offline-dot-unknown { color: var(--muted); }
+.offline-dot-ok      { color: #34d399; }
+.offline-dot-err     { color: var(--enemy); }
