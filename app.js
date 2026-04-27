@@ -13494,7 +13494,7 @@ function openShapeStylePanel(item, anchorEl) {
     dom.shapeLineStyleSelect.value = s.lineStyle ?? "solid";
     dom.shapeOpacityInput.value = s.fillOpacity;
     dom.shapeWeightInput.value = s.weight;
-    dom.shapeOpacityValue.textContent = `${Math.round(s.fillOpacity * 100)}%`;
+    dom.shapeOpacityValue.textContent = `${Math.round(s.fillOpacity * 100)}`;
     dom.shapeWeightValue.textContent = s.weight;
     updateRangeTrack(dom.shapeOpacityInput);
     updateRangeTrack(dom.shapeWeightInput);
@@ -13561,7 +13561,7 @@ function onShapeStyleChanged() {
   const lineStyle = dom.shapeLineStyleSelect.value;
   const fillOpacity = parseFloat(dom.shapeOpacityInput.value);
   const weight = parseInt(dom.shapeWeightInput.value, 10);
-  dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}%`;
+  dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}`;
   dom.shapeWeightValue.textContent = weight;
   const previous = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType);
   const fillColor = previous.color === color ? (previous.fillColor ?? color) : color;
@@ -13601,7 +13601,7 @@ function applyCircleGeometryUpdate(item, center, radiusM) {
   const fillOpacity = parseFloat(dom.shapeOpacityInput.value);
   const weight = parseInt(dom.shapeWeightInput.value, 10);
 
-  dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}%`;
+  dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}`;
   dom.shapeWeightValue.textContent = weight;
 
   const previous = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType);

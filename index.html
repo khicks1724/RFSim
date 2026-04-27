@@ -665,14 +665,18 @@
       <div id="shapeStyleTitle" class="shape-style-panel-title">Edit Shape</div>
       <button id="shapeStyleCloseBtn" class="icon-button ghost-button" type="button" aria-label="Close">&#10005;</button>
     </div>
-    <label class="shape-style-row">
-      Color
-      <input id="shapeColorInput" type="color" value="#3b82f6">
-    </label>
+
+    <!-- Color row — shared by point and shape -->
+    <div class="shape-field-group">
+      <label class="shape-field-label" for="shapeColorInput">Color</label>
+      <div class="shape-field-control">
+        <input id="shapeColorInput" type="color" value="#3b82f6">
+      </div>
+    </div>
 
     <!-- Point-only controls -->
     <div id="pointStyleControls" class="hidden">
-      <div class="shape-style-row shape-style-label-row">Icon</div>
+      <div class="shape-section-label">Icon</div>
       <div id="pointIconPicker" class="point-icon-picker">
         <button class="point-icon-btn active" data-icon="dot" title="Dot" type="button"></button>
         <button class="point-icon-btn" data-icon="ring" title="Ring" type="button"></button>
@@ -683,46 +687,60 @@
         <button class="point-icon-btn" data-icon="plus" title="Plus" type="button"></button>
         <button class="point-icon-btn" data-icon="star" title="Star" type="button"></button>
       </div>
-      <label class="shape-style-row">
-        Size
-        <input id="pointSizeInput" type="range" min="8" max="40" step="2" value="24">
-      </label>
-      <div class="shape-style-row shape-style-hint"><span id="pointSizeValue">24</span>px</div>
+      <div class="shape-field-group">
+        <label class="shape-field-label" for="pointSizeInput">Size</label>
+        <div class="shape-field-control shape-slider-row">
+          <input id="pointSizeInput" type="range" min="8" max="40" step="2" value="24">
+          <span class="shape-value-badge"><span id="pointSizeValue">24</span> px</span>
+        </div>
+      </div>
     </div>
 
     <!-- Shape-only controls -->
     <div id="shapeOnlyControls">
       <div id="circleShapeControls" class="hidden">
-        <label class="shape-style-row">
-          Center
-          <input id="circleCenterInput" type="text" placeholder="11SNU5423234567">
-        </label>
-        <label class="shape-style-row">
-          Radius (meters)
-          <input id="circleRadiusInput" type="number" min="1" step="1" value="1000">
-        </label>
-        <div class="shape-style-row shape-style-actions-inline">
+        <div class="shape-field-group">
+          <label class="shape-field-label" for="circleCenterInput">Center</label>
+          <div class="shape-field-control">
+            <input id="circleCenterInput" type="text" placeholder="11SNU5423234567" class="shape-text-input">
+          </div>
+        </div>
+        <div class="shape-field-group">
+          <label class="shape-field-label" for="circleRadiusInput">Radius (m)</label>
+          <div class="shape-field-control">
+            <input id="circleRadiusInput" type="number" min="1" step="1" value="1000" class="shape-text-input">
+          </div>
+        </div>
+        <div class="shape-field-group shape-field-actions">
           <button id="circleRelocateBtn" type="button" class="ghost-button small">Relocate Center</button>
         </div>
       </div>
-      <label class="shape-style-row">
-        Line Style
-        <select id="shapeLineStyleSelect">
-          <option value="solid">Solid</option>
-          <option value="dashed">Dashed</option>
-          <option value="dotted">Dotted</option>
-        </select>
-      </label>
-      <label class="shape-style-row">
-        Opacity
-        <input id="shapeOpacityInput" type="range" min="0" max="1" step="0.05" value="0.35">
-      </label>
-      <label class="shape-style-row">
-        Line Width
-        <input id="shapeWeightInput" type="range" min="1" max="10" step="1" value="2">
-      </label>
-      <div class="shape-style-row shape-style-hint">
-        <span id="shapeOpacityValue">35%</span> opacity &nbsp;·&nbsp; <span id="shapeWeightValue">2</span>px line
+
+      <div class="shape-field-group">
+        <label class="shape-field-label" for="shapeLineStyleSelect">Line Style</label>
+        <div class="shape-field-control">
+          <select id="shapeLineStyleSelect">
+            <option value="solid">Solid</option>
+            <option value="dashed">Dashed</option>
+            <option value="dotted">Dotted</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="shape-field-group">
+        <label class="shape-field-label" for="shapeOpacityInput">Fill Opacity</label>
+        <div class="shape-field-control shape-slider-row">
+          <input id="shapeOpacityInput" type="range" min="0" max="1" step="0.05" value="0.35">
+          <span class="shape-value-badge"><span id="shapeOpacityValue">35</span>%</span>
+        </div>
+      </div>
+
+      <div class="shape-field-group">
+        <label class="shape-field-label" for="shapeWeightInput">Line Width</label>
+        <div class="shape-field-control shape-slider-row">
+          <input id="shapeWeightInput" type="range" min="1" max="10" step="1" value="2">
+          <span class="shape-value-badge"><span id="shapeWeightValue">2</span> px</span>
+        </div>
       </div>
     </div>
 
