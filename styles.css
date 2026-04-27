@@ -2233,7 +2233,7 @@ h2 {
 .shape-style-modal {
   position: relative;
   z-index: 1451;
-  width: min(360px, calc(100vw - 32px));
+  width: min(300px, calc(100vw - 32px));
   max-height: min(82vh, 760px);
   overflow: auto;
   display: flex;
@@ -2251,7 +2251,7 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
   border-radius: 8px 8px 0 0;
@@ -2273,11 +2273,10 @@ h2 {
 
 /* ── Field group layout ──────────────────────────────────────────────── */
 .shape-field-group {
-  display: grid;
-  grid-template-columns: 90px 1fr;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 16px;
+  gap: 8px;
+  padding: 7px 14px;
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 
@@ -2293,6 +2292,8 @@ h2 {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
+  flex-shrink: 0;
+  width: 76px;
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
@@ -2301,7 +2302,8 @@ h2 {
 .shape-field-control {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex: 1;
   min-width: 0;
 }
 
@@ -2323,19 +2325,18 @@ h2 {
   border: 1px solid var(--border-strong);
   color: var(--text);
   font-size: 12px;
-  padding: 5px 8px;
+  padding: 4px 6px;
   border-radius: 4px;
 }
 
 .shape-text-input {
   flex: 1;
   min-width: 0;
-  width: 100%;
   background: var(--bg-soft);
   border: 1px solid var(--border-strong);
   color: var(--text);
   font-size: 12px;
-  padding: 5px 8px;
+  padding: 4px 6px;
   border-radius: 4px;
 }
 
@@ -2373,7 +2374,7 @@ h2 {
   opacity: 0.5;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  padding: 8px 16px 4px;
+  padding: 6px 14px 2px;
   color: var(--text);
 }
 
@@ -2399,7 +2400,7 @@ h2 {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 5px;
-  margin-bottom: 4px;
+  padding: 0 14px 6px;
 }
 
 .point-icon-btn {
@@ -2561,7 +2562,8 @@ input[type="range"]::-moz-range-progress {
 }
 
 .shape-style-actions {
-  margin-top: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
 }
 
 /* Drawing cursor feedback */
