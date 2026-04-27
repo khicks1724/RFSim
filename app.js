@@ -1072,6 +1072,15 @@ const dom = {
   mapContentsList: document.querySelector("#mapContentsList"),
   mapContentsSearchInput: document.querySelector("#mapContentsSearchInput"),
   mapContentsSearchClearBtn: document.querySelector("#mapContentsSearchClearBtn"),
+  mapGeoSearchInput: document.querySelector("#mapGeoSearchInput"),
+  mapGeoSearchClearBtn: document.querySelector("#mapGeoSearchClearBtn"),
+  workspaceAdminRow: document.querySelector("#workspaceAdminRow"),
+  workspaceAnalyticsBtn: document.querySelector("#workspaceAnalyticsBtn"),
+  analyticsModal: document.querySelector("#analyticsModal"),
+  analyticsModalCloseBtn: document.querySelector("#analyticsModalCloseBtn"),
+  analyticsSearchInput: document.querySelector("#analyticsSearchInput"),
+  analyticsSortSelect: document.querySelector("#analyticsSortSelect"),
+  analyticsRefreshBtn: document.querySelector("#analyticsRefreshBtn"),
   addMapFolderBtn: document.querySelector("#addMapFolderBtn"),
   drawShapeBtn: document.querySelector("#drawShapeBtn"),
   drawDropdown: document.querySelector("#drawDropdown"),
@@ -2093,6 +2102,8 @@ function syncWorkspaceUi() {
   dom.workspaceAuthGuest.classList.toggle("hidden", hasAccess);
   dom.workspaceAuthMember.classList.toggle("hidden", !hasAccess);
   dom.workspaceSignOutBtn.classList.toggle("hidden", !hasAccess);
+  const isAdmin = hasAccess && !guest && state.session.user?.email === "kyle.hicks@rfsim.local";
+  dom.workspaceAdminRow?.classList.toggle("hidden", !isAdmin);
 
   if (!hasAccess) {
     dom.workspaceMenuValue.textContent = "Sign In";
@@ -2188,6 +2199,7 @@ async function onWorkspaceLogin(credentials = null) {
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Signed in as ${payload.user.email}.`);
+  fireAnalyticsEvent({ event_type: "visit" });
 }
 
 async function onWorkspaceRegister(credentials = null) {
@@ -3369,6 +3381,8 @@ function wireEvents() {
   dom.mapContentsSearchClearBtn?.addEventListener("click", clearMapContentsSearch);
   updateMapContentsSearchUi();
   initGeocoderOnSearchInput();
+  initMapGeoSearch();
+  initAnalytics();
 
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
   document.querySelector("#drawPointBtn")?.addEventListener("click", (e) => { e.stopPropagation(); startDrawing("point"); });
@@ -6975,6 +6989,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     : state.ai.provider === "local-model"
       ? await callLocalModel(messages, 999999, 0.1)
       : await callGenAiMil(messages, 32000, 0.2);
+  fireAnalyticsEvent({ event_type: "ai_request", provider: state.ai.provider, model: state.ai.model });
   onStatus?.("Parsing response");
   const parsed = parseAiAssistantResponse(raw, prompt);
   return {
@@ -11454,7 +11469,6 @@ function clearMapContentsSearch() {
   }
   updateMapContentsSearchUi();
   renderMapContents();
-  hideGeocoderResults();
 }
 
 // ─── Map search geocoder ────────────────────────────────────────────────────
@@ -11462,9 +11476,10 @@ function clearMapContentsSearch() {
 let _geocoderDebounceTimer = null;
 let _geocoderActiveIndex = -1;
 let _geocoderResults = [];
+let _geocoderResultsElOverride = null;
 
 function getGeocoderResultsEl() {
-  return document.getElementById("mapSearchGeocoderResults");
+  return _geocoderResultsElOverride ?? document.getElementById("mapGeoSearchResults");
 }
 
 function hideGeocoderResults() {
@@ -11508,9 +11523,8 @@ function renderGeocoderResults(results) {
       e.preventDefault();
       navigateToGeocoderResult(_geocoderResults[Number(item.dataset.idx)]);
       hideGeocoderResults();
-      dom.mapContentsSearchInput.value = "";
-      updateMapContentsSearchUi();
-      renderMapContents();
+      const geoInput = document.getElementById("mapGeoSearchInput");
+      if (geoInput) { geoInput.value = ""; document.getElementById("mapGeoSearchClearBtn")?.classList.add("hidden"); }
     });
   });
 }
@@ -11629,38 +11643,36 @@ async function runGeocoderSearch(query) {
 }
 
 function initGeocoderOnSearchInput() {
-  const input = dom.mapContentsSearchInput;
+  // No-op — geocoder is now on the dedicated map geo search bar.
+}
+
+function initMapGeoSearch() {
+  const input = document.getElementById("mapGeoSearchInput");
+  const clearBtn = document.getElementById("mapGeoSearchClearBtn");
+  const resultsEl = document.getElementById("mapGeoSearchResults");
   if (!input) return;
 
-  // Wrap the search row in a relative-positioned container for the dropdown
-  const row = input.closest(".map-contents-search-row");
-  if (row && !row.querySelector("#mapSearchGeocoderResults")) {
-    const wrap = document.createElement("div");
-    wrap.className = "map-search-geocoder-wrap";
-    row.parentNode.insertBefore(wrap, row);
-    wrap.appendChild(row);
-    const dropdown = document.createElement("div");
-    dropdown.id = "mapSearchGeocoderResults";
-    dropdown.className = "map-search-geocoder-results";
-    dropdown.setAttribute("role", "listbox");
-    wrap.appendChild(dropdown);
-  }
+  const updateClear = () => {
+    clearBtn?.classList.toggle("hidden", !input.value.trim());
+  };
 
   input.addEventListener("input", () => {
     const val = input.value.trim();
-    // Only trigger geocoder if query doesn't match existing map contents
-    const hasContentMatch = state.mapContentsSearch && (
-      state.assets.some((a) => a.name?.toLowerCase().includes(val.toLowerCase())) ||
-      state.importedItems.some((i) => i.name?.toLowerCase().includes(val.toLowerCase()))
-    );
-    if (!val || hasContentMatch) { hideGeocoderResults(); return; }
+    updateClear();
+    if (!val) { hideGeocoderResults(); return; }
     clearTimeout(_geocoderDebounceTimer);
     _geocoderDebounceTimer = setTimeout(() => runGeocoderSearch(val), 400);
   });
 
+  clearBtn?.addEventListener("click", () => {
+    input.value = "";
+    updateClear();
+    hideGeocoderResults();
+    input.focus();
+  });
+
   input.addEventListener("keydown", (e) => {
-    const results = getGeocoderResultsEl();
-    if (!results || !_geocoderResults.length) return;
+    if (!_geocoderResults.length) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setGeocoderActiveIndex(Math.min(_geocoderActiveIndex + 1, _geocoderResults.length - 1));
@@ -11673,17 +11685,19 @@ function initGeocoderOnSearchInput() {
       navigateToGeocoderResult(_geocoderResults[_geocoderActiveIndex]);
       hideGeocoderResults();
       input.value = "";
-      updateMapContentsSearchUi();
-      renderMapContents();
+      updateClear();
     } else if (e.key === "Escape") {
       hideGeocoderResults();
+      input.blur();
     }
   });
 
   input.addEventListener("blur", () => {
-    // Small delay so mousedown on a result fires first
     setTimeout(hideGeocoderResults, 150);
   });
+
+  // Point geocoder helpers at the new results element
+  _geocoderResultsElOverride = resultsEl;
 }
 
 function setMapContentFolderId(contentId, folderId) {
@@ -16717,6 +16731,302 @@ const CanvasViewshedLayer = L.Layer.extend({
     }
   },
 });
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+function fireAnalyticsEvent(event) {
+  if (!state.session.token) return;
+  apiFetch("/analytics/event", {
+    method: "POST",
+    body: JSON.stringify(event),
+  }).catch(() => {});
+}
+
+const _analytics = {
+  data: null,
+  activeTab: "users",
+  sortCol: null,
+  sortDir: "desc",
+  filterText: "",
+};
+
+function openAnalyticsModal() {
+  dom.analyticsModal?.classList.remove("hidden");
+  fetchAndRenderAnalytics();
+}
+
+function closeAnalyticsModal() {
+  dom.analyticsModal?.classList.add("hidden");
+}
+
+async function fetchAndRenderAnalytics() {
+  try {
+    _analytics.data = await apiFetch("/admin/analytics");
+    renderAnalyticsKpis();
+    renderAnalyticsActiveTab();
+    drawAnalyticsCharts();
+  } catch (err) {
+    console.error("Analytics fetch failed:", err);
+  }
+}
+
+function renderAnalyticsKpis() {
+  const d = _analytics.data;
+  if (!d) return;
+  const totalVisits = d.users.reduce((s, u) => s + (u.visit_count || 0), 0);
+  const totalTokens = d.aiTokens.reduce((s, r) => s + (r.total_input || 0) + (r.total_output || 0), 0);
+  const totalAiReqs = d.aiTokens.reduce((s, r) => s + (r.request_count || 0), 0);
+  document.getElementById("akpiUsers").textContent = d.users.length;
+  document.getElementById("akpiVisits").textContent = totalVisits;
+  document.getElementById("akpiProjects").textContent = d.projects.length;
+  document.getElementById("akpiAiRequests").textContent = totalAiReqs;
+  document.getElementById("akpiTokens").textContent = totalTokens >= 1000
+    ? `${(totalTokens / 1000).toFixed(1)}k`
+    : totalTokens;
+}
+
+function renderAnalyticsActiveTab() {
+  const tab = _analytics.activeTab;
+  const filter = _analytics.filterText.toLowerCase();
+
+  if (tab === "users") {
+    let rows = (_analytics.data?.users ?? []).map((u) => ({
+      username: u.username ?? "",
+      created_at: u.created_at ? new Date(u.created_at).toLocaleDateString() : "",
+      visit_count: u.visit_count ?? 0,
+      project_count: u.project_count ?? 0,
+      last_seen: u.last_seen ? new Date(u.last_seen).toLocaleDateString() : "—",
+      _raw: u,
+    }));
+    if (filter) rows = rows.filter((r) => r.username.toLowerCase().includes(filter));
+    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    fillTable("analyticsUsersTable", rows, ["username", "created_at", "visit_count", "project_count", "last_seen"]);
+  } else if (tab === "ai") {
+    let rows = (_analytics.data?.aiTokens ?? []).map((r) => ({
+      username: r.username ?? "",
+      provider: r.provider ?? "",
+      model: r.model ?? "",
+      request_count: r.request_count ?? 0,
+      total_input: r.total_input ?? 0,
+      total_output: r.total_output ?? 0,
+      total: (r.total_input ?? 0) + (r.total_output ?? 0),
+    }));
+    if (filter) rows = rows.filter((r) =>
+      r.username.toLowerCase().includes(filter) ||
+      r.provider.toLowerCase().includes(filter) ||
+      r.model.toLowerCase().includes(filter)
+    );
+    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    fillTable("analyticsAiTable", rows, ["username", "provider", "model", "request_count", "total_input", "total_output", "total"]);
+  } else if (tab === "projects") {
+    let rows = (_analytics.data?.projects ?? []).map((p) => ({
+      username: p.username ?? "",
+      name: p.name ?? "",
+      created_at: p.created_at ? new Date(p.created_at).toLocaleDateString() : "",
+      updated_at: p.updated_at ? new Date(p.updated_at).toLocaleDateString() : "",
+      snapshot_count: p.snapshot_count ?? 0,
+    }));
+    if (filter) rows = rows.filter((r) =>
+      r.username.toLowerCase().includes(filter) || r.name.toLowerCase().includes(filter)
+    );
+    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    fillTable("analyticsProjectsTable", rows, ["username", "name", "created_at", "updated_at", "snapshot_count"]);
+  } else if (tab === "events") {
+    let rows = (_analytics.data?.events ?? []).map((e) => ({
+      created_at: e.created_at ? new Date(e.created_at).toLocaleString() : "",
+      username: e.username ?? "",
+      event_type: e.event_type ?? "",
+      provider: e.provider ?? "",
+      model: e.model ?? "",
+      input_tokens: e.input_tokens ?? "",
+      output_tokens: e.output_tokens ?? "",
+    }));
+    if (filter) rows = rows.filter((r) =>
+      r.username.toLowerCase().includes(filter) ||
+      r.event_type.toLowerCase().includes(filter)
+    );
+    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    fillTable("analyticsEventsTable", rows, ["created_at", "username", "event_type", "provider", "model", "input_tokens", "output_tokens"]);
+  }
+}
+
+function sortRows(rows, col, dir) {
+  if (!col) return rows;
+  return [...rows].sort((a, b) => {
+    const av = a[col] ?? "";
+    const bv = b[col] ?? "";
+    const cmp = typeof av === "number" && typeof bv === "number"
+      ? av - bv
+      : String(av).localeCompare(String(bv), undefined, { numeric: true });
+    return dir === "asc" ? cmp : -cmp;
+  });
+}
+
+function fillTable(tableId, rows, cols) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = cols.length;
+    td.textContent = "No data";
+    td.style.color = "var(--muted)";
+    td.style.textAlign = "center";
+    td.style.padding = "16px";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    for (const col of cols) {
+      const td = document.createElement("td");
+      td.textContent = row[col] === null || row[col] === undefined ? "" : row[col];
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function setAnalyticsTab(tab) {
+  _analytics.activeTab = tab;
+  _analytics.sortCol = null;
+  _analytics.sortDir = "desc";
+  document.querySelectorAll(".analytics-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+  });
+  document.querySelectorAll(".analytics-tab-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.id !== `analyticsTab${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+  });
+  updateSortSelect(tab);
+  renderAnalyticsActiveTab();
+}
+
+function updateSortSelect(tab) {
+  const sel = dom.analyticsSortSelect;
+  if (!sel) return;
+  const options = {
+    users:    [["", "Default"], ["visit_count", "Visits"], ["project_count", "Projects"], ["username", "Name"], ["created_at", "Joined"]],
+    ai:       [["", "Default"], ["total", "Total Tokens"], ["request_count", "Requests"], ["username", "Name"], ["provider", "Provider"]],
+    projects: [["", "Default"], ["updated_at", "Last Saved"], ["created_at", "Created"], ["snapshot_count", "Snapshots"], ["username", "Owner"]],
+    events:   [["", "Default"], ["created_at", "Time"], ["username", "User"], ["event_type", "Event"]],
+  };
+  sel.innerHTML = (options[tab] ?? [["", "Default"]]).map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+  sel.value = "";
+}
+
+function drawAnalyticsCharts() {
+  drawVisitSparkline();
+  drawTokenBarChart();
+}
+
+function drawVisitSparkline() {
+  const canvas = document.getElementById("analyticsVisitChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const daily = _analytics.data?.daily ?? [];
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!daily.length) return;
+  const counts = daily.map((d) => d.count ?? 0);
+  const maxVal = Math.max(1, ...counts);
+  const pad = { top: 8, bottom: 6, left: 4, right: 4 };
+  const barW = Math.max(1, (W - pad.left - pad.right) / counts.length - 1);
+  const accent = "#8fb7ff";
+  const accentFaint = "rgba(143,183,255,0.18)";
+  counts.forEach((val, i) => {
+    const x = pad.left + i * ((W - pad.left - pad.right) / counts.length);
+    const barH = ((val / maxVal) * (H - pad.top - pad.bottom));
+    const y = H - pad.bottom - barH;
+    ctx.fillStyle = val > 0 ? accent : accentFaint;
+    ctx.fillRect(x, y, barW, barH);
+  });
+}
+
+function drawTokenBarChart() {
+  const canvas = document.getElementById("analyticsTokenChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Aggregate tokens per user
+  const byUser = {};
+  for (const r of (_analytics.data?.aiTokens ?? [])) {
+    const u = r.username || "(unknown)";
+    byUser[u] = (byUser[u] || 0) + (r.total_input || 0) + (r.total_output || 0);
+  }
+  const entries = Object.entries(byUser).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (!entries.length) return;
+
+  const maxVal = Math.max(1, entries[0][1]);
+  const rowH = Math.floor((H - 4) / entries.length);
+  const colors = ["#8fb7ff", "#6ee7b7", "#fbbf24", "#f87171", "#a78bfa", "#34d399", "#fb923c", "#60a5fa"];
+
+  entries.forEach(([username, tokens], i) => {
+    const barW = Math.max(2, (tokens / maxVal) * (W - 8));
+    const y = 2 + i * rowH;
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(0, y + 1, barW, rowH - 3);
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.font = `${Math.min(10, rowH - 2)}px sans-serif`;
+    ctx.fillText(username.length > 14 ? username.slice(0, 13) + "…" : username, 4, y + rowH - 3);
+  });
+}
+
+function initAnalytics() {
+  dom.workspaceAnalyticsBtn?.addEventListener("click", () => {
+    closeWorkspaceMenu();
+    openAnalyticsModal();
+  });
+
+  dom.analyticsModalCloseBtn?.addEventListener("click", closeAnalyticsModal);
+
+  dom.analyticsModal?.addEventListener("click", (e) => {
+    if (e.target === dom.analyticsModal) closeAnalyticsModal();
+  });
+
+  dom.analyticsRefreshBtn?.addEventListener("click", fetchAndRenderAnalytics);
+
+  dom.analyticsSearchInput?.addEventListener("input", () => {
+    _analytics.filterText = dom.analyticsSearchInput.value;
+    renderAnalyticsActiveTab();
+  });
+
+  dom.analyticsSortSelect?.addEventListener("change", () => {
+    _analytics.sortCol = dom.analyticsSortSelect.value || null;
+    _analytics.sortDir = "desc";
+    renderAnalyticsActiveTab();
+  });
+
+  document.querySelectorAll(".analytics-tab").forEach((btn) => {
+    btn.addEventListener("click", () => setAnalyticsTab(btn.dataset.tab));
+  });
+
+  document.querySelectorAll(".analytics-table thead th[data-col]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (_analytics.sortCol === col) {
+        _analytics.sortDir = _analytics.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        _analytics.sortCol = col;
+        _analytics.sortDir = "desc";
+      }
+      // Update header indicators
+      const table = th.closest("table");
+      table.querySelectorAll("th[data-col]").forEach((h) => {
+        h.classList.remove("sort-asc", "sort-desc");
+      });
+      th.classList.add(_analytics.sortDir === "asc" ? "sort-asc" : "sort-desc");
+      renderAnalyticsActiveTab();
+    });
+  });
+
+  updateSortSelect("users");
+}
 
 init().catch((error) => {
   console.error(error);
