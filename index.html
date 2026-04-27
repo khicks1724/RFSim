@@ -688,6 +688,16 @@
 
     <!-- Shape-only controls -->
     <div id="shapeOnlyControls">
+      <div id="circleShapeControls" class="hidden">
+        <label class="shape-style-row">
+          Center
+          <input id="circleCenterInput" type="text" placeholder="11SNU5423234567">
+        </label>
+        <label class="shape-style-row">
+          Radius (meters)
+          <input id="circleRadiusInput" type="number" min="1" step="1" value="1000">
+        </label>
+      </div>
       <label class="shape-style-row">
         Line Style
         <select id="shapeLineStyleSelect">

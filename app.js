@@ -1086,6 +1086,9 @@ const dom = {
   shapeStyleDoneBtn: document.querySelector("#shapeStyleDoneBtn"),
   pointStyleControls: document.querySelector("#pointStyleControls"),
   shapeOnlyControls: document.querySelector("#shapeOnlyControls"),
+  circleShapeControls: document.querySelector("#circleShapeControls"),
+  circleCenterInput: document.querySelector("#circleCenterInput"),
+  circleRadiusInput: document.querySelector("#circleRadiusInput"),
   pointIconPicker: document.querySelector("#pointIconPicker"),
   pointSizeInput: document.querySelector("#pointSizeInput"),
   pointSizeValue: document.querySelector("#pointSizeValue"),
@@ -3375,6 +3378,9 @@ function wireEvents() {
   dom.shapeStyleEditVerticesBtn.addEventListener("click", onShapeStyleEditVertices);
   dom.shapeStyleDoneBtn.addEventListener("click", () => closeShapeStylePanel());
   dom.pointSizeInput?.addEventListener("input", onPointStyleChanged);
+  dom.circleCenterInput?.addEventListener("change", onCircleGeometryChanged);
+  dom.circleRadiusInput?.addEventListener("input", onCircleGeometryChanged);
+  dom.circleRadiusInput?.addEventListener("change", onCircleGeometryChanged);
   dom.pointIconPicker?.addEventListener("click", (e) => {
     const btn = e.target.closest(".point-icon-btn");
     if (!btn) return;
@@ -3602,10 +3608,13 @@ function serializeImportedItem(item) {
   // Only persist the two properties the app actually reads back — isCircle and radiusM.
   // Full GeoJSON attribute tables from imports can be enormous (100+ fields × thousands
   // of features) and are not used by any rendering or logic path after initial import.
-  const { isCircle, radiusM } = item.properties ?? {};
+  const { isCircle, radiusM, center } = item.properties ?? {};
   const properties = {};
   if (isCircle) properties.isCircle = isCircle;
   if (radiusM !== undefined) properties.radiusM = radiusM;
+  if (center && Number.isFinite(Number(center.lat)) && Number.isFinite(Number(center.lng))) {
+    properties.center = { lat: Number(center.lat), lng: Number(center.lng) };
+  }
 
   return {
     id: item.id,
@@ -13432,11 +13441,13 @@ function addDrawnFeature(feature, folderId = null) {
 function openShapeStylePanel(item, anchorEl) {
   state.draw.editingItemId = item.id;
   const isPoint = item.geometryType === "Point";
+  const isCircle = Boolean(item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM)));
 
   // Toggle point vs shape controls
   dom.pointStyleControls?.classList.toggle("hidden", !isPoint);
   dom.shapeOnlyControls?.classList.toggle("hidden", isPoint);
-  dom.shapeStyleEditVerticesBtn.style.display = isPoint ? "none" : "";
+  dom.circleShapeControls?.classList.toggle("hidden", !isCircle || isPoint);
+  dom.shapeStyleEditVerticesBtn.style.display = (isPoint || isCircle) ? "none" : "";
 
   if (isPoint) {
     const ms = normalizeDrawnPointMarkerStyle(item.markerStyle);
@@ -13460,6 +13471,22 @@ function openShapeStylePanel(item, anchorEl) {
     dom.shapeWeightValue.textContent = s.weight;
     updateRangeTrack(dom.shapeOpacityInput);
     updateRangeTrack(dom.shapeWeightInput);
+    if (isCircle) {
+      const center = getCircleCenterLatLng(item);
+      if (dom.circleCenterInput) {
+        dom.circleCenterInput.value = center
+          ? formatCoordinate(center.lat, center.lng, state.settings.coordinateSystem)
+          : "";
+        dom.circleCenterInput.placeholder = state.settings.coordinateSystem === "mgrs"
+          ? "11SNU5423234567"
+          : state.settings.coordinateSystem === "dms"
+            ? '38°53\'23"N 77°02\'10"W'
+            : "34.123456, -116.123456";
+      }
+      if (dom.circleRadiusInput) {
+        dom.circleRadiusInput.value = String(Math.max(1, Math.round(Number(item.properties?.radiusM) || 1)));
+      }
+    }
   }
 
   // Position to the right of the left panel, aligned to the item's row
@@ -13506,6 +13533,10 @@ function closeShapeStylePanel({ stopEditing = true } = {}) {
 function onShapeStyleChanged() {
   const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
   if (!item) return;
+  if (item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM))) {
+    onCircleGeometryChanged();
+    return;
+  }
   const color = dom.shapeColorInput.value;
   const lineStyle = dom.shapeLineStyleSelect.value;
   const fillOpacity = parseFloat(dom.shapeOpacityInput.value);
@@ -13517,6 +13548,44 @@ function onShapeStyleChanged() {
   item.shapeStyle = { color, fillColor, lineStyle, fillOpacity, weight };
   applyShapeStyleToLayer(item);
   item.layer.setPopupContent(renderImportedItemPopup(item));
+  saveMapState();
+  syncCesiumEntities();
+}
+
+function onCircleGeometryChanged() {
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (!item || item.geometryType !== "Polygon" || !item.properties?.isCircle) return;
+
+  const centerText = dom.circleCenterInput?.value?.trim() ?? "";
+  const parsedCenter = parseCoordinateEditorInput(centerText, state.settings.coordinateSystem);
+  const radiusM = Math.max(1, Number.parseFloat(dom.circleRadiusInput?.value ?? ""));
+  const color = dom.shapeColorInput.value;
+  const lineStyle = dom.shapeLineStyleSelect.value;
+  const fillOpacity = parseFloat(dom.shapeOpacityInput.value);
+  const weight = parseInt(dom.shapeWeightInput.value, 10);
+
+  if (!parsedCenter || !Number.isFinite(radiusM)) {
+    return;
+  }
+
+  dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}%`;
+  dom.shapeWeightValue.textContent = weight;
+
+  const previous = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType);
+  const fillColor = previous.color === color ? (previous.fillColor ?? color) : color;
+  item.shapeStyle = { color, fillColor, lineStyle, fillOpacity, weight };
+  item.properties = {
+    ...(item.properties ?? {}),
+    isCircle: true,
+    radiusM,
+    center: { lat: parsedCenter.lat, lng: parsedCenter.lng },
+  };
+
+  const coords = circleToPolygonLatLngs({ lat: parsedCenter.lat, lng: parsedCenter.lng }, radiusM);
+  item.layer.setLatLngs(coords);
+  applyShapeStyleToLayer(item);
+  item.layer.setPopupContent(renderImportedItemPopup(item));
+  renderMapContents();
   saveMapState();
   syncCesiumEntities();
 }
@@ -13990,6 +14059,18 @@ function extractGeoJsonFolderSegments(properties = {}) {
     }
   }
   return [];
+}
+
+function getCircleCenterLatLng(item) {
+  const stored = item?.properties?.center;
+  if (Number.isFinite(Number(stored?.lat)) && Number.isFinite(Number(stored?.lng))) {
+    return L.latLng(Number(stored.lat), Number(stored.lng));
+  }
+  const bounds = item?.layer?.getBounds?.();
+  if (bounds?.isValid?.()) {
+    return bounds.getCenter();
+  }
+  return null;
 }
 
 function parseGeoJsonShapeStyle(properties = {}, geometryType) {
