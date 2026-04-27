@@ -33,7 +33,9 @@ const { execSync, spawnSync } = require("child_process");
 
 const HTTP_PORT  = 8787;
 const HTTPS_PORT = 8788;
-const GENAI_URL  = "https://api.genai.mil/v1/chat/completions";
+const GENAI_BASE_URL = "https://api.genai.mil/v1";
+const GENAI_CHAT_URL = `${GENAI_BASE_URL}/chat/completions`;
+const GENAI_MODELS_URL = `${GENAI_BASE_URL}/models`;
 const CERTS_DIR  = path.join(__dirname, "certs");
 const CERT_FILE  = path.join(CERTS_DIR, "proxy.crt");
 const KEY_FILE   = path.join(CERTS_DIR, "proxy.key");
@@ -76,6 +78,12 @@ function readBody(req) {
 
 async function proxyPost(targetUrl, headers, body) {
   const res = await fetch(targetUrl, { method: "POST", headers, body });
+  const text = await res.text();
+  return { status: res.status, contentType: res.headers.get("content-type") || "application/json", text };
+}
+
+async function proxyGet(targetUrl, headers) {
+  const res = await fetch(targetUrl, { method: "GET", headers });
   const text = await res.text();
   return { status: res.status, contentType: res.headers.get("content-type") || "application/json", text };
 }
@@ -158,11 +166,31 @@ async function handleGenAiMil(req, res) {
   const bareKey = xApiKey ?? authHeader.replace(/^Bearer\s+/i, "");
 
   try {
-    const upstream = await proxyPost(GENAI_URL, {
+    const upstream = await proxyPost(GENAI_CHAT_URL, {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${bareKey}`,
       "X-Api-Key": bareKey,
     }, body);
+    res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...CORS });
+    res.end(upstream.text);
+  } catch (err) {
+    writeJson(res, 502, { error: { message: err.message || "Upstream request failed." } });
+  }
+}
+
+async function handleGenAiMilModels(req, res) {
+  const authHeader = req.headers["authorization"];
+  const xApiKey = req.headers["x-api-key"];
+  if (!authHeader && !xApiKey) {
+    return writeJson(res, 401, { error: { message: "Missing Authorization or X-Api-Key header." } });
+  }
+  const bareKey = xApiKey ?? authHeader.replace(/^Bearer\s+/i, "");
+
+  try {
+    const upstream = await proxyGet(GENAI_MODELS_URL, {
+      "Authorization": `Bearer ${bareKey}`,
+      "X-Api-Key": bareKey,
+    });
     res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...CORS });
     res.end(upstream.text);
   } catch (err) {
@@ -261,6 +289,9 @@ function createRouter(enableLocalModel) {
     if (req.method === "POST" && url === "/v1/chat/completions") {
       return handleGenAiMil(req, res);
     }
+    if (req.method === "GET" && url === "/v1/models") {
+      return handleGenAiMilModels(req, res);
+    }
 
     if (enableLocalModel) {
       if (req.method === "POST" && url === "/v1/local/chat/completions") {
@@ -281,6 +312,7 @@ function createRouter(enableLocalModel) {
 const httpServer = http.createServer(createRouter(false));
 httpServer.listen(HTTP_PORT, "127.0.0.1", () => {
   console.log(`\n🌐  GenAI.mil proxy   →  http://127.0.0.1:${HTTP_PORT}/v1/chat/completions`);
+  console.log(`🔎  Model discovery   →  http://127.0.0.1:${HTTP_PORT}/v1/models`);
 });
 
 if (LOCAL_MODEL_MODE) {

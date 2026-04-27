@@ -915,8 +915,12 @@ const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.orig
 const DEFAULT_CESIUM_ION_TOKEN = typeof window.EW_SIM_CONFIG?.cesiumIonDefaultToken === "string"
   ? window.EW_SIM_CONFIG.cesiumIonDefaultToken.trim()
   : "";
-const GENAI_MIL_ENDPOINT = "https://api.genai.mil/v1/chat/completions";
-const GENAI_MIL_PROXY_ENDPOINT = "http://127.0.0.1:8787/v1/chat/completions";
+const GENAI_MIL_BASE_URL = "https://api.genai.mil/v1";
+const GENAI_MIL_ENDPOINT = `${GENAI_MIL_BASE_URL}/chat/completions`;
+const GENAI_MIL_MODELS_ENDPOINT = `${GENAI_MIL_BASE_URL}/models`;
+const GENAI_MIL_PROXY_BASE_URL = "http://127.0.0.1:8787/v1";
+const GENAI_MIL_PROXY_ENDPOINT = `${GENAI_MIL_PROXY_BASE_URL}/chat/completions`;
+const GENAI_MIL_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_PROXY_BASE_URL}/models`;
 const LOCAL_MODEL_PROXY_ENDPOINT = "https://127.0.0.1:8788/v1/local/chat/completions";
 const LOCAL_MODEL_HEALTH_ENDPOINT = "https://127.0.0.1:8788/v1/local/health";
 const INITIAL_GUEST_SESSION = window.sessionStorage.getItem(GUEST_SESSION_STORAGE_KEY) === "1";
@@ -925,11 +929,12 @@ const AI_PROVIDER_CATALOG = {
     shortLabel: "GenAI.mil",
     keyLabel: "GenAI.mil API Key",
     keyPlaceholder: "Paste STARK_ API key",
-    defaultModel: "gemini-2.5-flash",
+    defaultModel: "gemini-3.1-pro",
     models: [
-      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-      { value: "gpt-4.1", label: "GPT-4.1" },
+      { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
+      { value: "gemini-3.1", label: "Gemini 3.1" },
     ],
+    supportsModelDiscovery: true,
   },
   anthropic: {
     shortLabel: "Claude",
@@ -1021,6 +1026,8 @@ const dom = {
   aiSavedConfigLabelInput: document.querySelector("#aiSavedConfigLabelInput"),
   aiApiKeyInput: document.querySelector("#aiApiKeyInput"),
   aiApiKeyLabelText: document.querySelector("#aiApiKeyLabelText"),
+  aiSettingsModelSelect: document.querySelector("#aiSettingsModelSelect"),
+  aiRefreshModelsBtn: document.querySelector("#aiRefreshModelsBtn"),
   aiProviderSummary: document.querySelector("#aiProviderSummary"),
   aiLocalModelSection: document.querySelector("#aiLocalModelSection"),
   aiLocalModelUrlInput: document.querySelector("#aiLocalModelUrlInput"),
@@ -1380,6 +1387,7 @@ const state = {
   ai: {
     activeConfigId: "",
     savedConfigs: [],
+    discoveredModelsByProvider: {},
     configLabel: "",
     provider: "",
     apiKey: "",
@@ -1729,11 +1737,77 @@ function getAiProviderMeta(provider) {
   return AI_PROVIDER_CATALOG[provider] ?? null;
 }
 
+function normalizeAiModelId(modelId) {
+  return String(modelId ?? "").trim();
+}
+
+function humanizeAiModelLabel(modelId) {
+  return normalizeAiModelId(modelId)
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+    .replace(/\bAi\b/g, "AI")
+    .replace(/\bMil\b/g, "mil");
+}
+
+function normalizeAiModelEntries(entries = []) {
+  const deduped = [];
+  entries.forEach((entry) => {
+    const value = normalizeAiModelId(typeof entry === "string" ? entry : entry?.value ?? entry?.id ?? entry?.model ?? entry?.name);
+    if (!value || deduped.some((model) => model.value === value)) {
+      return;
+    }
+    const label = typeof entry === "string"
+      ? humanizeAiModelLabel(value)
+      : normalizeAiModelId(entry?.label ?? entry?.display_name ?? entry?.displayName) || humanizeAiModelLabel(value);
+    deduped.push({ value, label });
+  });
+  return deduped;
+}
+
+function getDiscoveredAiProviderModels(provider) {
+  return Array.isArray(state.ai.discoveredModelsByProvider?.[provider])
+    ? state.ai.discoveredModelsByProvider[provider]
+    : [];
+}
+
 function getAiProviderModels(provider) {
+  const discovered = getDiscoveredAiProviderModels(provider);
+  if (discovered.length) {
+    return discovered;
+  }
   return getAiProviderMeta(provider)?.models ?? [];
 }
 
+function choosePreferredGenAiMilModel(models = []) {
+  const available = normalizeAiModelEntries(models);
+  if (!available.length) {
+    return "";
+  }
+  const exactPreferences = ["gemini-3.1-pro", "gemini-3.1"];
+  for (const preference of exactPreferences) {
+    const exact = available.find((model) => model.value.toLowerCase() === preference);
+    if (exact) {
+      return exact.value;
+    }
+  }
+  const regexPreferences = [
+    /gemini[-_]?3(?:\.|-)?1.*pro/i,
+    /gemini[-_]?3(?:\.|-)?1/i,
+    /gemini/i,
+  ];
+  for (const pattern of regexPreferences) {
+    const match = available.find((model) => pattern.test(model.value));
+    if (match) {
+      return match.value;
+    }
+  }
+  return available[0]?.value ?? "";
+}
+
 function getDefaultAiModel(provider) {
+  if (provider === "genai-mil") {
+    return choosePreferredGenAiMilModel(getAiProviderModels(provider)) || getAiProviderMeta(provider)?.defaultModel || "";
+  }
   return getAiProviderMeta(provider)?.defaultModel ?? "";
 }
 
@@ -1748,6 +1822,10 @@ function ensureAiModelForProvider(provider, model = "") {
 
 function getAiModelLabel(provider, model) {
   return getAiProviderModels(provider).find((entry) => entry.value === model)?.label ?? model ?? "";
+}
+
+function setDiscoveredAiProviderModels(provider, entries = []) {
+  state.ai.discoveredModelsByProvider[provider] = normalizeAiModelEntries(entries);
 }
 
 function getAiProviderLabel(provider) {
@@ -1880,28 +1958,33 @@ function renderAiSavedConfigOptions() {
     : "";
 }
 
-function renderAiModelOptions() {
-  if (!dom.aiChatModelSelect) {
+function renderAiModelSelect(selectEl, { emptyLabel = "No model available" } = {}) {
+  if (!selectEl) {
     return;
   }
   const isLocal = getAiProviderMeta(state.ai.provider)?.isLocalModel;
   if (isLocal) {
-    // For local models the model name is free-form — show a single editable option
+    // For local models the model name is free-form — show a single editable option.
     const modelName = state.ai.apiKey.trim() || state.ai.model.trim() || "default";
-    dom.aiChatModelSelect.innerHTML = `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`;
-    dom.aiChatModelSelect.value = modelName;
+    selectEl.innerHTML = `<option value="${escapeHtml(modelName)}">${escapeHtml(modelName)}</option>`;
+    selectEl.value = modelName;
     return;
   }
   const models = getAiProviderModels(state.ai.provider);
   if (!models.length) {
-    dom.aiChatModelSelect.innerHTML = '<option value="">No model available</option>';
-    dom.aiChatModelSelect.value = "";
+    selectEl.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
+    selectEl.value = "";
     return;
   }
-  dom.aiChatModelSelect.innerHTML = models
+  selectEl.innerHTML = models
     .map((model) => `<option value="${escapeHtml(model.value)}">${escapeHtml(model.label)}</option>`)
     .join("");
-  dom.aiChatModelSelect.value = ensureAiModelForProvider(state.ai.provider, state.ai.model);
+  selectEl.value = ensureAiModelForProvider(state.ai.provider, state.ai.model);
+}
+
+function renderAiModelOptions() {
+  renderAiModelSelect(dom.aiChatModelSelect);
+  renderAiModelSelect(dom.aiSettingsModelSelect, { emptyLabel: "Auto-select after key validation" });
 }
 
 async function syncAiProviderSettingsToServer() {
@@ -3481,6 +3564,8 @@ function wireEvents() {
   dom.aiLocalModelUrlInput?.addEventListener("change", onLocalModelUrlChanged);
   dom.aiLocalModelDetectBtn?.addEventListener("click", onLocalModelDetect);
   dom.aiLocalModelPicker?.addEventListener("change", onLocalModelPickerChanged);
+  dom.aiSettingsModelSelect?.addEventListener("change", onAiModelChanged);
+  dom.aiRefreshModelsBtn?.addEventListener("click", onAiRefreshModels);
   dom.saveAiProviderBtn.addEventListener("click", saveAiProvider);
   dom.deleteAiProviderBtn?.addEventListener("click", deleteAiProvider);
   dom.testAiConnectionBtn.addEventListener("click", testAiProviderConnection);
@@ -4804,11 +4889,16 @@ async function onAiProviderChanged() {
   if (!isLocal) {
     state.ai.apiKey = dom.aiApiKeyInput.value.trim();
   }
+  if (newProvider === "genai-mil") {
+    setDiscoveredAiProviderModels("genai-mil", []);
+  }
   state.ai.model = ensureAiModelForProvider(state.ai.provider, state.ai.model);
   state.ai.status = "offline";
   state.ai.statusMessage = isLocal
     ? "Click Detect to find available local models, then select one and Test Connection."
-    : "Enter your API key and test the connection.";
+    : newProvider === "genai-mil"
+      ? "Enter your GenAI.mil key to load the models available to that key."
+      : "Enter your API key and test the connection.";
   persistAiProviderSettings();
   syncAiUi();
   if (state.ai.provider && (state.ai.apiKey || isLocal)) {
@@ -4870,6 +4960,32 @@ function onLocalModelPickerChanged() {
   renderAiModelOptions();
   if (dom.aiChatModelSelect) dom.aiChatModelSelect.value = selected;
   persistAiProviderSettings();
+}
+
+async function onAiRefreshModels() {
+  if (state.ai.provider !== "genai-mil") {
+    return;
+  }
+  if (!state.ai.apiKey) {
+    state.ai.status = "error";
+    state.ai.statusMessage = "Enter a GenAI.mil API key before refreshing models.";
+    syncAiUi();
+    return;
+  }
+
+  state.ai.status = "testing";
+  state.ai.statusMessage = "Loading models available to this GenAI.mil key...";
+  syncAiUi();
+  try {
+    const models = await ensureGenAiMilModelsLoaded({ forceRefresh: true, returnModels: true });
+    state.ai.status = "pending";
+    state.ai.statusMessage = `Loaded ${models.length} model${models.length === 1 ? "" : "s"} for this GenAI.mil key.`;
+  } catch (error) {
+    state.ai.status = "error";
+    state.ai.statusMessage = error.message;
+  }
+  persistAiProviderSettings();
+  syncAiUi();
 }
 
 function populateLocalModelPicker(models) {
@@ -4973,8 +5089,12 @@ function deleteAiProvider() {
   syncAiUi();
 }
 
-function onAiModelChanged() {
-  state.ai.model = ensureAiModelForProvider(state.ai.provider, dom.aiChatModelSelect.value);
+function onAiModelChanged(event) {
+  const selectedModel = event?.target?.value
+    ?? dom.aiSettingsModelSelect?.value
+    ?? dom.aiChatModelSelect?.value
+    ?? "";
+  state.ai.model = ensureAiModelForProvider(state.ai.provider, selectedModel);
   syncActiveAiConfigFromDraft();
   persistAiProviderSettings();
   syncAiUi();
@@ -5097,6 +5217,12 @@ function syncAiUi() {
   const sendEnabled = actionButtonsEnabled;
   if (dom.aiChatModelSelect) {
     dom.aiChatModelSelect.disabled = !state.ai.provider || state.ai.status === "testing";
+  }
+  if (dom.aiSettingsModelSelect) {
+    dom.aiSettingsModelSelect.disabled = !state.ai.provider || state.ai.status === "testing";
+  }
+  if (dom.aiRefreshModelsBtn) {
+    dom.aiRefreshModelsBtn.disabled = state.ai.provider !== "genai-mil" || !state.ai.apiKey || state.ai.status === "testing";
   }
   if (dom.saveAiProviderBtn) {
     dom.saveAiProviderBtn.disabled = !state.ai.provider || (!isLocalModel && !state.ai.apiKey);
@@ -6548,6 +6674,100 @@ function isGenAiMilKey(key) {
   return key.startsWith("STARK_") || key.startsWith("STARK-");
 }
 
+function parseGenAiMilApiError(status, bodyText, fallbackMessage) {
+  if (bodyText.startsWith("<!doctype") || bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")) {
+    if (status === 401 || status === 403) {
+      return new Error(`GenAI.mil authentication failed (HTTP ${status}). Check your STARK API key and network access.`);
+    }
+    return new Error(`GenAI.mil may only be reachable from approved networks. HTTP ${status}.`);
+  }
+  try {
+    const parsedError = JSON.parse(bodyText);
+    const message = parsedError?.error?.message || parsedError?.message;
+    const unlockUrl = parsedError?.error?.unlock_url;
+    if (message && unlockUrl) {
+      return new Error(`GenAI.mil (${status}): ${message} Unlock URL: ${unlockUrl}`);
+    }
+    if (message) {
+      return new Error(`GenAI.mil (${status}): ${message}`);
+    }
+  } catch {}
+  return new Error(fallbackMessage);
+}
+
+function parseGenAiMilModelsPayload(payload) {
+  const rawModels = Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload?.models)
+      ? payload.models
+      : [];
+  return normalizeAiModelEntries(rawModels.map((entry) => ({
+    value: entry?.id ?? entry?.model ?? entry?.name ?? entry,
+    label: entry?.display_name ?? entry?.displayName ?? entry?.label,
+  })));
+}
+
+async function callGenAiMilModelsEndpoint(url, apiKey) {
+  return await fetch(url, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "X-Api-Key": apiKey,
+    },
+  });
+}
+
+async function fetchGenAiMilModelsFrom(url, apiKey) {
+  const response = await callGenAiMilModelsEndpoint(url, apiKey);
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil model discovery failed (HTTP ${response.status}).`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    throw new Error("GenAI.mil returned a non-JSON model list.");
+  }
+  const models = parseGenAiMilModelsPayload(parsed);
+  if (!models.length) {
+    throw new Error("GenAI.mil returned no usable models for this key.");
+  }
+  return models;
+}
+
+async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels = false } = {}) {
+  const cachedModels = getDiscoveredAiProviderModels("genai-mil");
+  if (!forceRefresh && cachedModels.length) {
+    state.ai.model = ensureAiModelForProvider("genai-mil", state.ai.model);
+    return returnModels ? cachedModels : state.ai.model;
+  }
+
+  let models;
+  try {
+    models = await fetchGenAiMilModelsFrom(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      try {
+        models = await fetchGenAiMilModelsFrom(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
+        state.ai.statusMessage = "GenAI.mil model discovery succeeded through the local proxy on 127.0.0.1:8787.";
+      } catch (proxyError) {
+        if (proxyError instanceof TypeError) {
+          throw new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
+        }
+        throw proxyError;
+      }
+    } else {
+      throw error;
+    }
+  }
+
+  setDiscoveredAiProviderModels("genai-mil", models);
+  state.ai.model = ensureAiModelForProvider("genai-mil", state.ai.model || choosePreferredGenAiMilModel(models));
+  syncAiUi();
+  return returnModels ? models : state.ai.model;
+}
+
 async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
   const { provider, apiKey } = state.ai;
 
@@ -6559,13 +6779,15 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
       return;
     }
     state.ai.status = "testing";
-    state.ai.statusMessage = "Testing GenAI.mil access. If direct access is blocked, the app will try the local proxy on 127.0.0.1:8787.";
+    state.ai.statusMessage = "Loading GenAI.mil models for this key, then validating the selected model. If direct access is blocked, the app will try the local proxy on 127.0.0.1:8787.";
     syncAiUi();
     try {
+      const models = await ensureGenAiMilModelsLoaded({ forceRefresh: true, returnModels: true });
       const text = await callGenAiMil([{ role: "user", content: "Reply with READY only." }], 16, 0);
       if (!/READY/i.test(text)) throw new Error("GenAI.mil returned an unexpected validation response.");
       state.ai.status = "ready";
-      state.ai.statusMessage = "GenAI.mil connected. AI chat is enabled.";
+      const selectedModel = ensureAiModelForProvider("genai-mil", state.ai.model);
+      state.ai.statusMessage = `GenAI.mil connected with ${selectedModel}. ${models.length} model${models.length === 1 ? "" : "s"} available to this key.`;
       syncAiUi();
       if (openPanelOnSuccess) {
         openAiPanel();
@@ -7002,8 +7224,9 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
 }
 
 async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
+  const selectedModel = await ensureGenAiMilModelsLoaded();
   const payload = {
-    model: ensureAiModelForProvider("genai-mil", state.ai.model),
+    model: selectedModel,
     messages,
     max_tokens: maxTokens,
     temperature,
@@ -7030,24 +7253,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
 
   const bodyText = await response.text();
   if (!response.ok) {
-    if (bodyText.startsWith("<!doctype") || bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Error(`GenAI.mil authentication failed (HTTP ${response.status}). Check your STARK API key and network access.`);
-      }
-      throw new Error(`GenAI.mil may only be reachable from approved networks. HTTP ${response.status}.`);
-    }
-    try {
-      const parsedError = JSON.parse(bodyText);
-      const message = parsedError?.error?.message || parsedError?.message;
-      if (message) {
-        throw new Error(`GenAI.mil (${response.status}): ${message}`);
-      }
-    } catch (parseError) {
-      if (parseError.message.startsWith("GenAI.mil")) {
-        throw parseError;
-      }
-    }
-    throw new Error(`GenAI.mil request failed (HTTP ${response.status}).`);
+    throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil request failed (HTTP ${response.status}).`);
   }
 
   let parsed;
