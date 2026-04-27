@@ -89,6 +89,43 @@ const aiConfigListSchema = z.object({
   configs: z.array(aiConfigItemSchema).default([])
 });
 
+const aiGenAiMilModelsSchema = z.object({
+  apiKey: z.string().min(1).max(4096)
+});
+
+const aiGenAiMilChatSchema = z.object({
+  apiKey: z.string().min(1).max(4096),
+  model: z.string().min(1).max(200),
+  messages: z.array(z.any()).min(1),
+  max_tokens: z.number().int().positive().max(200000).optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  stream: z.boolean().optional()
+});
+
+const GENAI_MIL_BASE_URL = "https://api.genai.mil/v1";
+
+async function relayGenAiMil(response, upstreamUrl, { apiKey, body, method = "POST" }) {
+  try {
+    const upstream = await fetch(upstreamUrl, {
+      method,
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+
+    const text = await upstream.text();
+    response.status(upstream.status);
+    if (upstream.headers.get("content-type")) {
+      response.set("Content-Type", upstream.headers.get("content-type"));
+    }
+    response.send(text);
+  } catch (error) {
+    response.status(502).json({ error: error.message || "GenAI.mil relay request failed." });
+  }
+}
+
 app.get("/api/health", async (_request, response) => {
   try {
     await query("select 1");
@@ -248,6 +285,33 @@ app.put("/api/user/ai-configs", authRequired, async (request, response) => {
   } finally {
     client.release();
   }
+});
+
+app.post("/api/ai/genai-mil/models", authRequired, async (request, response) => {
+  const parsed = aiGenAiMilModelsSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  await relayGenAiMil(response, `${GENAI_MIL_BASE_URL}/models`, {
+    apiKey: parsed.data.apiKey,
+    method: "GET",
+  });
+});
+
+app.post("/api/ai/genai-mil/chat/completions", authRequired, async (request, response) => {
+  const parsed = aiGenAiMilChatSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  await relayGenAiMil(response, `${GENAI_MIL_BASE_URL}/chat/completions`, {
+    apiKey: parsed.data.apiKey,
+    body: parsed.data,
+    method: "POST",
+  });
 });
 
 app.get("/api/projects", authRequired, async (request, response) => {

@@ -161,6 +161,8 @@ If you want, I can make that repo change next.
 - Do not expose admin-grade AI provider keys in the browser.
 - Route AI provider traffic through the backend for production use.
 
+GenAI.mil requests in the deployed app should now flow through the existing same-origin backend API (`/api/ai/genai-mil/models` and `/api/ai/genai-mil/chat/completions`). This avoids browser CORS and localhost proxy issues when using Chrome on the EC2-hosted site.
+
 ## Current Backend Scope
 
 The backend currently provides:

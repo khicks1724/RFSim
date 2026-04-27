@@ -182,7 +182,7 @@ Enter your API key in the settings panel. GenAI.mil keys start with `STARK_`. If
 node genai-proxy.js
 ```
 
-For GenAI.mil, the app now queries `/v1/models` for the selected key, populates the model dropdown in Settings, and prefers `gemini-3.1-pro` or `gemini-3.1` when those are available. The app will automatically fall back to the proxy at `http://127.0.0.1:8787` when direct access fails.
+For GenAI.mil, the app now queries `/v1/models` for the selected key, populates the model dropdown in Settings, and prefers `gemini-3.1-pro` or `gemini-3.1` when those are available. In hosted deployments, GenAI.mil traffic is routed through the app backend under `/api/ai/genai-mil/*` so the browser does not need direct access to the provider. The local proxy at `http://127.0.0.1:8787` remains a fallback for browser-only local runs.
 
 ### Local Model (Ollama / LM Studio / llama.cpp)
 

@@ -912,6 +912,8 @@ const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
 const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
 const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
 const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
+const GENAI_MIL_BACKEND_MODELS_PATH = "/ai/genai-mil/models";
+const GENAI_MIL_BACKEND_CHAT_PATH = "/ai/genai-mil/chat/completions";
 const DEFAULT_CESIUM_ION_TOKEN = typeof window.EW_SIM_CONFIG?.cesiumIonDefaultToken === "string"
   ? window.EW_SIM_CONFIG.cesiumIonDefaultToken.trim()
   : "";
@@ -1947,8 +1949,7 @@ function renderAiSavedConfigOptions() {
     ? [
         '<option value="">Select saved key</option>',
         ...state.ai.savedConfigs.map((config) => {
-          const modelLabel = getAiModelLabel(config.provider, config.model);
-          return `<option value="${escapeHtml(config.id)}">${escapeHtml(`${getAiSavedConfigDisplayLabel(config)} | ${modelLabel}`)}</option>`;
+          return `<option value="${escapeHtml(config.id)}">${escapeHtml(getAiSavedConfigDisplayLabel(config))}</option>`;
         }),
       ]
     : ['<option value="">No saved keys</option>'];
@@ -6712,7 +6713,6 @@ async function callGenAiMilModelsEndpoint(url, apiKey) {
     method: "GET",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
-      "X-Api-Key": apiKey,
     },
   });
 }
@@ -6736,6 +6736,18 @@ async function fetchGenAiMilModelsFrom(url, apiKey) {
   return models;
 }
 
+async function fetchGenAiMilModelsFromBackend(apiKey) {
+  const payload = await apiFetch(GENAI_MIL_BACKEND_MODELS_PATH, {
+    method: "POST",
+    body: JSON.stringify({ apiKey }),
+  });
+  const models = parseGenAiMilModelsPayload(payload);
+  if (!models.length) {
+    throw new Error("GenAI.mil returned no usable models for this key.");
+  }
+  return models;
+}
+
 async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels = false } = {}) {
   const cachedModels = getDiscoveredAiProviderModels("genai-mil");
   if (!forceRefresh && cachedModels.length) {
@@ -6744,21 +6756,31 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
   }
 
   let models;
-  try {
-    models = await fetchGenAiMilModelsFrom(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      try {
+  let backendError = null;
+  if (state.session.token) {
+    try {
+      models = await fetchGenAiMilModelsFromBackend(state.ai.apiKey);
+    } catch (error) {
+      backendError = error;
+    }
+  }
+  if (!models) {
+    try {
+      models = await fetchGenAiMilModelsFrom(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        try {
         models = await fetchGenAiMilModelsFrom(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
         state.ai.statusMessage = "GenAI.mil model discovery succeeded through the local proxy on 127.0.0.1:8787.";
-      } catch (proxyError) {
-        if (proxyError instanceof TypeError) {
-          throw new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
+        } catch (proxyError) {
+          if (proxyError instanceof TypeError) {
+            throw backendError ?? new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
+          }
+          throw proxyError;
         }
-        throw proxyError;
+      } else {
+        throw error;
       }
-    } else {
-      throw error;
     }
   }
 
@@ -7232,6 +7254,25 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
     temperature,
   };
 
+  if (state.session.token) {
+    try {
+      const parsed = await apiFetch(GENAI_MIL_BACKEND_CHAT_PATH, {
+        method: "POST",
+        body: JSON.stringify({
+          apiKey: state.ai.apiKey,
+          ...payload,
+        }),
+      });
+      const content = parsed?.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error("GenAI.mil returned an empty completion.");
+      }
+      return content;
+    } catch (error) {
+      // Fall back to direct access for browser-only/local modes.
+    }
+  }
+
   let response;
   try {
     response = await callGenAiMilEndpoint(GENAI_MIL_ENDPOINT, state.ai.apiKey, payload);
@@ -7275,7 +7316,6 @@ async function callGenAiMilEndpoint(url, apiKey, payload) {
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${apiKey}`,
-      "X-Api-Key": apiKey,
     },
     body: JSON.stringify(payload),
   });

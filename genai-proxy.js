@@ -169,7 +169,6 @@ async function handleGenAiMil(req, res) {
     const upstream = await proxyPost(GENAI_CHAT_URL, {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${bareKey}`,
-      "X-Api-Key": bareKey,
     }, body);
     res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...CORS });
     res.end(upstream.text);
@@ -189,7 +188,6 @@ async function handleGenAiMilModels(req, res) {
   try {
     const upstream = await proxyGet(GENAI_MODELS_URL, {
       "Authorization": `Bearer ${bareKey}`,
-      "X-Api-Key": bareKey,
     });
     res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...CORS });
     res.end(upstream.text);
