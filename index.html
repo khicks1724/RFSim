@@ -661,22 +661,23 @@
 
   <div id="shapeStyleModal" class="shape-style-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="shapeStyleTitle">
   <div id="shapeStylePanel" class="shape-style-panel shape-style-modal" aria-label="Shape style editor">
+
     <div class="shape-style-modal-header">
-      <div id="shapeStyleTitle" class="shape-style-panel-title">Edit Shape</div>
+      <span id="shapeStyleTitle" class="shape-style-panel-title">Edit Shape</span>
       <button id="shapeStyleCloseBtn" class="icon-button ghost-button" type="button" aria-label="Close">&#10005;</button>
     </div>
 
-    <div class="shape-modal-body">
+    <div class="shape-style-body">
 
-      <!-- Color — shared -->
-      <div class="sf-row sf-row--inline">
-        <label class="sf-label" for="shapeColorInput">Color</label>
-        <input id="shapeColorInput" type="color" value="#3b82f6" class="sf-color">
-      </div>
+      <!-- Color — shared by point + shape -->
+      <label class="shape-param-label">
+        <span>Color</span>
+        <input id="shapeColorInput" type="color" value="#3b82f6" class="shape-color-input">
+      </label>
 
       <!-- Point-only controls -->
       <div id="pointStyleControls" class="hidden">
-        <div class="sf-section-label">Icon</div>
+        <div class="shape-section-divider">Icon</div>
         <div id="pointIconPicker" class="point-icon-picker">
           <button class="point-icon-btn active" data-icon="dot" title="Dot" type="button"></button>
           <button class="point-icon-btn" data-icon="ring" title="Ring" type="button"></button>
@@ -687,63 +688,65 @@
           <button class="point-icon-btn" data-icon="plus" title="Plus" type="button"></button>
           <button class="point-icon-btn" data-icon="star" title="Star" type="button"></button>
         </div>
-        <div class="sf-row sf-row--slider">
-          <div class="sf-row-top">
-            <label class="sf-label" for="pointSizeInput">Size</label>
-            <span class="sf-value"><span id="pointSizeValue">24</span> px</span>
+        <label class="shape-param-label">
+          <span>Size</span>
+          <div class="shape-slider-field">
+            <input id="pointSizeInput" type="range" min="8" max="40" step="2" value="24">
+            <span class="shape-slider-value"><span id="pointSizeValue">24</span> px</span>
           </div>
-          <input id="pointSizeInput" type="range" min="8" max="40" step="2" value="24" class="sf-slider">
-        </div>
+        </label>
       </div>
 
       <!-- Shape-only controls -->
       <div id="shapeOnlyControls">
+
         <div id="circleShapeControls" class="hidden">
-          <div class="sf-row sf-row--stacked">
-            <label class="sf-label" for="circleCenterInput">Center</label>
-            <input id="circleCenterInput" type="text" placeholder="11SNU5423234567" class="sf-input">
-          </div>
-          <div class="sf-row sf-row--stacked">
-            <label class="sf-label" for="circleRadiusInput">Radius (meters)</label>
-            <input id="circleRadiusInput" type="number" min="1" step="1" value="1000" class="sf-input">
-          </div>
-          <div class="sf-row sf-row--inline">
+          <label class="shape-param-label">
+            <span>Center</span>
+            <input id="circleCenterInput" type="text" placeholder="11SNU5423234567">
+          </label>
+          <label class="shape-param-label">
+            <span>Radius (meters)</span>
+            <input id="circleRadiusInput" type="number" min="1" step="1" value="1000">
+          </label>
+          <div class="shape-param-label">
             <button id="circleRelocateBtn" type="button" class="ghost-button small">Relocate Center</button>
           </div>
         </div>
 
-        <div class="sf-row sf-row--stacked">
-          <label class="sf-label" for="shapeLineStyleSelect">Line Style</label>
-          <select id="shapeLineStyleSelect" class="sf-select">
+        <label class="shape-param-label">
+          <span>Line Style</span>
+          <select id="shapeLineStyleSelect">
             <option value="solid">Solid</option>
             <option value="dashed">Dashed</option>
             <option value="dotted">Dotted</option>
           </select>
-        </div>
+        </label>
 
-        <div class="sf-row sf-row--slider">
-          <div class="sf-row-top">
-            <label class="sf-label" for="shapeOpacityInput">Fill Opacity</label>
-            <span class="sf-value"><span id="shapeOpacityValue">35</span>%</span>
+        <label class="shape-param-label">
+          <span>Fill Opacity</span>
+          <div class="shape-slider-field">
+            <input id="shapeOpacityInput" type="range" min="0" max="1" step="0.05" value="0.35">
+            <span class="shape-slider-value"><span id="shapeOpacityValue">35</span>%</span>
           </div>
-          <input id="shapeOpacityInput" type="range" min="0" max="1" step="0.05" value="0.35" class="sf-slider">
-        </div>
+        </label>
 
-        <div class="sf-row sf-row--slider">
-          <div class="sf-row-top">
-            <label class="sf-label" for="shapeWeightInput">Line Width</label>
-            <span class="sf-value"><span id="shapeWeightValue">2</span> px</span>
+        <label class="shape-param-label">
+          <span>Line Width</span>
+          <div class="shape-slider-field">
+            <input id="shapeWeightInput" type="range" min="1" max="10" step="1" value="2">
+            <span class="shape-slider-value"><span id="shapeWeightValue">2</span> px</span>
           </div>
-          <input id="shapeWeightInput" type="range" min="1" max="10" step="1" value="2" class="sf-slider">
-        </div>
+        </label>
+
       </div>
+    </div>
 
-    </div><!-- /.shape-modal-body -->
-
-    <div class="shape-modal-footer button-row">
+    <div class="shape-style-footer button-row">
       <button id="shapeStyleEditVerticesBtn" type="button" class="ghost-button small">Edit Vertices</button>
       <button id="shapeStyleDoneBtn" type="button" class="primary-button small">Done</button>
     </div>
+
   </div>
   </div>
 
