@@ -6732,6 +6732,9 @@ function summarizeGenAiMilErrors(errors, fallbackMessage) {
 }
 
 function shouldPreferHostedGenAiMilSiteProxy() {
+  if (state.session.token) {
+    return false;
+  }
   const { protocol, hostname } = window.location;
   if (!/^https?:$/.test(protocol)) {
     return false;
