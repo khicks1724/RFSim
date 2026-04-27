@@ -918,8 +918,11 @@ const DEFAULT_CESIUM_ION_TOKEN = typeof window.EW_SIM_CONFIG?.cesiumIonDefaultTo
   ? window.EW_SIM_CONFIG.cesiumIonDefaultToken.trim()
   : "";
 const GENAI_MIL_BASE_URL = "https://api.genai.mil/v1";
+const GENAI_MIL_SITE_PROXY_BASE_URL = `${window.location.origin}/genai-mil/v1`;
 const GENAI_MIL_ENDPOINT = `${GENAI_MIL_BASE_URL}/chat/completions`;
 const GENAI_MIL_MODELS_ENDPOINT = `${GENAI_MIL_BASE_URL}/models`;
+const GENAI_MIL_SITE_PROXY_ENDPOINT = `${GENAI_MIL_SITE_PROXY_BASE_URL}/chat/completions`;
+const GENAI_MIL_SITE_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_SITE_PROXY_BASE_URL}/models`;
 const GENAI_MIL_PROXY_BASE_URL = "http://127.0.0.1:8787/v1";
 const GENAI_MIL_PROXY_ENDPOINT = `${GENAI_MIL_PROXY_BASE_URL}/chat/completions`;
 const GENAI_MIL_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_PROXY_BASE_URL}/models`;
@@ -6711,6 +6714,14 @@ function parseGenAiMilModelsPayload(payload) {
   })));
 }
 
+function shouldPreferHostedGenAiMilSiteProxy() {
+  const { protocol, hostname } = window.location;
+  if (!/^https?:$/.test(protocol)) {
+    return false;
+  }
+  return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1";
+}
+
 async function callGenAiMilModelsEndpoint(url, apiKey) {
   return await fetch(url, {
     method: "GET",
@@ -6759,8 +6770,16 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
   }
 
   let models;
+  let siteProxyError = null;
+  if (shouldPreferHostedGenAiMilSiteProxy()) {
+    try {
+      models = await fetchGenAiMilModelsFrom(GENAI_MIL_SITE_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
+    } catch (error) {
+      siteProxyError = error;
+    }
+  }
   let backendError = null;
-  if (state.session.token) {
+  if (!models && state.session.token) {
     try {
       models = await fetchGenAiMilModelsFromBackend(state.ai.apiKey);
     } catch (error) {
@@ -6777,7 +6796,7 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
         state.ai.statusMessage = "GenAI.mil model discovery succeeded through the local proxy on 127.0.0.1:8787.";
         } catch (proxyError) {
           if (proxyError instanceof TypeError) {
-            throw backendError ?? new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
+            throw siteProxyError ?? backendError ?? new Error("Browser access to GenAI.mil is blocked, and the local proxy at 127.0.0.1:8787 is not reachable. Start the proxy with: node genai-proxy.js");
           }
           throw proxyError;
         }
@@ -7256,6 +7275,24 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
     max_tokens: maxTokens,
     temperature,
   };
+
+  if (shouldPreferHostedGenAiMilSiteProxy()) {
+    try {
+      const response = await callGenAiMilEndpoint(GENAI_MIL_SITE_PROXY_ENDPOINT, state.ai.apiKey, payload);
+      const bodyText = await response.text();
+      if (!response.ok) {
+        throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil request failed (HTTP ${response.status}).`);
+      }
+      const parsed = JSON.parse(bodyText);
+      const content = parsed?.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error("GenAI.mil returned an empty completion.");
+      }
+      return content;
+    } catch (error) {
+      // Fall through to backend relay and browser-direct paths.
+    }
+  }
 
   if (state.session.token) {
     try {
