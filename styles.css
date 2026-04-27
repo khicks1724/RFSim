@@ -2246,7 +2246,7 @@ h2 {
 }
 
 .shape-style-panel {
-  display: contents;
+  /* intentionally empty — layout is on .shape-style-modal */
 }
 
 .shape-style-modal-header {
@@ -2274,6 +2274,14 @@ h2 {
   flex-direction: column;
   gap: 14px;
   padding: 18px;
+}
+
+#shapeOnlyControls,
+#circleShapeControls,
+#pointStyleControls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .shape-style-footer {
