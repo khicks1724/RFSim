@@ -12662,6 +12662,13 @@ function renderImportedPointPopup(item) {
   const latLng = item?.layer?.getLatLng?.();
   const markerStyle = normalizeDrawnPointMarkerStyle(item.markerStyle);
   const dragging = Boolean(item?.layer?.dragging?.enabled?.());
+  const coordinateSystem = state.settings.coordinateSystem;
+  const coordinateLabel = coordinateSystem === "mgrs" ? "Grid" : coordinateSystem === "dms" ? "Position (DMS)" : "Position (Lat/Lon)";
+  const coordinatePlaceholder = coordinateSystem === "mgrs"
+    ? "11SNU5423234567"
+    : coordinateSystem === "dms"
+      ? '38°53\'23"N 77°02\'10"W'
+      : "34.123456, -116.123456";
   const iconButtons = POINT_ICONS.map((icon) => `
     <button
       type="button"
@@ -12670,7 +12677,7 @@ function renderImportedPointPopup(item) {
       data-icon="${escapeHtml(icon)}"
       title="${escapeHtml(icon)}"
       aria-label="${escapeHtml(icon)}"
-    >${buildDrawnPointSvg(icon, markerStyle.color, 18)}</button>
+    >${buildDrawnPointSvg(icon, markerStyle.color, 18, markerStyle.outlineColor, markerStyle.outlineWidth)}</button>
   `).join("");
   return `
     <div class="point-edit-popup" data-item-id="${escapeHtml(item.id)}">
@@ -12679,16 +12686,10 @@ function renderImportedPointPopup(item) {
         <span>Name</span>
         <input type="text" data-point-field="name" value="${escapeHtml(item.name ?? "")}">
       </label>
-      <div class="point-edit-popup-grid">
-        <label class="point-edit-popup-row">
-          <span>Latitude</span>
-          <input type="number" data-point-field="lat" step="0.000001" value="${Number.isFinite(latLng?.lat) ? latLng.lat.toFixed(6) : ""}">
-        </label>
-        <label class="point-edit-popup-row">
-          <span>Longitude</span>
-          <input type="number" data-point-field="lng" step="0.000001" value="${Number.isFinite(latLng?.lng) ? latLng.lng.toFixed(6) : ""}">
-        </label>
-      </div>
+      <label class="point-edit-popup-row">
+        <span>${coordinateLabel}</span>
+        <input type="text" data-point-field="position" value="${Number.isFinite(latLng?.lat) && Number.isFinite(latLng?.lng) ? escapeHtml(formatCoordinate(latLng.lat, latLng.lng, coordinateSystem)) : ""}" placeholder="${escapeHtml(coordinatePlaceholder)}">
+      </label>
       <div class="point-edit-popup-grid point-edit-popup-grid-compact">
         <label class="point-edit-popup-row">
           <span>Color</span>
@@ -12697,6 +12698,16 @@ function renderImportedPointPopup(item) {
         <label class="point-edit-popup-row">
           <span>Size</span>
           <input type="number" data-point-field="size" min="8" max="40" step="2" value="${markerStyle.size}">
+        </label>
+      </div>
+      <div class="point-edit-popup-grid point-edit-popup-grid-compact">
+        <label class="point-edit-popup-row">
+          <span>Outline</span>
+          <input type="color" data-point-field="outlineColor" value="${escapeHtml(markerStyle.outlineColor)}">
+        </label>
+        <label class="point-edit-popup-row">
+          <span>Outline Width</span>
+          <input type="number" data-point-field="outlineWidth" min="0" max="8" step="1" value="${markerStyle.outlineWidth}">
         </label>
       </div>
       <div class="point-edit-popup-row">
@@ -12779,18 +12790,18 @@ function applyPointPopupEdits(itemId, root) {
   }
 
   const name = root.querySelector('[data-point-field="name"]')?.value?.trim() ?? "";
-  const lat = Number.parseFloat(root.querySelector('[data-point-field="lat"]')?.value ?? "");
-  const lng = Number.parseFloat(root.querySelector('[data-point-field="lng"]')?.value ?? "");
+  const positionInput = root.querySelector('[data-point-field="position"]')?.value?.trim() ?? "";
   const color = root.querySelector('[data-point-field="color"]')?.value ?? "#ffffff";
   const rawSize = Number.parseFloat(root.querySelector('[data-point-field="size"]')?.value ?? "");
+  const outlineColor = root.querySelector('[data-point-field="outlineColor"]')?.value ?? "#0b1220";
+  const rawOutlineWidth = Number.parseFloat(root.querySelector('[data-point-field="outlineWidth"]')?.value ?? "");
   const activeIcon = root.querySelector('.point-popup-icon-btn.active')?.dataset.icon ?? item.markerStyle?.icon ?? "dot";
+  const parsedPosition = parseCoordinateEditorInput(positionInput, state.settings.coordinateSystem);
+  const lat = parsedPosition?.lat;
+  const lng = parsedPosition?.lng;
 
-  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
-    setStatus("Enter a valid latitude between -90 and 90.", true);
-    return;
-  }
-  if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
-    setStatus("Enter a valid longitude between -180 and 180.", true);
+  if (!parsedPosition || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    setStatus(`Enter a valid ${coordinateSystemStatusLabel(state.settings.coordinateSystem)} coordinate.`, true);
     return;
   }
 
@@ -12799,6 +12810,8 @@ function applyPointPopupEdits(itemId, root) {
     icon: activeIcon,
     color,
     size: Number.isFinite(rawSize) ? rawSize : undefined,
+    outlineColor,
+    outlineWidth: Number.isFinite(rawOutlineWidth) ? rawOutlineWidth : undefined,
   });
   item.lastModified = nowIso();
 
@@ -12950,40 +12963,49 @@ function normalizeImportedShapeStyle(geometryType, shapeStyle = null) {
 const POINT_ICONS = ["dot", "ring", "x", "check", "diamond", "square", "plus", "star"];
 
 function normalizeDrawnPointMarkerStyle(ms = null) {
-  const defaults = { icon: "dot", color: "#ffffff", size: 18 };
+  const defaults = { icon: "dot", color: "#ffffff", size: 18, outlineColor: "#0b1220", outlineWidth: 2 };
   if (!ms || typeof ms !== "object") return defaults;
   return {
     icon: POINT_ICONS.includes(ms.icon) ? ms.icon : defaults.icon,
     color: typeof ms.color === "string" && ms.color ? ms.color : defaults.color,
     size: Number.isFinite(Number(ms.size)) ? clamp(Number(ms.size), 8, 40) : defaults.size,
+    outlineColor: typeof ms.outlineColor === "string" && ms.outlineColor ? ms.outlineColor : defaults.outlineColor,
+    outlineWidth: Number.isFinite(Number(ms.outlineWidth)) ? clamp(Number(ms.outlineWidth), 0, 8) : defaults.outlineWidth,
   };
 }
 
-function buildDrawnPointSvg(icon, color, size) {
+function buildDrawnPointSvg(icon, color, size, outlineColor = "#0b1220", outlineWidth = 2) {
   const s = size;
   const h = s / 2;
   const sw = Math.max(1.5, s / 10); // stroke width scales with size
+  const outline = Math.max(0, Number(outlineWidth) || 0);
   const c = escapeHtml(color);
+  const oc = escapeHtml(outlineColor);
   let inner = "";
   if (icon === "dot") {
-    inner = `<circle cx="${h}" cy="${h}" r="${h * 0.52}" fill="${c}"/>`;
+    inner = `<circle cx="${h}" cy="${h}" r="${h * 0.52}" fill="${c}" ${outline ? `stroke="${oc}" stroke-width="${outline}"` : ""}/>`;
   } else if (icon === "ring") {
-    inner = `<circle cx="${h}" cy="${h}" r="${h * 0.52}" fill="none" stroke="${c}" stroke-width="${sw}"/>`;
+    inner = `<circle cx="${h}" cy="${h}" r="${h * 0.52}" fill="none" stroke="${c}" stroke-width="${sw + outline * 2}"/><circle cx="${h}" cy="${h}" r="${h * 0.52}" fill="none" stroke="${outline ? oc : c}" stroke-width="${outline || 0}"/>`;
   } else if (icon === "x") {
     const m = h * 0.35;
-    inner = `<line x1="${h-m}" y1="${h-m}" x2="${h+m}" y2="${h+m}" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/>
+    inner = `${outline ? `<line x1="${h-m}" y1="${h-m}" x2="${h+m}" y2="${h+m}" stroke="${oc}" stroke-width="${sw + outline * 2}" stroke-linecap="round"/>
+             <line x1="${h+m}" y1="${h-m}" x2="${h-m}" y2="${h+m}" stroke="${oc}" stroke-width="${sw + outline * 2}" stroke-linecap="round"/>` : ""}
+             <line x1="${h-m}" y1="${h-m}" x2="${h+m}" y2="${h+m}" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/>
              <line x1="${h+m}" y1="${h-m}" x2="${h-m}" y2="${h+m}" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/>`;
   } else if (icon === "check") {
     const m = h * 0.38;
-    inner = `<polyline points="${h-m},${h} ${h-m*0.2},${h+m*0.65} ${h+m},${h-m*0.6}" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    inner = `${outline ? `<polyline points="${h-m},${h} ${h-m*0.2},${h+m*0.65} ${h+m},${h-m*0.6}" fill="none" stroke="${oc}" stroke-width="${sw + outline * 2}" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+             <polyline points="${h-m},${h} ${h-m*0.2},${h+m*0.65} ${h+m},${h-m*0.6}" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
   } else if (icon === "diamond") {
-    inner = `<polygon points="${h},${h*0.22} ${h*1.72},${h} ${h},${h*1.78} ${h*0.28},${h}" fill="${c}"/>`;
+    inner = `<polygon points="${h},${h*0.22} ${h*1.72},${h} ${h},${h*1.78} ${h*0.28},${h}" fill="${c}" ${outline ? `stroke="${oc}" stroke-width="${outline}"` : ""}/>`;
   } else if (icon === "square") {
     const m = h * 0.42;
-    inner = `<rect x="${h-m}" y="${h-m}" width="${m*2}" height="${m*2}" rx="1.5" fill="${c}"/>`;
+    inner = `<rect x="${h-m}" y="${h-m}" width="${m*2}" height="${m*2}" rx="1.5" fill="${c}" ${outline ? `stroke="${oc}" stroke-width="${outline}"` : ""}/>`;
   } else if (icon === "plus") {
-    const m = h * 0.38; const t = sw;
-    inner = `<line x1="${h}" y1="${h-m}" x2="${h}" y2="${h+m}" stroke="${c}" stroke-width="${sw*1.5}" stroke-linecap="round"/>
+    const m = h * 0.38;
+    inner = `${outline ? `<line x1="${h}" y1="${h-m}" x2="${h}" y2="${h+m}" stroke="${oc}" stroke-width="${(sw * 1.5) + outline * 2}" stroke-linecap="round"/>
+             <line x1="${h-m}" y1="${h}" x2="${h+m}" y2="${h}" stroke="${oc}" stroke-width="${(sw * 1.5) + outline * 2}" stroke-linecap="round"/>` : ""}
+             <line x1="${h}" y1="${h-m}" x2="${h}" y2="${h+m}" stroke="${c}" stroke-width="${sw*1.5}" stroke-linecap="round"/>
              <line x1="${h-m}" y1="${h}" x2="${h+m}" y2="${h}" stroke="${c}" stroke-width="${sw*1.5}" stroke-linecap="round"/>`;
   } else if (icon === "star") {
     // 5-pointed star
@@ -12993,7 +13015,7 @@ function buildDrawnPointSvg(icon, color, size) {
       const r = i % 2 === 0 ? h * 0.52 : h * 0.22;
       pts.push(`${(h + r * Math.cos(ang)).toFixed(2)},${(h + r * Math.sin(ang)).toFixed(2)}`);
     }
-    inner = `<polygon points="${pts.join(" ")}" fill="${c}"/>`;
+    inner = `<polygon points="${pts.join(" ")}" fill="${c}" ${outline ? `stroke="${oc}" stroke-width="${outline}" stroke-linejoin="round"` : ""}/>`;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">${inner}</svg>`;
 }
@@ -13141,7 +13163,7 @@ function onDrawClick(latlng) {
       geometryType: "Point",
       coordinates: [latlng.lat, latlng.lng],
       properties: {},
-      markerStyle: { icon: "dot", color: "#ffffff", size: 18 },
+      markerStyle: { icon: "dot", color: "#ffffff", size: 18, outlineColor: "#0b1220", outlineWidth: 2 },
     });
     return;
   }
@@ -15377,6 +15399,48 @@ function parseMgrsReferenceInput(input) {
     lat: (south + north) / 2,
     lng: (west + east) / 2,
   };
+}
+
+function parseCoordinateEditorInput(input, system = state.settings.coordinateSystem) {
+  const raw = String(input ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  if (system === "mgrs") {
+    try {
+      return parseMgrsReferenceInput(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  if (system === "latlon") {
+    const decMatch = raw.match(/^(-?\d{1,3}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)$/);
+    if (!decMatch) {
+      return null;
+    }
+    const lat = parseFloat(decMatch[1]);
+    const lng = parseFloat(decMatch[2]);
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return null;
+    }
+    return { lat, lng };
+  }
+
+  if (system === "dms") {
+    const parsed = tryParseCoordinateSearch(raw)?.[0];
+    if (!parsed || !Number.isFinite(parsed.lat) || !Number.isFinite(parsed.lon)) {
+      return null;
+    }
+    return { lat: parsed.lat, lng: parsed.lon };
+  }
+
+  const parsed = tryParseCoordinateSearch(raw)?.[0];
+  if (!parsed || !Number.isFinite(parsed.lat) || !Number.isFinite(parsed.lon)) {
+    return null;
+  }
+  return { lat: parsed.lat, lng: parsed.lon };
 }
 
 function formatCoordinate(lat, lon, system) {
