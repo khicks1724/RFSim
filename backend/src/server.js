@@ -451,8 +451,8 @@ const analyticsEventSchema = z.object({
   event_type: z.enum(["visit", "ai_request", "project_create", "project_save", "snapshot"]),
   provider:       z.string().max(80).optional(),
   model:          z.string().max(120).optional(),
-  input_tokens:   z.number().int().nonneg().optional(),
-  output_tokens:  z.number().int().nonneg().optional(),
+  input_tokens:   z.number().int().nonnegative().optional(),
+  output_tokens:  z.number().int().nonnegative().optional(),
   meta:           z.record(z.any()).optional().default({}),
 });
 
