@@ -5123,10 +5123,14 @@ function renderAiEmptyState() {
     return;
   }
 
+  const message = state.ai.provider && state.ai.apiKey
+    ? escapeHtml(state.ai.statusMessage || "AI assistant is unavailable right now.")
+    : "Add a working AI provider in the top bar to enable chat-assisted planning.";
+
   dom.aiChatMessages.innerHTML = `
     <article class="ai-chat-message ai-chat-message-system">
       <strong>Assistant</strong>
-      <p>Add a working AI provider in the top bar to enable chat-assisted planning.</p>
+      <p>${message}</p>
     </article>
   `;
 }
@@ -5263,15 +5267,12 @@ async function onAiChatSubmit(event) {
   const prompt = dom.aiChatInput.value.trim();
   if (!prompt && state.ai.pendingImages.length === 0 && state.ai.pendingFiles.length === 0) return;
   if (state.ai.requestInFlight) return;
-  if (state.ai.status !== "ready") {
-    if (!state.ai.provider || !state.ai.apiKey) {
-      return;
-    }
-    await testAiProviderConnection({ openPanelOnSuccess: false });
-    if (state.ai.status !== "ready") {
-      return;
-    }
+  if (!state.ai.provider || !state.ai.apiKey) {
+    return;
   }
+
+  // A stale UI error state should not block chat if the provider/key are configured.
+  // Let the actual request path surface the real provider error.
 
   const images = [...state.ai.pendingImages];
   const files = [...state.ai.pendingFiles];
@@ -5320,11 +5321,13 @@ async function onAiChatSubmit(event) {
     stopThinkingIndicator();
     assistantMessageController.setStatus(executionSummary.length ? "Applied changes" : "Response ready");
     await streamAiMessageText(assistantMessageController, reply);
+    state.ai.status = "ready";
     state.ai.statusMessage = "AI assistant ready.";
   } catch (error) {
     stopThinkingIndicator();
     assistantMessageController.setStatus("Request failed");
     assistantMessageController.setText(`I couldn't complete that request. ${error.message}`);
+    state.ai.status = "error";
     state.ai.statusMessage = error.message;
   } finally {
     state.ai.requestInFlight = false;
