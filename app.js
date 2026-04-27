@@ -3777,6 +3777,7 @@ function applySavedMapState(rawSaved) {
         pane: getMapContentPaneName(`asset:${asset.id}`),
       }).addTo(state.map);
       marker.bindPopup(renderAssetPopup(asset));
+      marker.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(`asset:${asset.id}`); });
       state.assetMarkers.set(asset.id, marker);
     });
   }
@@ -3815,6 +3816,7 @@ function applySavedMapState(rawSaved) {
         item.layer.addTo(state.map);
         item.layer.bindPopup(renderImportedItemPopup(item));
         item.layer.on?.("click", () => focusMapContent(contentId));
+        item.layer.on?.("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
         item.layer.on?.("dragend edit", () => {
           item.layer.setPopupContent(renderImportedItemPopup(item));
           renderMapContents();
@@ -7808,6 +7810,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
       pane: getMapContentPaneName(`asset:${newAsset.id}`),
     }).addTo(state.map);
     marker.bindPopup(renderAssetPopup(newAsset));
+    marker.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(`asset:${newAsset.id}`); });
     state.assetMarkers.set(newAsset.id, marker);
     state.assets.push(newAsset);
     renderAssets();
@@ -8969,6 +8972,7 @@ function addAsset(latlng) {
   }).addTo(state.map);
 
   marker.bindPopup(renderAssetPopup(asset));
+  marker.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(`asset:${asset.id}`); });
   state.assetMarkers.set(asset.id, marker);
   state.assets.push(asset);
   renderAssets();
@@ -13206,7 +13210,7 @@ function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle 
     });
   }
 
-  return L.polygon(coordinates, {
+  const polygon = L.polygon(coordinates, {
     pane,
     renderer,
     color: style.color,
@@ -13216,6 +13220,8 @@ function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle 
     weight: style.weight,
     dashArray,
   });
+  applyPolygonClickThrough(polygon, style.fillOpacity);
+  return polygon;
 }
 
 function startDrawing(mode) {
@@ -13442,6 +13448,7 @@ function addDrawnFeature(feature, folderId = null) {
   item.layer.addTo(state.map);
   item.layer.bindPopup(renderImportedItemPopup(item));
   item.layer.on("click", () => focusMapContent(contentId));
+  item.layer.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
   item.layer.on("dragend edit", () => {
     item.layer.setPopupContent(renderImportedItemPopup(item));
     renderMapContents();
@@ -13695,9 +13702,33 @@ function applyShapeStyleToLayer(item) {
   const dashArray = getLeafletDashArray(lineStyle);
   if (item.geometryType === "Polygon" || item.geometryType === "MultiPolygon") {
     item.layer.setStyle({ color, opacity, fillColor: fillColor ?? color, fillOpacity, weight, dashArray });
+    applyPolygonClickThrough(item.layer, fillOpacity);
   } else {
     item.layer.setStyle({ color, opacity, weight, dashArray });
   }
+}
+
+// When a polygon has no fill (fillOpacity === 0), override _containsPoint so
+// clicks pass through the interior to items underneath. Only the stroke/border
+// remains interactive.
+function applyPolygonClickThrough(layer, fillOpacity) {
+  if (fillOpacity > 0) {
+    delete layer._containsPoint;
+    return;
+  }
+  layer._containsPoint = function (p) {
+    const tolerance = (this._clickTolerance ? this._clickTolerance() : 3) + (this.options.weight || 2) / 2;
+    // _parts is the pixel-coordinate rings used by the canvas renderer
+    const parts = this._parts || [];
+    for (const ring of parts) {
+      for (let i = 0, len = ring.length, j = len - 1; i < len; j = i++) {
+        if (L.LineUtil.pointToSegmentDistance(p, ring[j], ring[i]) <= tolerance) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
 }
 
 function getCesiumStrokeMaterial(C, color, lineStyle) {
@@ -14023,6 +14054,7 @@ function addImportedFeature(feature, folderId, index, options = {}) {
   }
 
   item.layer.on?.("click", () => focusMapContent(contentId));
+  item.layer.on?.("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId);
   state.mapContentOrder.push(contentId);
