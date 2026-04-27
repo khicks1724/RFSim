@@ -36,7 +36,7 @@
   --civilian: #a78bfa;
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
   --topbar-height: 54px;
-  --panel-width: 420px;
+  --panel-width: 560px;
   --control-panel-top-height: 33%;
   --ai-panel-width: 0px;
   --divider-width: 4px;
@@ -1990,7 +1990,7 @@ body:not(.ai-panel-open) .ai-panel {
   top: 14px;
   left: 138px;        /* 52px toggle left + 76px width + 10px gap */
   z-index: 650;
-  width: 280px;
+  width: 380px;
 }
 
 .map-geo-search-shell {
