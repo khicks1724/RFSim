@@ -6742,6 +6742,14 @@ function shouldPreferHostedGenAiMilSiteProxy() {
   return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1";
 }
 
+function shouldAllowLocalGenAiMilProxyFallback() {
+  if (state.session.token) {
+    return false;
+  }
+  const { hostname } = window.location;
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
 async function callGenAiMilModelsEndpoint(url, apiKey) {
   return await fetch(url, {
     method: "GET",
@@ -6808,16 +6816,23 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
       attemptErrors.push(error);
     }
   }
+  if (state.session.token && !models) {
+    throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil model discovery failed through the hosted site relay.");
+  }
   if (!models) {
     try {
       models = await fetchGenAiMilModelsFrom(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey);
     } catch (error) {
       attemptErrors.push(error);
-      try {
-        models = await fetchGenAiMilModelsFrom(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
-        state.ai.statusMessage = "GenAI.mil model discovery succeeded through the local proxy on 127.0.0.1:8787.";
-      } catch (proxyError) {
-        attemptErrors.push(proxyError);
+      if (shouldAllowLocalGenAiMilProxyFallback()) {
+        try {
+          models = await fetchGenAiMilModelsFrom(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
+          state.ai.statusMessage = "GenAI.mil model discovery succeeded through the local proxy on 127.0.0.1:8787.";
+        } catch (proxyError) {
+          attemptErrors.push(proxyError);
+          throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil model discovery failed.");
+        }
+      } else {
         throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil model discovery failed.");
       }
     }
@@ -6840,7 +6855,9 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
       return;
     }
     state.ai.status = "testing";
-    state.ai.statusMessage = "Loading GenAI.mil models for this key, then validating the selected model. If direct access is blocked, the app will try the local proxy on 127.0.0.1:8787.";
+    state.ai.statusMessage = state.session.token
+      ? "Loading GenAI.mil models for this key, then validating the selected model through the site relay."
+      : "Loading GenAI.mil models for this key, then validating the selected model.";
     syncAiUi();
     try {
       const models = await ensureGenAiMilModelsLoaded({ forceRefresh: true, returnModels: true });
@@ -7334,6 +7351,9 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
       attemptErrors.push(error);
     }
   }
+  if (state.session.token) {
+    throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed through the hosted site relay.");
+  }
 
   let response;
   try {
@@ -7341,12 +7361,16 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
   } catch (error) {
     attemptErrors.push(error);
     if (error instanceof TypeError) {
-      try {
-        response = await callGenAiMilEndpoint(GENAI_MIL_PROXY_ENDPOINT, state.ai.apiKey, payload);
-        state.ai.statusMessage = "GenAI.mil connected through the local proxy on 127.0.0.1:8787.";
-        syncAiUi();
-      } catch (proxyError) {
-        attemptErrors.push(proxyError);
+      if (shouldAllowLocalGenAiMilProxyFallback()) {
+        try {
+          response = await callGenAiMilEndpoint(GENAI_MIL_PROXY_ENDPOINT, state.ai.apiKey, payload);
+          state.ai.statusMessage = "GenAI.mil connected through the local proxy on 127.0.0.1:8787.";
+          syncAiUi();
+        } catch (proxyError) {
+          attemptErrors.push(proxyError);
+          throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed.");
+        }
+      } else {
         throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed.");
       }
     } else {
