@@ -2016,8 +2016,7 @@ body:not(.ai-panel-open) .ai-panel {
 }
 
 .map-geo-search-shell:focus-within {
-  border-color: rgba(142,179,255,0.5);
-  box-shadow: 0 0 0 2px rgba(142,179,255,0.12), var(--shadow);
+  box-shadow: var(--shadow);
 }
 
 .map-geo-search-icon {
