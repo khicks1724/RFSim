@@ -1084,6 +1084,11 @@ const dom = {
   shapeWeightValue: document.querySelector("#shapeWeightValue"),
   shapeStyleEditVerticesBtn: document.querySelector("#shapeStyleEditVerticesBtn"),
   shapeStyleDoneBtn: document.querySelector("#shapeStyleDoneBtn"),
+  pointStyleControls: document.querySelector("#pointStyleControls"),
+  shapeOnlyControls: document.querySelector("#shapeOnlyControls"),
+  pointIconPicker: document.querySelector("#pointIconPicker"),
+  pointSizeInput: document.querySelector("#pointSizeInput"),
+  pointSizeValue: document.querySelector("#pointSizeValue"),
   mapContentsMenu: document.querySelector("#mapContentsMenu"),
   mapContentsRename: document.querySelector("#mapContentsRename"),
   mapContentsRenameInput: document.querySelector("#mapContentsRenameInput"),
@@ -3008,7 +3013,7 @@ function ensureMapContentsSearchUi() {
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </span>
-        <input id="mapContentsSearchInput" type="text" placeholder="Search map contents">
+        <input id="mapContentsSearchInput" type="text" placeholder="Search map contents or navigate…" autocomplete="off">
       </label>
       <button id="mapContentsSearchClearBtn" class="ghost-button small icon-button map-contents-search-clear hidden" type="button" aria-label="Clear map contents search">
         &#10005;
@@ -3324,10 +3329,8 @@ function wireEvents() {
   });
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
 
-  const importBtn = document.querySelector("#importBtn");
   const importFileInput = document.querySelector("#importFileInput");
-  if (importBtn && importFileInput) {
-    importBtn.addEventListener("click", () => importFileInput.click());
+  if (importFileInput) {
     importFileInput.addEventListener("change", async () => {
       const files = [...importFileInput.files];
       importFileInput.value = "";
@@ -3347,8 +3350,11 @@ function wireEvents() {
   });
   dom.mapContentsSearchClearBtn?.addEventListener("click", clearMapContentsSearch);
   updateMapContentsSearchUi();
+  initGeocoderOnSearchInput();
 
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
+  document.querySelector("#drawPointBtn")?.addEventListener("click", () => startDrawing("point"));
+  buildPointIconPickerSvgs();
   dom.drawCircleBtn.addEventListener("click", () => startDrawing("circle"));
   dom.drawRectangleBtn.addEventListener("click", () => startDrawing("rectangle"));
   dom.drawPolylineBtn.addEventListener("click", () => startDrawing("polyline"));
@@ -3360,6 +3366,14 @@ function wireEvents() {
   dom.shapeWeightInput.addEventListener("input", onShapeStyleChanged);
   dom.shapeStyleEditVerticesBtn.addEventListener("click", onShapeStyleEditVertices);
   dom.shapeStyleDoneBtn.addEventListener("click", () => closeShapeStylePanel());
+  dom.pointSizeInput?.addEventListener("input", onPointStyleChanged);
+  dom.pointIconPicker?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".point-icon-btn");
+    if (!btn) return;
+    dom.pointIconPicker.querySelectorAll(".point-icon-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    onPointStyleChanged();
+  });
   dom.mapContentsMenu.addEventListener("click", onMapContentsMenuAction);
   dom.mapContentsRename.addEventListener("click", (event) => event.stopPropagation());
   dom.mapContentsRenameSave.addEventListener("click", commitRenameMapContent);
@@ -3472,10 +3486,29 @@ function wireEvents() {
     if (!hidden) positionTopBarDropdown(dom.exportDropdown, dom.exportMenuBtn);
   });
   document.addEventListener("click", () => dom.exportDropdown.classList.add("hidden"));
-  dom.exportGeoJsonBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsGeoJson(); });
-  dom.exportKmlBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsKml(false); });
-  dom.exportKmzBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsKml(true); });
-  dom.exportZipBtn.addEventListener("click", () => { dom.exportDropdown.classList.add("hidden"); exportAssetsZip(); });
+
+  const closeExport = () => dom.exportDropdown.classList.add("hidden");
+  const importFileInputEl = document.querySelector("#importFileInput");
+
+  document.querySelector("#importKmzBtn")?.addEventListener("click", () => {
+    closeExport();
+    if (importFileInputEl) {
+      importFileInputEl.accept = ".kml,.kmz";
+      importFileInputEl.click();
+    }
+  });
+  document.querySelector("#importGeoJsonBtn")?.addEventListener("click", () => {
+    closeExport();
+    if (importFileInputEl) {
+      importFileInputEl.accept = ".geojson,.json,.zip";
+      importFileInputEl.click();
+    }
+  });
+
+  dom.exportGeoJsonBtn.addEventListener("click", () => { closeExport(); exportAssetsGeoJson(); });
+  dom.exportKmlBtn.addEventListener("click", () => { closeExport(); exportAssetsKml(false); });
+  dom.exportKmzBtn.addEventListener("click", () => { closeExport(); exportAssetsKml(true); });
+  dom.exportZipBtn.addEventListener("click", () => { closeExport(); exportAssetsZip(); });
   dom.clearViewshedsBtn.addEventListener("click", clearViewsheds);
   dom.runSimulationBtn.addEventListener("click", runSimulation);
   dom.propagationModel?.addEventListener("change", syncSimHfSectionVisibility);
@@ -11319,6 +11352,240 @@ function clearMapContentsSearch() {
   }
   updateMapContentsSearchUi();
   renderMapContents();
+  hideGeocoderResults();
+}
+
+// ─── Map search geocoder ────────────────────────────────────────────────────
+
+let _geocoderDebounceTimer = null;
+let _geocoderActiveIndex = -1;
+let _geocoderResults = [];
+
+function getGeocoderResultsEl() {
+  return document.getElementById("mapSearchGeocoderResults");
+}
+
+function hideGeocoderResults() {
+  const el = getGeocoderResultsEl();
+  if (el) el.innerHTML = "";
+  _geocoderResults = [];
+  _geocoderActiveIndex = -1;
+}
+
+function showGeocoderStatus(msg) {
+  const el = getGeocoderResultsEl();
+  if (!el) return;
+  el.innerHTML = `<div class="map-search-geocoder-status">${msg}</div>`;
+}
+
+function renderGeocoderResults(results) {
+  _geocoderResults = results;
+  _geocoderActiveIndex = -1;
+  const el = getGeocoderResultsEl();
+  if (!el) return;
+  if (!results.length) { el.innerHTML = `<div class="map-search-geocoder-status">No results found.</div>`; return; }
+
+  const icons = {
+    coordinate: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>`,
+    mgrs:       `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>`,
+    place:      `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`,
+  };
+
+  el.innerHTML = results.map((r, i) => `
+    <div class="map-search-geocoder-item" data-idx="${i}" role="option">
+      <span class="map-search-geocoder-item-icon">${icons[r.kind] ?? icons.place}</span>
+      <span class="map-search-geocoder-item-text">
+        <span class="map-search-geocoder-item-name">${escapeHtml(r.name)}</span>
+        ${r.sub ? `<span class="map-search-geocoder-item-sub">${escapeHtml(r.sub)}</span>` : ""}
+      </span>
+    </div>
+  `).join("");
+
+  el.querySelectorAll(".map-search-geocoder-item").forEach((item) => {
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      navigateToGeocoderResult(_geocoderResults[Number(item.dataset.idx)]);
+      hideGeocoderResults();
+      dom.mapContentsSearchInput.value = "";
+      updateMapContentsSearchUi();
+      renderMapContents();
+    });
+  });
+}
+
+function setGeocoderActiveIndex(idx) {
+  const el = getGeocoderResultsEl();
+  if (!el) return;
+  const items = el.querySelectorAll(".map-search-geocoder-item");
+  items.forEach((item, i) => item.classList.toggle("active", i === idx));
+  _geocoderActiveIndex = idx;
+  if (idx >= 0 && items[idx]) items[idx].scrollIntoView({ block: "nearest" });
+}
+
+function navigateToGeocoderResult(result) {
+  if (!result) return;
+  if (result.bounds) {
+    const { north, south, east, west } = result.bounds;
+    state.map.fitBounds([[south, west], [north, east]], { maxZoom: result.zoom ?? 16, animate: true });
+  } else {
+    state.map.setView([result.lat, result.lon], result.zoom ?? 14, { animate: true });
+  }
+  if (state.cesiumViewer && state.view3dEnabled) {
+    const C = window.Cesium;
+    const lat = result.lat ?? (result.bounds ? (result.bounds.north + result.bounds.south) / 2 : 0);
+    const lon = result.lon ?? (result.bounds ? (result.bounds.east + result.bounds.west) / 2 : 0);
+    state.cesiumViewer.camera.flyTo({
+      destination: C.Cartesian3.fromDegrees(lon, lat, 8000),
+      duration: 1.5,
+    });
+  }
+}
+
+function tryParseCoordinateSearch(raw) {
+  const s = raw.trim();
+
+  // MGRS — e.g. "11S NU 54 23", "11SNU5423"
+  try {
+    const compact = s.toUpperCase().replace(/[^0-9A-Z]/g, "");
+    const match = compact.match(/^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d{4}|\d{6}|\d{8}|\d{10})$/i);
+    if (match) {
+      const [, zoneBand, square, digits] = match;
+      const half = digits.length / 2;
+      const easting = digits.slice(0, half).padEnd(5, "0");
+      const northing = digits.slice(half).padEnd(5, "0");
+      const normalized = `${zoneBand}${square}${easting}${northing}`;
+      const bounds = window.mgrs?.inverse(normalized);
+      if (Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite)) {
+        const [west, south, east, north] = bounds;
+        const lat = (north + south) / 2;
+        const lon = (east + west) / 2;
+        const precisionZoom = { 4: 13, 6: 15, 8: 17, 10: 18 };
+        const zoom = precisionZoom[digits.length] ?? 14;
+        return [{ kind: "mgrs", name: s.toUpperCase(), sub: `${lat.toFixed(5)}, ${lon.toFixed(5)}`, lat, lon, bounds: { north, south, east, west }, zoom }];
+      }
+    }
+  } catch (_) {}
+
+  // Decimal lat,lon — e.g. "34.1234, -116.5678" or "34.1234 -116.5678"
+  const decMatch = s.match(/^(-?\d{1,3}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)$/);
+  if (decMatch) {
+    const lat = parseFloat(decMatch[1]);
+    const lon = parseFloat(decMatch[2]);
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      return [{ kind: "coordinate", name: `${lat.toFixed(6)}, ${lon.toFixed(6)}`, sub: "Decimal coordinates", lat, lon, zoom: 14 }];
+    }
+  }
+
+  // DMS — e.g. "38°53'23\"N 77°02'10\"W"
+  const dmsMatch = s.match(/(\d+)[°\s](\d+)['\s](\d+(?:\.\d+)?)["\s]?([NS])[,\s]+(\d+)[°\s](\d+)['\s](\d+(?:\.\d+)?)["\s]?([EW])/i);
+  if (dmsMatch) {
+    const [, latD, latM, latS, latH, lonD, lonM, lonS, lonH] = dmsMatch;
+    const lat = (Number(latD) + Number(latM)/60 + Number(latS)/3600) * (latH.toUpperCase() === "S" ? -1 : 1);
+    const lon = (Number(lonD) + Number(lonM)/60 + Number(lonS)/3600) * (lonH.toUpperCase() === "W" ? -1 : 1);
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      return [{ kind: "coordinate", name: s, sub: `${lat.toFixed(6)}, ${lon.toFixed(6)}`, lat, lon, zoom: 14 }];
+    }
+  }
+
+  return null;
+}
+
+async function runGeocoderSearch(query) {
+  const q = query.trim();
+  if (!q) { hideGeocoderResults(); return; }
+
+  // First try local coordinate/MGRS parse — instant, no network
+  const local = tryParseCoordinateSearch(q);
+  if (local) { renderGeocoderResults(local); return; }
+
+  // Nominatim geocoding (OpenStreetMap)
+  showGeocoderStatus("Searching…");
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`;
+    const resp = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "RFSim/1.0" } });
+    if (!resp.ok) throw new Error("Nominatim error");
+    const data = await resp.json();
+    if (!data.length) { showGeocoderStatus("No results found."); return; }
+
+    const results = data.map((item) => {
+      const lat = parseFloat(item.lat);
+      const lon = parseFloat(item.lon);
+      const bb = item.boundingbox;
+      const bounds = bb ? { south: parseFloat(bb[0]), north: parseFloat(bb[1]), west: parseFloat(bb[2]), east: parseFloat(bb[3]) } : null;
+      const addr = item.address ?? {};
+      const parts = [addr.city ?? addr.town ?? addr.village ?? addr.county, addr.state, addr.country].filter(Boolean);
+      const sub = parts.join(", ");
+      // Zoom based on OSM type
+      const zoomMap = { country: 5, state: 7, county: 9, city: 11, town: 12, suburb: 13, road: 15, house: 17 };
+      const zoom = zoomMap[item.type] ?? zoomMap[item.addresstype] ?? 13;
+      return { kind: "place", name: item.display_name.split(",")[0], sub, lat, lon, bounds, zoom };
+    });
+    renderGeocoderResults(results);
+  } catch (_) {
+    showGeocoderStatus("Search unavailable — check connection.");
+  }
+}
+
+function escapeHtml(str) {
+  return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function initGeocoderOnSearchInput() {
+  const input = dom.mapContentsSearchInput;
+  if (!input) return;
+
+  // Wrap the search row in a relative-positioned container for the dropdown
+  const row = input.closest(".map-contents-search-row");
+  if (row && !row.querySelector("#mapSearchGeocoderResults")) {
+    const wrap = document.createElement("div");
+    wrap.className = "map-search-geocoder-wrap";
+    row.parentNode.insertBefore(wrap, row);
+    wrap.appendChild(row);
+    const dropdown = document.createElement("div");
+    dropdown.id = "mapSearchGeocoderResults";
+    dropdown.className = "map-search-geocoder-results";
+    dropdown.setAttribute("role", "listbox");
+    wrap.appendChild(dropdown);
+  }
+
+  input.addEventListener("input", () => {
+    const val = input.value.trim();
+    // Only trigger geocoder if query doesn't match existing map contents
+    const hasContentMatch = state.mapContentsSearch && (
+      state.assets.some((a) => a.name?.toLowerCase().includes(val.toLowerCase())) ||
+      state.importedItems.some((i) => i.name?.toLowerCase().includes(val.toLowerCase()))
+    );
+    if (!val || hasContentMatch) { hideGeocoderResults(); return; }
+    clearTimeout(_geocoderDebounceTimer);
+    _geocoderDebounceTimer = setTimeout(() => runGeocoderSearch(val), 400);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    const results = getGeocoderResultsEl();
+    if (!results || !_geocoderResults.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setGeocoderActiveIndex(Math.min(_geocoderActiveIndex + 1, _geocoderResults.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setGeocoderActiveIndex(Math.max(_geocoderActiveIndex - 1, 0));
+    } else if (e.key === "Enter" && _geocoderActiveIndex >= 0) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      navigateToGeocoderResult(_geocoderResults[_geocoderActiveIndex]);
+      hideGeocoderResults();
+      input.value = "";
+      updateMapContentsSearchUi();
+      renderMapContents();
+    } else if (e.key === "Escape") {
+      hideGeocoderResults();
+    }
+  });
+
+  input.addEventListener("blur", () => {
+    // Small delay so mousedown on a result fires first
+    setTimeout(hideGeocoderResults, 150);
+  });
 }
 
 function setMapContentFolderId(contentId, folderId) {
@@ -12511,6 +12778,65 @@ function normalizeImportedShapeStyle(geometryType, shapeStyle = null) {
   return { color, fillColor, fillOpacity, opacity, weight, lineStyle };
 }
 
+const POINT_ICONS = ["dot", "ring", "x", "check", "diamond", "square", "plus", "star"];
+
+function normalizeDrawnPointMarkerStyle(ms = null) {
+  const defaults = { icon: "dot", color: "#ffffff", size: 18 };
+  if (!ms || typeof ms !== "object") return defaults;
+  return {
+    icon: POINT_ICONS.includes(ms.icon) ? ms.icon : defaults.icon,
+    color: typeof ms.color === "string" && ms.color ? ms.color : defaults.color,
+    size: Number.isFinite(Number(ms.size)) ? clamp(Number(ms.size), 8, 40) : defaults.size,
+  };
+}
+
+function buildDrawnPointSvg(icon, color, size) {
+  const s = size;
+  const h = s / 2;
+  const sw = Math.max(1.5, s / 10); // stroke width scales with size
+  const c = escapeHtml(color);
+  let inner = "";
+  if (icon === "dot") {
+    inner = `<circle cx="${h}" cy="${h}" r="${h * 0.52}" fill="${c}"/>`;
+  } else if (icon === "ring") {
+    inner = `<circle cx="${h}" cy="${h}" r="${h * 0.52}" fill="none" stroke="${c}" stroke-width="${sw}"/>`;
+  } else if (icon === "x") {
+    const m = h * 0.35;
+    inner = `<line x1="${h-m}" y1="${h-m}" x2="${h+m}" y2="${h+m}" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/>
+             <line x1="${h+m}" y1="${h-m}" x2="${h-m}" y2="${h+m}" stroke="${c}" stroke-width="${sw}" stroke-linecap="round"/>`;
+  } else if (icon === "check") {
+    const m = h * 0.38;
+    inner = `<polyline points="${h-m},${h} ${h-m*0.2},${h+m*0.65} ${h+m},${h-m*0.6}" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  } else if (icon === "diamond") {
+    inner = `<polygon points="${h},${h*0.22} ${h*1.72},${h} ${h},${h*1.78} ${h*0.28},${h}" fill="${c}"/>`;
+  } else if (icon === "square") {
+    const m = h * 0.42;
+    inner = `<rect x="${h-m}" y="${h-m}" width="${m*2}" height="${m*2}" rx="1.5" fill="${c}"/>`;
+  } else if (icon === "plus") {
+    const m = h * 0.38; const t = sw;
+    inner = `<line x1="${h}" y1="${h-m}" x2="${h}" y2="${h+m}" stroke="${c}" stroke-width="${sw*1.5}" stroke-linecap="round"/>
+             <line x1="${h-m}" y1="${h}" x2="${h+m}" y2="${h}" stroke="${c}" stroke-width="${sw*1.5}" stroke-linecap="round"/>`;
+  } else if (icon === "star") {
+    // 5-pointed star
+    const pts = [];
+    for (let i = 0; i < 10; i++) {
+      const ang = (Math.PI * i / 5) - Math.PI / 2;
+      const r = i % 2 === 0 ? h * 0.52 : h * 0.22;
+      pts.push(`${(h + r * Math.cos(ang)).toFixed(2)},${(h + r * Math.sin(ang)).toFixed(2)}`);
+    }
+    inner = `<polygon points="${pts.join(" ")}" fill="${c}"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">${inner}</svg>`;
+}
+
+function buildPointIconPickerSvgs() {
+  if (!dom.pointIconPicker) return;
+  dom.pointIconPicker.querySelectorAll(".point-icon-btn").forEach((btn) => {
+    const icon = btn.dataset.icon;
+    btn.innerHTML = buildDrawnPointSvg(icon, "#a8bfd8", 22);
+  });
+}
+
 function normalizeImportedMarkerStyle(markerStyle = null) {
   if (!markerStyle || typeof markerStyle !== "object") {
     return null;
@@ -12527,10 +12853,23 @@ function normalizeImportedMarkerStyle(markerStyle = null) {
 }
 
 function buildImportedPointIcon(markerStyle) {
-  const style = normalizeImportedMarkerStyle(markerStyle);
-  if (!style) {
-    return null;
+  // Drawn point — uses icon/color/size fields
+  if (markerStyle && markerStyle.icon) {
+    const ms = normalizeDrawnPointMarkerStyle(markerStyle);
+    const size = ms.size;
+    const svg = buildDrawnPointSvg(ms.icon, ms.color, size);
+    return L.divIcon({
+      className: "imported-point-marker drawn-point-marker",
+      html: svg,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      popupAnchor: [0, -Math.max(12, size / 2)],
+    });
   }
+
+  // KMZ-imported point — uses iconUrl/color/size fields
+  const style = normalizeImportedMarkerStyle(markerStyle);
+  if (!style) return null;
 
   const size = style.size ?? Math.round(22 * style.scale);
   if (style.iconUrl) {
@@ -12560,13 +12899,13 @@ function buildImportedPointIcon(markerStyle) {
   });
 }
 
-function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle = null, markerStyle = null }) {
+function createImportedLayer({ contentId, geometryType, coordinates, shapeStyle = null, markerStyle = null, draggable = false }) {
   const pane = getMapContentPaneName(contentId);
   if (geometryType === "Point") {
     const icon = buildImportedPointIcon(markerStyle);
     return L.marker(coordinates, {
       pane,
-      draggable: false,
+      draggable,
       ...(icon ? { icon } : {}),
     });
   }
@@ -12605,8 +12944,8 @@ function startDrawing(mode) {
   cancelDrawing();
   state.draw.mode = mode;
   dom.map.classList.add("leaflet-drawing-active");
-  const hints = { circle: "Click to set center, click again to set radius.", rectangle: "Click two corners to draw a rectangle.", polyline: "Click to add points. Double-click to finish." };
-  setStatus(hints[mode]);
+  const hints = { point: "Click on the map to place a point.", circle: "Click to set center, click again to set radius.", rectangle: "Click two corners to draw a rectangle.", polyline: "Click to add points. Double-click to finish." };
+  setStatus(hints[mode] ?? "Click on the map.");
 }
 
 function cancelDrawing() {
@@ -12621,6 +12960,19 @@ function cancelDrawing() {
 
 function onDrawClick(latlng) {
   const { mode, points } = state.draw;
+
+  if (mode === "point") {
+    cancelDrawing();
+    const index = state.importedItems.filter((i) => i.drawn).length;
+    addDrawnFeature({
+      name: `Point ${index + 1}`,
+      geometryType: "Point",
+      coordinates: [latlng.lat, latlng.lng],
+      properties: {},
+      markerStyle: { icon: "dot", color: "#ffffff", size: 18 },
+    });
+    return;
+  }
 
   if (mode === "circle") {
     if (points.length === 0) {
@@ -12722,6 +13074,7 @@ function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
 }
 
 function addDrawnFeature(feature, folderId = null) {
+  const isPoint = feature.geometryType === "Point";
   const item = stampContentRecord({
     id: generateId(),
     name: feature.name,
@@ -12730,8 +13083,8 @@ function addDrawnFeature(feature, folderId = null) {
     geometryType: feature.geometryType,
     properties: feature.properties ?? {},
     drawn: true,
-    shapeStyle: normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle ?? { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color }),
-    markerStyle: null,
+    shapeStyle: isPoint ? null : normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle ?? { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color }),
+    markerStyle: isPoint ? normalizeDrawnPointMarkerStyle(feature.markerStyle) : null,
     layer: null,
   });
 
@@ -12741,6 +13094,8 @@ function addDrawnFeature(feature, folderId = null) {
     geometryType: feature.geometryType,
     coordinates: feature.coordinates,
     shapeStyle: item.shapeStyle,
+    markerStyle: item.markerStyle,
+    draggable: isPoint,
   });
 
   item.layer.addTo(state.map);
@@ -12764,18 +13119,36 @@ function addDrawnFeature(feature, folderId = null) {
 
 function openShapeStylePanel(item, anchorEl) {
   state.draw.editingItemId = item.id;
-  const s = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType, { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color });
-  dom.shapeColorInput.value = s.color;
-  dom.shapeLineStyleSelect.value = s.lineStyle ?? "solid";
-  dom.shapeOpacityInput.value = s.fillOpacity;
-  dom.shapeWeightInput.value = s.weight;
-  dom.shapeOpacityValue.textContent = `${Math.round(s.fillOpacity * 100)}%`;
-  dom.shapeWeightValue.textContent = s.weight;
-  updateRangeTrack(dom.shapeOpacityInput);
-  updateRangeTrack(dom.shapeWeightInput);
+  const isPoint = item.geometryType === "Point";
 
-  // Hide vertex button for pure polylines
-  dom.shapeStyleEditVerticesBtn.style.display = item.geometryType === "Point" ? "none" : "";
+  // Toggle point vs shape controls
+  dom.pointStyleControls?.classList.toggle("hidden", !isPoint);
+  dom.shapeOnlyControls?.classList.toggle("hidden", isPoint);
+  dom.shapeStyleEditVerticesBtn.style.display = isPoint ? "none" : "";
+
+  if (isPoint) {
+    const ms = normalizeDrawnPointMarkerStyle(item.markerStyle);
+    dom.shapeColorInput.value = ms.color;
+    if (dom.pointSizeInput) {
+      dom.pointSizeInput.value = ms.size;
+      dom.pointSizeValue.textContent = ms.size;
+      updateRangeTrack(dom.pointSizeInput);
+    }
+    buildPointIconPickerSvgs();
+    dom.pointIconPicker?.querySelectorAll(".point-icon-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.icon === ms.icon);
+    });
+  } else {
+    const s = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType, { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color });
+    dom.shapeColorInput.value = s.color;
+    dom.shapeLineStyleSelect.value = s.lineStyle ?? "solid";
+    dom.shapeOpacityInput.value = s.fillOpacity;
+    dom.shapeWeightInput.value = s.weight;
+    dom.shapeOpacityValue.textContent = `${Math.round(s.fillOpacity * 100)}%`;
+    dom.shapeWeightValue.textContent = s.weight;
+    updateRangeTrack(dom.shapeOpacityInput);
+    updateRangeTrack(dom.shapeWeightInput);
+  }
 
   // Position to the right of the left panel, aligned to the item's row
   const contentId = `imported:${item.id}`;
@@ -12831,6 +13204,23 @@ function onShapeStyleChanged() {
   const fillColor = previous.color === color ? (previous.fillColor ?? color) : color;
   item.shapeStyle = { color, fillColor, lineStyle, fillOpacity, weight };
   applyShapeStyleToLayer(item);
+  item.layer.setPopupContent(renderImportedItemPopup(item));
+  saveMapState();
+  syncCesiumEntities();
+}
+
+function onPointStyleChanged() {
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (!item || item.geometryType !== "Point") return;
+  const color = dom.shapeColorInput.value;
+  const size = parseInt(dom.pointSizeInput?.value ?? 18, 10);
+  const activeIconBtn = dom.pointIconPicker?.querySelector(".point-icon-btn.active");
+  const icon = activeIconBtn?.dataset.icon ?? item.markerStyle?.icon ?? "dot";
+  if (dom.pointSizeValue) dom.pointSizeValue.textContent = size;
+  updateRangeTrack(dom.pointSizeInput);
+  item.markerStyle = { icon, color, size };
+  const newIcon = buildImportedPointIcon(item.markerStyle);
+  if (newIcon) item.layer.setIcon(newIcon);
   item.layer.setPopupContent(renderImportedItemPopup(item));
   saveMapState();
   syncCesiumEntities();

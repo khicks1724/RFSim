@@ -378,14 +378,6 @@
                     <span class="map-folder-icon-plus">+</span>
                   </span>
                 </button>
-                <!-- Import -->
-                <button id="importBtn" class="ghost-button small icon-button mc-icon-btn" type="button" aria-label="Import file" data-label="Import">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/>
-                    <line x1="12" y1="3" x2="12" y2="15"/>
-                  </svg>
-                </button>
                 <input id="importFileInput" type="file" accept=".kml,.kmz,.geojson,.json,.zip" style="display:none" aria-hidden="true">
                 <!-- Add Emitter -->
                 <button id="addEmitterBtn" class="ghost-button small icon-button add-emitter-btn mc-icon-btn" type="button" aria-label="Add Emitter" data-label="Emitter">
@@ -408,14 +400,15 @@
                     <span class="add-emitter-plus">+</span>
                   </button>
                   <div id="drawDropdown" class="export-dropdown hidden">
+                    <button id="drawPointBtn" class="export-dropdown-item" type="button">Point</button>
                     <button id="drawCircleBtn" class="export-dropdown-item" type="button">Circle</button>
                     <button id="drawRectangleBtn" class="export-dropdown-item" type="button">Rectangle</button>
                     <button id="drawPolylineBtn" class="export-dropdown-item" type="button">Polyline</button>
                   </div>
                 </div>
-                <!-- Export -->
+                <!-- Import / Export -->
                 <div class="export-dropdown-wrapper">
-                  <button id="exportMenuBtn" class="ghost-button small icon-button mc-icon-btn" type="button" aria-label="Export" data-label="Export">
+                  <button id="exportMenuBtn" class="ghost-button small icon-button mc-icon-btn" type="button" aria-label="Import / Export" data-label="I/O">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
                       <polyline points="16 6 12 2 8 6"/>
@@ -423,6 +416,11 @@
                     </svg>
                   </button>
                   <div id="exportDropdown" class="export-dropdown hidden">
+                    <div class="export-dropdown-section-label">Import</div>
+                    <button id="importKmzBtn" class="export-dropdown-item" type="button">KML / KMZ</button>
+                    <button id="importGeoJsonBtn" class="export-dropdown-item" type="button">GeoJSON / ZIP</button>
+                    <div class="export-dropdown-divider"></div>
+                    <div class="export-dropdown-section-label">Export</div>
                     <button id="exportGeoJsonBtn" class="export-dropdown-item" type="button">GeoJSON</button>
                     <button id="exportKmlBtn" class="export-dropdown-item" type="button">KML</button>
                     <button id="exportKmzBtn" class="export-dropdown-item" type="button">KMZ</button>
@@ -662,30 +660,55 @@
   </div>
 
   <div id="shapeStylePanel" class="map-contents-menu shape-style-panel hidden" aria-label="Shape style editor">
-    <div class="shape-style-panel-title">Edit Shape Style</div>
+    <div class="shape-style-panel-title">Edit Style</div>
     <label class="shape-style-row">
       Color
       <input id="shapeColorInput" type="color" value="#3b82f6">
     </label>
-    <label class="shape-style-row">
-      Line Style
-      <select id="shapeLineStyleSelect">
-        <option value="solid">Solid</option>
-        <option value="dashed">Dashed</option>
-        <option value="dotted">Dotted</option>
-      </select>
-    </label>
-    <label class="shape-style-row">
-      Opacity
-      <input id="shapeOpacityInput" type="range" min="0" max="1" step="0.05" value="0.35">
-    </label>
-    <label class="shape-style-row">
-      Line Width
-      <input id="shapeWeightInput" type="range" min="1" max="10" step="1" value="2">
-    </label>
-    <div class="shape-style-row shape-style-hint">
-      <span id="shapeOpacityValue">35%</span> opacity &nbsp;·&nbsp; <span id="shapeWeightValue">2</span>px line
+
+    <!-- Point-only controls -->
+    <div id="pointStyleControls" class="hidden">
+      <div class="shape-style-row shape-style-label-row">Icon</div>
+      <div id="pointIconPicker" class="point-icon-picker">
+        <button class="point-icon-btn active" data-icon="dot" title="Dot" type="button"></button>
+        <button class="point-icon-btn" data-icon="ring" title="Ring" type="button"></button>
+        <button class="point-icon-btn" data-icon="x" title="X" type="button"></button>
+        <button class="point-icon-btn" data-icon="check" title="Check" type="button"></button>
+        <button class="point-icon-btn" data-icon="diamond" title="Diamond" type="button"></button>
+        <button class="point-icon-btn" data-icon="square" title="Square" type="button"></button>
+        <button class="point-icon-btn" data-icon="plus" title="Plus" type="button"></button>
+        <button class="point-icon-btn" data-icon="star" title="Star" type="button"></button>
+      </div>
+      <label class="shape-style-row">
+        Size
+        <input id="pointSizeInput" type="range" min="8" max="40" step="2" value="18">
+      </label>
+      <div class="shape-style-row shape-style-hint"><span id="pointSizeValue">18</span>px</div>
     </div>
+
+    <!-- Shape-only controls -->
+    <div id="shapeOnlyControls">
+      <label class="shape-style-row">
+        Line Style
+        <select id="shapeLineStyleSelect">
+          <option value="solid">Solid</option>
+          <option value="dashed">Dashed</option>
+          <option value="dotted">Dotted</option>
+        </select>
+      </label>
+      <label class="shape-style-row">
+        Opacity
+        <input id="shapeOpacityInput" type="range" min="0" max="1" step="0.05" value="0.35">
+      </label>
+      <label class="shape-style-row">
+        Line Width
+        <input id="shapeWeightInput" type="range" min="1" max="10" step="1" value="2">
+      </label>
+      <div class="shape-style-row shape-style-hint">
+        <span id="shapeOpacityValue">35%</span> opacity &nbsp;·&nbsp; <span id="shapeWeightValue">2</span>px line
+      </div>
+    </div>
+
     <div class="button-row shape-style-actions">
       <button id="shapeStyleEditVerticesBtn" type="button" class="ghost-button small">Edit Vertices</button>
       <button id="shapeStyleDoneBtn" type="button" class="primary-button small">Done</button>

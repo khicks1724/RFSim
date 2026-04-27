@@ -1005,6 +1005,79 @@ body.panel-collapsed .control-panel {
   flex-shrink: 0;
 }
 
+.map-search-geocoder-wrap {
+  position: relative;
+}
+
+.map-search-geocoder-results {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 9000;
+  background: rgba(9, 14, 23, 0.98);
+  border: 1px solid rgba(120, 140, 168, 0.35);
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.55);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.map-search-geocoder-results:empty { display: none; }
+
+.map-search-geocoder-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(120,140,168,0.12);
+  transition: background 0.1s;
+}
+
+.map-search-geocoder-item:last-child { border-bottom: none; }
+
+.map-search-geocoder-item:hover,
+.map-search-geocoder-item.active {
+  background: rgba(142, 179, 255, 0.12);
+}
+
+.map-search-geocoder-item-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: rgba(142, 179, 255, 0.7);
+}
+
+.map-search-geocoder-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.map-search-geocoder-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-search-geocoder-item-sub {
+  font-size: 10px;
+  color: rgba(150, 165, 187, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+.map-search-geocoder-status {
+  padding: 10px 12px;
+  font-size: 11px;
+  color: rgba(150,165,187,0.7);
+  text-align: center;
+}
+
 .map-contents-list {
   flex: 1 1 0;
   min-height: 0;
@@ -2124,6 +2197,22 @@ h2 {
   background: var(--bg-hover);
 }
 
+.export-dropdown-section-label {
+  padding: 5px 12px 3px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(150, 165, 187, 0.55);
+  pointer-events: none;
+}
+
+.export-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+}
+
 .draw-dropdown-wrapper {
   position: relative;
   overflow: visible;
@@ -2166,6 +2255,47 @@ h2 {
 
 .shape-style-row input[type="range"] {
   flex: 1;
+}
+
+.shape-style-label-row {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  justify-content: flex-start;
+  margin-top: 2px;
+}
+
+.point-icon-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.point-icon-btn {
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid rgba(120,140,168,0.28);
+  border-radius: 6px;
+  background: rgba(4,10,18,0.7);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.point-icon-btn:hover {
+  border-color: rgba(142,179,255,0.5);
+  background: rgba(142,179,255,0.08);
+}
+
+.point-icon-btn.active {
+  border-color: rgba(142,179,255,0.9);
+  background: rgba(142,179,255,0.15);
 }
 
 /* ── Range sliders ─────────────────────────────────────────────────────────── */
