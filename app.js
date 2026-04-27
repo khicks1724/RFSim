@@ -11526,10 +11526,6 @@ async function runGeocoderSearch(query) {
   }
 }
 
-function escapeHtml(str) {
-  return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 function initGeocoderOnSearchInput() {
   const input = dom.mapContentsSearchInput;
   if (!input) return;
