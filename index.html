@@ -659,8 +659,12 @@
     <button type="button" class="ghost-button small" data-map-content-action="delete">Delete</button>
   </div>
 
-  <div id="shapeStylePanel" class="map-contents-menu shape-style-panel hidden" aria-label="Shape style editor">
-    <div class="shape-style-panel-title">Edit Style</div>
+  <div id="shapeStyleModal" class="shape-style-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="shapeStyleTitle">
+  <div id="shapeStylePanel" class="shape-style-panel shape-style-modal" aria-label="Shape style editor">
+    <div class="shape-style-modal-header">
+      <div id="shapeStyleTitle" class="shape-style-panel-title">Edit Shape</div>
+      <button id="shapeStyleCloseBtn" class="icon-button ghost-button" type="button" aria-label="Close">&#10005;</button>
+    </div>
     <label class="shape-style-row">
       Color
       <input id="shapeColorInput" type="color" value="#3b82f6">
@@ -681,9 +685,9 @@
       </div>
       <label class="shape-style-row">
         Size
-        <input id="pointSizeInput" type="range" min="8" max="40" step="2" value="18">
+        <input id="pointSizeInput" type="range" min="8" max="40" step="2" value="24">
       </label>
-      <div class="shape-style-row shape-style-hint"><span id="pointSizeValue">18</span>px</div>
+      <div class="shape-style-row shape-style-hint"><span id="pointSizeValue">24</span>px</div>
     </div>
 
     <!-- Shape-only controls -->
@@ -697,6 +701,9 @@
           Radius (meters)
           <input id="circleRadiusInput" type="number" min="1" step="1" value="1000">
         </label>
+        <div class="shape-style-row shape-style-actions-inline">
+          <button id="circleRelocateBtn" type="button" class="ghost-button small">Relocate Center</button>
+        </div>
       </div>
       <label class="shape-style-row">
         Line Style
@@ -723,6 +730,7 @@
       <button id="shapeStyleEditVerticesBtn" type="button" class="ghost-button small">Edit Vertices</button>
       <button id="shapeStyleDoneBtn" type="button" class="primary-button small">Done</button>
     </div>
+  </div>
   </div>
 
   <div id="mapContentsRename" class="map-contents-menu hidden" aria-label="Rename map content">

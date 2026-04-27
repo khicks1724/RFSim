@@ -1075,7 +1075,9 @@ const dom = {
   drawCircleBtn: document.querySelector("#drawCircleBtn"),
   drawRectangleBtn: document.querySelector("#drawRectangleBtn"),
   drawPolylineBtn: document.querySelector("#drawPolylineBtn"),
+  shapeStyleModal: document.querySelector("#shapeStyleModal"),
   shapeStylePanel: document.querySelector("#shapeStylePanel"),
+  shapeStyleCloseBtn: document.querySelector("#shapeStyleCloseBtn"),
   shapeColorInput: document.querySelector("#shapeColorInput"),
   shapeLineStyleSelect: document.querySelector("#shapeLineStyleSelect"),
   shapeOpacityInput: document.querySelector("#shapeOpacityInput"),
@@ -1089,6 +1091,7 @@ const dom = {
   circleShapeControls: document.querySelector("#circleShapeControls"),
   circleCenterInput: document.querySelector("#circleCenterInput"),
   circleRadiusInput: document.querySelector("#circleRadiusInput"),
+  circleRelocateBtn: document.querySelector("#circleRelocateBtn"),
   pointIconPicker: document.querySelector("#pointIconPicker"),
   pointSizeInput: document.querySelector("#pointSizeInput"),
   pointSizeValue: document.querySelector("#pointSizeValue"),
@@ -1278,6 +1281,7 @@ const state = {
   centerElevationRequestId: null,
   cesiumTerrainProviderKey: null,
   relocatingImportedItemId: null,
+  relocatingCircleItemId: null,
   worker: createSimulationWorker(),
   pendingInspection: null,
   pendingPlanningRequestId: null,
@@ -3074,7 +3078,7 @@ async function init() {
   state.map.on("mousemove", onMapMouseMove);
   state.map.on("contextmenu", onMapContextMenu);
   state.map.on("movestart", () => {
-    if (state.relocatingImportedItemId) {
+    if (state.relocatingImportedItemId || state.relocatingCircleItemId) {
       state.ui.suppressImportedRelocateClick = true;
     }
   });
@@ -3332,11 +3336,10 @@ function wireEvents() {
   document.addEventListener("click", closeTopBarMenus);
   document.addEventListener("click", closeMapContentsMenu);
   document.addEventListener("click", closeRenamePopover);
-  document.addEventListener("click", (e) => {
-    if (isShapeVertexEditingActive()) {
-      return;
+  dom.shapeStyleModal?.addEventListener("click", (event) => {
+    if (event.target === dom.shapeStyleModal) {
+      closeShapeStylePanel({ stopEditing: false });
     }
-    if (!dom.shapeStylePanel.contains(e.target)) closeShapeStylePanel({ stopEditing: false });
   });
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
 
@@ -3377,10 +3380,12 @@ function wireEvents() {
   dom.shapeWeightInput.addEventListener("input", onShapeStyleChanged);
   dom.shapeStyleEditVerticesBtn.addEventListener("click", onShapeStyleEditVertices);
   dom.shapeStyleDoneBtn.addEventListener("click", () => closeShapeStylePanel());
+  dom.shapeStyleCloseBtn?.addEventListener("click", () => closeShapeStylePanel());
   dom.pointSizeInput?.addEventListener("input", onPointStyleChanged);
   dom.circleCenterInput?.addEventListener("change", onCircleGeometryChanged);
   dom.circleRadiusInput?.addEventListener("input", onCircleGeometryChanged);
   dom.circleRadiusInput?.addEventListener("change", onCircleGeometryChanged);
+  dom.circleRelocateBtn?.addEventListener("click", startCircleRelocationFromEditor);
   dom.pointIconPicker?.addEventListener("click", (e) => {
     const btn = e.target.closest(".point-icon-btn");
     if (!btn) return;
@@ -3397,6 +3402,7 @@ function wireEvents() {
     if (e.key === "Escape") {
       if (state.relocatingAssetId) { finishAssetRelocation(null); }
       else if (state.relocatingImportedItemId) { finishImportedPointRelocation(null); }
+      else if (state.relocatingCircleItemId) { finishCircleRelocation(null); }
       else if (state.settingsMenuOpen) closeSettingsMenu();
       else if (state.draw.mode) cancelDrawing();
       else if (state.mcSelectMode) toggleMcSelectMode();
@@ -8732,6 +8738,14 @@ function onMapClick(event) {
     finishImportedPointRelocation(event.latlng);
     return;
   }
+  if (state.relocatingCircleItemId) {
+    if (state.ui.suppressImportedRelocateClick) {
+      state.ui.suppressImportedRelocateClick = false;
+      return;
+    }
+    finishCircleRelocation(event.latlng);
+    return;
+  }
 
   if (state.placingAsset) {
     placePendingAssetAt(event.latlng, "2D map");
@@ -13031,7 +13045,7 @@ function normalizeImportedShapeStyle(geometryType, shapeStyle = null) {
 const POINT_ICONS = ["dot", "ring", "x", "check", "diamond", "square", "plus", "star"];
 
 function normalizeDrawnPointMarkerStyle(ms = null) {
-  const defaults = { icon: "dot", color: "#ffffff", size: 18, outlineColor: "#0b1220", outlineWidth: 2 };
+  const defaults = { icon: "dot", color: "#ffffff", size: 24, outlineColor: "#0b1220", outlineWidth: 2 };
   if (!ms || typeof ms !== "object") return defaults;
   return {
     icon: POINT_ICONS.includes(ms.icon) ? ms.icon : defaults.icon,
@@ -13235,7 +13249,7 @@ function onDrawClick(latlng) {
       geometryType: "Point",
       coordinates: [latlng.lat, latlng.lng],
       properties: {},
-      markerStyle: { icon: "dot", color: "#ffffff", size: 18, outlineColor: "#0b1220", outlineWidth: 2 },
+      markerStyle: { icon: "dot", color: "#ffffff", size: 24, outlineColor: "#0b1220", outlineWidth: 2 },
     });
     return;
   }
@@ -13489,16 +13503,7 @@ function openShapeStylePanel(item, anchorEl) {
     }
   }
 
-  // Position to the right of the left panel, aligned to the item's row
-  const contentId = `imported:${item.id}`;
-  const rowEl = dom.mapContentsList?.querySelector(`[data-content-id="${contentId}"]`);
-  const panelRect = dom.mapContentsCard?.getBoundingClientRect() ?? { right: 340, top: 80 };
-  const rowRect = rowEl ? rowEl.getBoundingClientRect() : panelRect;
-  const panelLeft = panelRect.right + 6;
-  const panelTop = Math.min(rowRect.top, window.innerHeight - 360);
-  dom.shapeStylePanel.style.left = `${panelLeft}px`;
-  dom.shapeStylePanel.style.top = `${panelTop}px`;
-  dom.shapeStylePanel.classList.remove("hidden");
+  dom.shapeStyleModal?.classList.remove("hidden");
   syncShapeVertexEditUi(item);
 }
 
@@ -13521,13 +13526,15 @@ function syncShapeVertexEditUi(item) {
   }
 }
 
-function closeShapeStylePanel({ stopEditing = true } = {}) {
-  dom.shapeStylePanel.classList.add("hidden");
+function closeShapeStylePanel({ stopEditing = true, clearEditing = true } = {}) {
+  dom.shapeStyleModal?.classList.add("hidden");
   const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
   if (item && stopEditing) {
     stopShapeVertexEdit(item);
   }
-  state.draw.editingItemId = null;
+  if (clearEditing) {
+    state.draw.editingItemId = null;
+  }
 }
 
 function onShapeStyleChanged() {
@@ -13568,6 +13575,19 @@ function onCircleGeometryChanged() {
     return;
   }
 
+  applyCircleGeometryUpdate(item, parsedCenter, radiusM);
+}
+
+function applyCircleGeometryUpdate(item, center, radiusM) {
+  if (!item || item.geometryType !== "Polygon" || !item.properties?.isCircle) {
+    return;
+  }
+
+  const color = dom.shapeColorInput.value;
+  const lineStyle = dom.shapeLineStyleSelect.value;
+  const fillOpacity = parseFloat(dom.shapeOpacityInput.value);
+  const weight = parseInt(dom.shapeWeightInput.value, 10);
+
   dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}%`;
   dom.shapeWeightValue.textContent = weight;
 
@@ -13578,10 +13598,10 @@ function onCircleGeometryChanged() {
     ...(item.properties ?? {}),
     isCircle: true,
     radiusM,
-    center: { lat: parsedCenter.lat, lng: parsedCenter.lng },
+    center: { lat: center.lat, lng: center.lng },
   };
 
-  const coords = circleToPolygonLatLngs({ lat: parsedCenter.lat, lng: parsedCenter.lng }, radiusM);
+  const coords = circleToPolygonLatLngs({ lat: center.lat, lng: center.lng }, radiusM);
   item.layer.setLatLngs(coords);
   applyShapeStyleToLayer(item);
   item.layer.setPopupContent(renderImportedItemPopup(item));
@@ -13590,11 +13610,54 @@ function onCircleGeometryChanged() {
   syncCesiumEntities();
 }
 
+function startCircleRelocationFromEditor() {
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (!item || item.geometryType !== "Polygon" || !item.properties?.isCircle) {
+    return;
+  }
+  startCircleRelocation(item.id);
+}
+
+function startCircleRelocation(itemId) {
+  const item = state.importedItems.find((entry) => entry.id === itemId && entry.properties?.isCircle);
+  if (!item) return;
+  finishAssetRelocation(null);
+  finishImportedPointRelocation(null);
+  state.relocatingCircleItemId = itemId;
+  state.ui.suppressImportedRelocateClick = false;
+  dom.map?.classList.add("asset-placement-active");
+  dom.cesiumContainer?.classList.add("asset-placement-active");
+  dom.mapStage?.classList.add("asset-placement-active");
+  if (state.map) state.map.getContainer().style.cursor = "crosshair";
+  closeShapeStylePanel({ stopEditing: false, clearEditing: false });
+  updateCenterCrosshairVisibility();
+  setStatus(`Click map to relocate the center of ${item.name}. Press Esc to cancel.`);
+}
+
+function finishCircleRelocation(latlng) {
+  const itemId = state.relocatingCircleItemId;
+  state.relocatingCircleItemId = null;
+  state.ui.suppressImportedRelocateClick = false;
+  dom.map?.classList.remove("asset-placement-active");
+  dom.cesiumContainer?.classList.remove("asset-placement-active");
+  dom.mapStage?.classList.remove("asset-placement-active");
+  if (state.map) state.map.getContainer().style.cursor = "";
+  updateCenterCrosshairVisibility();
+  if (!itemId) return;
+  const item = state.importedItems.find((entry) => entry.id === itemId && entry.properties?.isCircle);
+  if (!item) return;
+  if (latlng) {
+    const radiusM = Number(item.properties?.radiusM) || Math.max(1, Number.parseFloat(dom.circleRadiusInput?.value ?? "") || 1000);
+    applyCircleGeometryUpdate(item, latlng, radiusM);
+  }
+  openShapeStylePanel(item);
+}
+
 function onPointStyleChanged() {
   const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
   if (!item || item.geometryType !== "Point") return;
   const color = dom.shapeColorInput.value;
-  const size = parseInt(dom.pointSizeInput?.value ?? 18, 10);
+  const size = parseInt(dom.pointSizeInput?.value ?? 24, 10);
   const activeIconBtn = dom.pointIconPicker?.querySelector(".point-icon-btn.active");
   const icon = activeIconBtn?.dataset.icon ?? item.markerStyle?.icon ?? "dot";
   if (dom.pointSizeValue) dom.pointSizeValue.textContent = size;
