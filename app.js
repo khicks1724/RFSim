@@ -17990,45 +17990,6 @@ function renderAnalyticsActiveTab() {
   }
 }
 
-function sortRows(rows, col, dir) {
-  if (!col) return rows;
-  return [...rows].sort((a, b) => {
-    const av = a[col] ?? "";
-    const bv = b[col] ?? "";
-    const cmp = typeof av === "number" && typeof bv === "number"
-      ? av - bv
-      : String(av).localeCompare(String(bv), undefined, { numeric: true });
-    return dir === "asc" ? cmp : -cmp;
-  });
-}
-
-function fillTable(tableId, rows, cols) {
-  const tbody = document.querySelector(`#${tableId} tbody`);
-  if (!tbody) return;
-  tbody.innerHTML = "";
-  if (!rows.length) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = cols.length;
-    td.textContent = _analytics.error || "No data";
-    td.style.color = "var(--muted)";
-    td.style.textAlign = "center";
-    td.style.padding = "16px";
-    tr.appendChild(td);
-    tbody.appendChild(tr);
-    return;
-  }
-  for (const row of rows) {
-    const tr = document.createElement("tr");
-    for (const col of cols) {
-      const td = document.createElement("td");
-      td.textContent = row[col] === null || row[col] === undefined ? "" : row[col];
-      tr.appendChild(td);
-    }
-    tbody.appendChild(tr);
-  }
-}
-
 function setAnalyticsTab(tab) {
   _analytics.activeTab = tab;
   _analytics.sortCol = null;
