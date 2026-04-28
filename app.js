@@ -6777,10 +6777,10 @@ async function fetchGenAiMilModels(url, apiKey) {
     throw new Error(`GenAI.mil models request failed: ${networkErr.message}`);
   }
   if (!response.ok) {
-    throw new Error(extractGenAiMilErrorMessage(response.status, bodyText, `GenAI.mil models failed (HTTP ${response.status}).`));
-  }
-  if (isHtmlLikeResponse(bodyText)) {
-    throw new Error(`GenAI.mil models endpoint returned an HTML page instead of JSON (${url}).`);
+    const detail = isHtmlLikeResponse(bodyText)
+      ? bodyText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300)
+      : bodyText.slice(0, 300);
+    throw new Error(`GenAI.mil models (HTTP ${response.status}): ${detail}`);
   }
   let parsed;
   try { parsed = JSON.parse(bodyText); } catch {
@@ -6808,10 +6808,10 @@ async function postGenAiMilChat(url, apiKey, payload) {
     throw new Error(`GenAI.mil chat request failed: ${networkErr.message}`);
   }
   if (!response.ok) {
-    throw new Error(extractGenAiMilErrorMessage(response.status, bodyText, `GenAI.mil chat failed (HTTP ${response.status}).`));
-  }
-  if (isHtmlLikeResponse(bodyText)) {
-    throw new Error(`GenAI.mil chat endpoint returned an HTML page instead of JSON (${url}).`);
+    const detail = isHtmlLikeResponse(bodyText)
+      ? bodyText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300)
+      : bodyText.slice(0, 300);
+    throw new Error(`GenAI.mil chat (HTTP ${response.status}): ${detail}`);
   }
   let parsed;
   try { parsed = JSON.parse(bodyText); } catch {
@@ -6850,8 +6850,7 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
   }
 
   if (!models) {
-    const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean)
-      || "GenAI.mil model discovery failed. GenAI.mil may only be reachable from approved networks.";
+    const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean) || "GenAI.mil model discovery failed.";
     throw new Error(msg);
   }
 
@@ -7336,8 +7335,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
     }
   }
 
-  const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean)
-    || "GenAI.mil request failed. GenAI.mil may only be reachable from approved networks.";
+  const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean) || "GenAI.mil request failed.";
   throw new Error(msg);
 }
 
