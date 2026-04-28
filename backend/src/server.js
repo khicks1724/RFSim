@@ -115,9 +115,12 @@ async function relayGenAiMil(response, upstreamUrl, { apiKey, body, method = "PO
     const upstream = await fetch(upstreamUrl, {
       method,
       headers: {
+        "Accept": "application/json",
         "Authorization": `Bearer ${apiKey}`,
+        "X-Api-Key": apiKey,
         ...(bodyJson ? { "Content-Type": "application/json" } : {}),
       },
+      signal: AbortSignal.timeout(30000),
       ...(bodyJson ? { body: bodyJson } : {}),
     });
 
@@ -581,32 +584,64 @@ app.post("/api/analytics/event", authRequired, async (request, response) => {
 
 app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, response) => {
   try {
-    const analyticsAvailable = await query("select to_regclass('public.analytics_event') as analytics_table");
-    const hasAnalyticsTable = Boolean(analyticsAvailable.rows[0]?.analytics_table);
+    const tableAvailability = await query(`
+      select
+        to_regclass('public.analytics_event') as analytics_table,
+        to_regclass('public.project') as project_table,
+        to_regclass('public.project_snapshot') as project_snapshot_table
+    `);
+    const hasAnalyticsTable = Boolean(tableAvailability.rows[0]?.analytics_table);
+    const hasProjectTable = Boolean(tableAvailability.rows[0]?.project_table);
+    const hasProjectSnapshotTable = Boolean(tableAvailability.rows[0]?.project_snapshot_table);
+
+    let usersQuery;
+    if (hasAnalyticsTable && hasProjectTable) {
+      usersQuery = query(`
+        select u.id, u.full_name as username, u.email, u.created_at,
+               count(distinct p.id)::int as project_count,
+               count(distinct case when e.event_type='visit' then e.id end)::int as visit_count,
+               max(e.created_at) as last_seen
+        from app_user u
+        left join project p on p.owner_user_id = u.id
+        left join analytics_event e on e.user_id = u.id
+        group by u.id
+        order by last_seen desc nulls last, u.created_at desc
+      `);
+    } else if (hasProjectTable) {
+      usersQuery = query(`
+        select u.id, u.full_name as username, u.email, u.created_at,
+               count(distinct p.id)::int as project_count,
+               0::int as visit_count,
+               null::timestamptz as last_seen
+        from app_user u
+        left join project p on p.owner_user_id = u.id
+        group by u.id
+        order by u.created_at desc
+      `);
+    } else if (hasAnalyticsTable) {
+      usersQuery = query(`
+        select u.id, u.full_name as username, u.email, u.created_at,
+               0::int as project_count,
+               count(distinct case when e.event_type='visit' then e.id end)::int as visit_count,
+               max(e.created_at) as last_seen
+        from app_user u
+        left join analytics_event e on e.user_id = u.id
+        group by u.id
+        order by last_seen desc nulls last, u.created_at desc
+      `);
+    } else {
+      usersQuery = query(`
+        select u.id, u.full_name as username, u.email, u.created_at,
+               0::int as project_count,
+               0::int as visit_count,
+               null::timestamptz as last_seen
+        from app_user u
+        order by u.created_at desc
+      `);
+    }
 
     const [usersRes, eventsRes, aiRes, projectsRes, dailyRes] = await Promise.all([
-      hasAnalyticsTable
-        ? query(`
-            select u.id, u.full_name as username, u.email, u.created_at,
-                   count(distinct p.id)::int                               as project_count,
-                   count(distinct case when e.event_type='visit' then e.id end)::int as visit_count,
-                   max(e.created_at)                                       as last_seen
-            from app_user u
-            left join project p on p.owner_user_id = u.id
-            left join analytics_event e on e.user_id = u.id
-            group by u.id
-            order by last_seen desc nulls last, u.created_at desc
-          `)
-        : query(`
-            select u.id, u.full_name as username, u.email, u.created_at,
-                   count(distinct p.id)::int as project_count,
-                   0::int                    as visit_count,
-                   null::timestamptz         as last_seen
-            from app_user u
-            left join project p on p.owner_user_id = u.id
-            group by u.id
-            order by u.created_at desc
-          `),
+      usersQuery,
       hasAnalyticsTable
         ? query(`
             select e.id, e.username, e.event_type, e.provider, e.model,
@@ -628,13 +663,17 @@ app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, re
             order by total_input + total_output desc
           `)
         : Promise.resolve({ rows: [] }),
-      query(`
-        select u.full_name as username, p.name, p.created_at, p.updated_at,
-               (select count(*) from project_snapshot s where s.project_id = p.id)::int as snapshot_count
-        from project p
-        join app_user u on u.id = p.owner_user_id
-        order by p.updated_at desc
-      `),
+      hasProjectTable
+        ? query(`
+            select u.full_name as username, p.name, p.created_at, p.updated_at,
+                   ${hasProjectSnapshotTable
+                     ? "(select count(*) from project_snapshot s where s.project_id = p.id)::int"
+                     : "0::int"} as snapshot_count
+            from project p
+            join app_user u on u.id = p.owner_user_id
+            order by p.updated_at desc
+          `)
+        : Promise.resolve({ rows: [] }),
       hasAnalyticsTable
         ? query(`
             select date_trunc('day', created_at)::date as day,
