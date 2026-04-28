@@ -18254,7 +18254,7 @@ function getSortableAnalyticsValue(value) {
   return value ?? "";
 }
 
-function sortRowsLegacy(rows, col, dir) {
+function sortRows(rows, col, dir) {
   if (!col) return rows;
   return [...rows].sort((a, b) => {
     const av = getSortableAnalyticsValue(a[col]);
@@ -18266,6 +18266,10 @@ function sortRowsLegacy(rows, col, dir) {
       : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
     return dir === "asc" ? cmp : -cmp;
   });
+}
+
+function sortRowsLegacy(rows, col, dir) {
+  return sortRows(rows, col, dir);
 }
 
 function fillTable(tableId, rows, cols) {
@@ -18302,30 +18306,183 @@ function fillTable(tableId, rows, cols) {
   }
 }
 
+function ensureAnalyticsChrome() {
+  const titleNote = document.querySelector("#analyticsModal .emitter-modal-title-group p");
+  if (titleNote) {
+    titleNote.textContent = "Usage monitoring for users, projects, prompts, providers, and token spend. Visible only to kyle.hicks.";
+  }
+
+  const filterBar = dom.analyticsSearchInput?.closest(".analytics-filter-bar");
+  if (filterBar && !document.getElementById("analyticsResultsMeta")) {
+    const meta = document.createElement("div");
+    meta.id = "analyticsResultsMeta";
+    meta.className = "analytics-results-meta";
+    meta.textContent = "Loading analytics...";
+    filterBar.insertBefore(meta, dom.analyticsRefreshBtn ?? null);
+  }
+
+  const sidebar = document.querySelector(".analytics-sidebar");
+  if (!sidebar || sidebar.dataset.enhanced === "true") return;
+
+  const visitCanvas = document.getElementById("analyticsVisitChart");
+  const tokenCanvas = document.getElementById("analyticsTokenChart");
+  const visitTitle = visitCanvas?.previousElementSibling?.classList.contains("analytics-chart-title")
+    ? visitCanvas.previousElementSibling
+    : null;
+  const tokenTitle = tokenCanvas?.previousElementSibling?.classList.contains("analytics-chart-title")
+    ? tokenCanvas.previousElementSibling
+    : null;
+  if (!visitCanvas || !tokenCanvas || !visitTitle || !tokenTitle) return;
+
+  const makeSidebarCard = (titleNode, contentNode) => {
+    const card = document.createElement("section");
+    card.className = "analytics-sidebar-card";
+    card.appendChild(titleNode);
+    card.appendChild(contentNode);
+    return card;
+  };
+
+  visitCanvas.width = 260;
+  visitCanvas.height = 140;
+  tokenCanvas.width = 260;
+  tokenCanvas.height = 160;
+
+  const quickTotalsCard = document.createElement("section");
+  quickTotalsCard.className = "analytics-sidebar-card";
+  quickTotalsCard.innerHTML = `
+    <div class="analytics-chart-title">Quick Totals</div>
+    <div class="analytics-stat-list">
+      <div class="analytics-stat-item">
+        <span class="analytics-stat-label">Input tokens</span>
+        <span id="analyticsInputTokens" class="analytics-stat-value">&mdash;</span>
+      </div>
+      <div class="analytics-stat-item">
+        <span class="analytics-stat-label">Output tokens</span>
+        <span id="analyticsOutputTokens" class="analytics-stat-value">&mdash;</span>
+      </div>
+      <div class="analytics-stat-item">
+        <span class="analytics-stat-label">Snapshots</span>
+        <span id="analyticsSnapshots" class="analytics-stat-value">&mdash;</span>
+      </div>
+      <div class="analytics-stat-item">
+        <span class="analytics-stat-label">Active users (7d)</span>
+        <span id="analyticsActive7d" class="analytics-stat-value">&mdash;</span>
+      </div>
+    </div>
+  `;
+
+  sidebar.replaceChildren(
+    makeSidebarCard(visitTitle, visitCanvas),
+    makeSidebarCard(tokenTitle, tokenCanvas),
+    quickTotalsCard
+  );
+  sidebar.dataset.enhanced = "true";
+}
+
+function getAnalyticsActiveRows() {
+  const tableRowCount = (tableId) => {
+    const rows = Array.from(document.querySelectorAll(`#${tableId} tbody tr`));
+    if (rows.length === 1 && rows[0]?.children?.length === 1 && rows[0].children[0].colSpan > 1) {
+      return 0;
+    }
+    return rows.length;
+  };
+  if (_analytics.activeTab === "overview") {
+    return new Array(
+      tableRowCount("analyticsOverviewProvidersTable")
+      + tableRowCount("analyticsOverviewIntentsTable")
+      + tableRowCount("analyticsOverviewUsersTable")
+    ).fill(null);
+  }
+  if (_analytics.activeTab === "users") return new Array(tableRowCount("analyticsUsersTable")).fill(null);
+  if (_analytics.activeTab === "ai") return new Array(tableRowCount("analyticsAiTable")).fill(null);
+  if (_analytics.activeTab === "projects") return new Array(tableRowCount("analyticsProjectsTable")).fill(null);
+  return new Array(tableRowCount("analyticsEventsTable")).fill(null);
+}
+
+function renderAnalyticsMeta() {
+  const metaEl = document.getElementById("analyticsResultsMeta");
+  if (!metaEl) return;
+  const totalRows = getAnalyticsActiveRows().length;
+  const filter = _analytics.filterText.trim();
+  const labelByTab = {
+    overview: "overview groups",
+    users: "users",
+    ai: "AI usage rows",
+    projects: "projects",
+    events: "activity events",
+  };
+  const tabLabel = labelByTab[_analytics.activeTab] ?? "rows";
+  if (_analytics.error) {
+    metaEl.textContent = _analytics.error;
+    metaEl.classList.add("is-error");
+    return;
+  }
+  metaEl.classList.remove("is-error");
+  metaEl.textContent = filter
+    ? `${totalRows} ${tabLabel} matched "${filter}"`
+    : `${totalRows} ${tabLabel}`;
+}
+
+function renderAnalyticsHighlights() {
+  const summary = (_analytics.data ?? getEmptyAnalyticsPayload()).summary ?? {};
+  const inputEl = document.getElementById("analyticsInputTokens");
+  const outputEl = document.getElementById("analyticsOutputTokens");
+  const snapshotsEl = document.getElementById("analyticsSnapshots");
+  const active7dEl = document.getElementById("analyticsActive7d");
+  if (inputEl) inputEl.textContent = formatAnalyticsCompactNumber(summary.total_input_tokens);
+  if (outputEl) outputEl.textContent = formatAnalyticsCompactNumber(summary.total_output_tokens);
+  if (snapshotsEl) snapshotsEl.textContent = formatAnalyticsCompactNumber(summary.total_snapshots);
+  if (active7dEl) active7dEl.textContent = formatAnalyticsCompactNumber(summary.active_users_7d);
+}
+
+function setAnalyticsOpenState(isOpen) {
+  dom.analyticsModal?.classList.toggle("hidden", !isOpen);
+  document.body.classList.toggle("emitter-modal-open", Boolean(isOpen));
+}
+
 function openAnalyticsModal() {
   if (!isAnalyticsAdmin()) {
     closeAnalyticsModal();
     return;
   }
-  dom.analyticsModal?.classList.remove("hidden");
+  ensureAnalyticsChrome();
+  setAnalyticsOpenState(true);
   fetchAndRenderAnalytics();
 }
 
 function closeAnalyticsModal() {
-  dom.analyticsModal?.classList.add("hidden");
+  setAnalyticsOpenState(false);
 }
 
 async function fetchAndRenderAnalytics() {
   try {
     _analytics.error = "";
-    _analytics.data = await apiFetch("/admin/analytics");
+    const payload = await apiFetch("/admin/analytics");
+    _analytics.data = {
+      ...getEmptyAnalyticsPayload(),
+      ...(payload ?? {}),
+      summary: {
+        ...getEmptyAnalyticsPayload().summary,
+        ...((payload ?? {}).summary ?? {}),
+      },
+      users: Array.isArray(payload?.users) ? payload.users : [],
+      events: Array.isArray(payload?.events) ? payload.events : [],
+      aiUsage: Array.isArray(payload?.aiUsage) ? payload.aiUsage : [],
+      projects: Array.isArray(payload?.projects) ? payload.projects : [],
+      daily: Array.isArray(payload?.daily) ? payload.daily : [],
+      providers: Array.isArray(payload?.providers) ? payload.providers : [],
+      intents: Array.isArray(payload?.intents) ? payload.intents : [],
+    };
   } catch (err) {
     _analytics.data = getEmptyAnalyticsPayload();
     _analytics.error = err?.message || "Analytics request failed.";
     console.error("Analytics fetch failed:", err);
   }
   renderAnalyticsKpis();
+  renderAnalyticsHighlights();
   renderAnalyticsActiveTab();
+  renderAnalyticsMeta();
   drawAnalyticsCharts();
 }
 
@@ -18465,11 +18622,18 @@ function renderAnalyticsActiveTab() {
   if (!_analytics.data) {
     _analytics.data = getEmptyAnalyticsPayload();
   }
-  if (_analytics.activeTab === "overview") return renderAnalyticsOverview();
-  if (_analytics.activeTab === "users") return renderAnalyticsUsers();
-  if (_analytics.activeTab === "ai") return renderAnalyticsAiUsage();
-  if (_analytics.activeTab === "projects") return renderAnalyticsProjects();
-  return renderAnalyticsEvents();
+  if (_analytics.activeTab === "overview") {
+    renderAnalyticsOverview();
+  } else if (_analytics.activeTab === "users") {
+    renderAnalyticsUsers();
+  } else if (_analytics.activeTab === "ai") {
+    renderAnalyticsAiUsage();
+  } else if (_analytics.activeTab === "projects") {
+    renderAnalyticsProjects();
+  } else {
+    renderAnalyticsEvents();
+  }
+  renderAnalyticsMeta();
 }
 
 function setAnalyticsTab(tab) {
@@ -18499,6 +18663,16 @@ function updateSortSelect(tab) {
   };
   sel.innerHTML = (options[tab] ?? [["", "Default"]]).map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
   sel.value = "";
+  if (dom.analyticsSearchInput) {
+    const placeholders = {
+      overview: "Filter providers, intents, or active users",
+      users: "Filter by user, email, provider, or intent",
+      ai: "Filter by user, provider, model, or intent",
+      projects: "Filter by owner, project, description, or intent",
+      events: "Filter by user, event, provider, project, or prompt",
+    };
+    dom.analyticsSearchInput.placeholder = placeholders[tab] ?? "Filter analytics data";
+  }
 }
 
 function drawAnalyticsCharts() {
@@ -18559,6 +18733,7 @@ function drawTokenBarChart() {
 }
 
 function initAnalytics() {
+  ensureAnalyticsChrome();
   dom.workspaceAnalyticsBtn?.addEventListener("click", () => {
     if (!isAnalyticsAdmin()) {
       return;
@@ -18598,6 +18773,11 @@ function initAnalytics() {
       th.classList.add(_analytics.sortDir === "asc" ? "sort-asc" : "sort-desc");
       renderAnalyticsActiveTab();
     });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && dom.analyticsModal && !dom.analyticsModal.classList.contains("hidden")) {
+      closeAnalyticsModal();
+    }
   });
   updateSortSelect("overview");
 }
