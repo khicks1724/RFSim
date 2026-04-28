@@ -6737,82 +6737,89 @@ function isHtmlLikeResponse(text = "") {
     || normalized.startsWith("<body");
 }
 
-function summarizeGenAiMilErrors(errors, fallbackMessage) {
-  const messages = errors
-    .map((error) => error?.message)
-    .filter(Boolean)
-    .filter((message, index, list) => list.indexOf(message) === index);
-  return new Error(messages.length ? messages[0] : fallbackMessage);
-}
+// ---------------------------------------------------------------------------
+// GenAI.mil (STARK) helpers
+//
+// Call priority:
+//   Deployed site  → nginx /genai-mil/v1/ proxy (same origin, no CORS issue,
+//                    nginx sets Host: api.genai.mil and handles TLS)
+//   Localhost      → direct to api.genai.mil (no CORS restriction from 127.0.0.1)
+//                    fallback: local genai-proxy on port 8787
+// ---------------------------------------------------------------------------
 
-function shouldPreferHostedGenAiMilSiteProxy() {
-  return false;
-}
-
-function shouldUseBackendRelayFirstForGenAiMil() {
-  const { protocol, hostname } = window.location;
-  if (!/^https?:$/.test(protocol)) return false;
-  return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1";
-}
-
-function shouldAllowLocalGenAiMilProxyFallback() {
-  if (state.session.token) {
-    return false;
-  }
+function isLocalhost() {
   const { hostname } = window.location;
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
-async function callGenAiMilModelsEndpoint(url, apiKey) {
-  return await fetch(url, {
-    method: "GET",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-    },
-  });
+// Parse a GenAI.mil API error from a raw response body text
+function extractGenAiMilErrorMessage(status, bodyText, fallback) {
+  if (!isHtmlLikeResponse(bodyText)) {
+    try {
+      const obj = JSON.parse(bodyText);
+      const msg = obj?.error?.message || obj?.detail || obj?.message;
+      if (msg) return `GenAI.mil (${status}): ${msg}`;
+    } catch {}
+  }
+  return fallback || `GenAI.mil request failed (HTTP ${status}).`;
 }
 
-async function fetchGenAiMilModelsFrom(url, apiKey) {
-  const response = await callGenAiMilModelsEndpoint(url, apiKey);
-  const bodyText = await response.text();
+// Fetch the models list from a given URL using a STARK Bearer token
+async function fetchGenAiMilModels(url, apiKey) {
+  let response, bodyText;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${apiKey}` },
+    });
+    bodyText = await response.text();
+  } catch (networkErr) {
+    throw new Error(`GenAI.mil models request failed: ${networkErr.message}`);
+  }
   if (!response.ok) {
-    throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil model discovery failed (HTTP ${response.status}).`);
+    throw new Error(extractGenAiMilErrorMessage(response.status, bodyText, `GenAI.mil models failed (HTTP ${response.status}).`));
   }
   if (isHtmlLikeResponse(bodyText)) {
-    throw new Error("GenAI.mil model discovery returned HTML instead of JSON. The hosted reverse-proxy path may not be deployed yet.");
+    throw new Error(`GenAI.mil models endpoint returned an HTML page instead of JSON (${url}).`);
   }
   let parsed;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
+  try { parsed = JSON.parse(bodyText); } catch {
     throw new Error("GenAI.mil returned a non-JSON model list.");
   }
   const models = parseGenAiMilModelsPayload(parsed);
-  if (!models.length) {
-    throw new Error("GenAI.mil returned no usable models for this key.");
-  }
+  if (!models.length) throw new Error("GenAI.mil returned no usable models for this key.");
   return models;
 }
 
-async function fetchGenAiMilModelsFromBackend(apiKey) {
-  const relayRes = await fetch(`${API_BASE_URL}${GENAI_MIL_BACKEND_MODELS_PATH}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey }),
-  });
-  const bodyText = await relayRes.text();
-  if (!relayRes.ok) {
-    throw parseGenAiMilApiError(relayRes.status, bodyText, `GenAI.mil models failed (${relayRes.status}).`);
+// Send a chat/completions request to a given URL using a STARK Bearer token
+async function postGenAiMilChat(url, apiKey, payload) {
+  let response, bodyText;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    bodyText = await response.text();
+  } catch (networkErr) {
+    throw new Error(`GenAI.mil chat request failed: ${networkErr.message}`);
+  }
+  if (!response.ok) {
+    throw new Error(extractGenAiMilErrorMessage(response.status, bodyText, `GenAI.mil chat failed (HTTP ${response.status}).`));
   }
   if (isHtmlLikeResponse(bodyText)) {
-    throw new Error("GenAI.mil model discovery returned HTML instead of JSON through the site backend relay.");
+    throw new Error(`GenAI.mil chat endpoint returned an HTML page instead of JSON (${url}).`);
   }
-  const payload = JSON.parse(bodyText);
-  const models = parseGenAiMilModelsPayload(payload);
-  if (!models.length) {
-    throw new Error("GenAI.mil returned no usable models for this key.");
+  let parsed;
+  try { parsed = JSON.parse(bodyText); } catch {
+    throw new Error("GenAI.mil returned a non-JSON chat response.");
   }
-  return models;
+  const content = parsed?.choices?.[0]?.message?.content;
+  if (!content) throw new Error("GenAI.mil returned an empty completion.");
+  return content;
 }
 
 async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels = false } = {}) {
@@ -6822,47 +6829,30 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
     return returnModels ? cachedModels : state.ai.model;
   }
 
+  const errors = [];
   let models;
-  const attemptErrors = [];
 
-  if (shouldUseBackendRelayFirstForGenAiMil()) {
-    try {
-      models = await fetchGenAiMilModelsFromBackend(state.ai.apiKey);
-    } catch (error) {
-      attemptErrors.push(error);
-    }
-  }
-
-  // Direct browser → api.genai.mil (works if they support CORS for this origin)
-  if (!models && !shouldUseBackendRelayFirstForGenAiMil()) {
-    try {
-      models = await fetchGenAiMilModelsFrom(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey);
-    } catch (error) {
-      attemptErrors.push(error);
-    }
-  }
-
-  // Backend relay (Node → api.genai.mil)
-  if (!models && !shouldUseBackendRelayFirstForGenAiMil()) {
-    try {
-      models = await fetchGenAiMilModelsFromBackend(state.ai.apiKey);
-    } catch (error) {
-      attemptErrors.push(error);
-    }
-  }
-
-  // Local dev proxy fallback (localhost only)
-  if (!models && shouldAllowLocalGenAiMilProxyFallback()) {
-    try {
-      models = await fetchGenAiMilModelsFrom(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
-      state.ai.statusMessage = "GenAI.mil model discovery succeeded through the local proxy on 127.0.0.1:8787.";
-    } catch (proxyError) {
-      attemptErrors.push(proxyError);
+  if (!isLocalhost()) {
+    // Deployed site: nginx proxies /genai-mil/v1/ → api.genai.mil server-side (no CORS)
+    try { models = await fetchGenAiMilModels(GENAI_MIL_SITE_PROXY_MODELS_ENDPOINT, state.ai.apiKey); }
+    catch (e) { errors.push(e); }
+  } else {
+    // Localhost: direct call (no CORS restriction from 127.0.0.1)
+    try { models = await fetchGenAiMilModels(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey); }
+    catch (e) { errors.push(e); }
+    // Localhost fallback: local genai-proxy on 8787
+    if (!models && !state.session.token) {
+      try {
+        models = await fetchGenAiMilModels(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
+        state.ai.statusMessage = "Connected via local GenAI proxy (127.0.0.1:8787).";
+      } catch (e) { errors.push(e); }
     }
   }
 
   if (!models) {
-    throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil model discovery failed.");
+    const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean)
+      || "GenAI.mil model discovery failed. GenAI.mil may only be reachable from approved networks.";
+    throw new Error(msg);
   }
 
   setDiscoveredAiProviderModels("genai-mil", models);
@@ -6882,9 +6872,7 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
       return;
     }
     state.ai.status = "testing";
-    state.ai.statusMessage = shouldUseBackendRelayFirstForGenAiMil()
-      ? "Loading GenAI.mil models for this key through the site backend relay, then validating the selected model."
-      : "Loading GenAI.mil models for this key, then validating the selected model.";
+    state.ai.statusMessage = "Loading GenAI.mil models and validating the selected model...";
     syncAiUi();
     try {
       const models = await ensureGenAiMilModelsLoaded({ forceRefresh: true, returnModels: true });
@@ -7330,99 +7318,27 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
 
 async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
   const selectedModel = await ensureGenAiMilModelsLoaded();
-  const payload = {
-    model: selectedModel,
-    messages,
-    max_tokens: maxTokens,
-    temperature,
-  };
+  const payload = { model: selectedModel, messages, max_tokens: maxTokens, temperature };
+  const errors = [];
 
-  const attemptErrors = [];
-
-  async function tryGenAiMilEndpoint(url) {
-    const response = await callGenAiMilEndpoint(url, state.ai.apiKey, payload);
-    const bodyText = await response.text();
-    if (!response.ok) {
-      throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil request failed (HTTP ${response.status}).`);
-    }
-    if (isHtmlLikeResponse(bodyText)) {
-      throw new Error("GenAI.mil chat returned HTML instead of JSON.");
-    }
-    const parsed = JSON.parse(bodyText);
-    const content = parsed?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("GenAI.mil returned an empty completion.");
-    return content;
-  }
-
-  if (shouldUseBackendRelayFirstForGenAiMil()) {
-    try {
-      const relayRes = await fetch(`${API_BASE_URL}${GENAI_MIL_BACKEND_CHAT_PATH}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: state.ai.apiKey, ...payload }),
-      });
-      const bodyText = await relayRes.text();
-      if (!relayRes.ok) {
-        throw parseGenAiMilApiError(relayRes.status, bodyText, `GenAI.mil request failed (${relayRes.status}).`);
-      }
-      if (isHtmlLikeResponse(bodyText)) {
-        throw new Error("GenAI.mil chat returned HTML instead of JSON through the site backend relay.");
-      }
-      const parsed = JSON.parse(bodyText);
-      const content = parsed?.choices?.[0]?.message?.content;
-      if (!content) throw new Error("GenAI.mil returned an empty completion.");
-      return content;
-    } catch (error) {
-      attemptErrors.push(error);
+  if (!isLocalhost()) {
+    // Deployed site: nginx proxy
+    try { return await postGenAiMilChat(GENAI_MIL_SITE_PROXY_ENDPOINT, state.ai.apiKey, payload); }
+    catch (e) { errors.push(e); }
+  } else {
+    // Localhost: direct call
+    try { return await postGenAiMilChat(GENAI_MIL_ENDPOINT, state.ai.apiKey, payload); }
+    catch (e) { errors.push(e); }
+    // Localhost fallback: local proxy on 8787
+    if (!state.session.token) {
+      try { return await postGenAiMilChat(GENAI_MIL_PROXY_ENDPOINT, state.ai.apiKey, payload); }
+      catch (e) { errors.push(e); }
     }
   }
 
-  // Direct browser → api.genai.mil
-  if (!shouldUseBackendRelayFirstForGenAiMil()) {
-    try {
-      return await tryGenAiMilEndpoint(GENAI_MIL_ENDPOINT);
-    } catch (error) {
-      attemptErrors.push(error);
-    }
-  }
-
-  // Backend relay
-  if (!shouldUseBackendRelayFirstForGenAiMil()) {
-    try {
-      const relayRes = await fetch(`${API_BASE_URL}${GENAI_MIL_BACKEND_CHAT_PATH}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: state.ai.apiKey, ...payload }),
-      });
-      const bodyText = await relayRes.text();
-      if (!relayRes.ok) {
-        throw parseGenAiMilApiError(relayRes.status, bodyText, `GenAI.mil request failed (${relayRes.status}).`);
-      }
-      if (isHtmlLikeResponse(bodyText)) {
-        throw new Error("GenAI.mil chat returned HTML instead of JSON through the site backend relay.");
-      }
-      const parsed = JSON.parse(bodyText);
-      const content = parsed?.choices?.[0]?.message?.content;
-      if (!content) throw new Error("GenAI.mil returned an empty completion.");
-      return content;
-    } catch (error) {
-      attemptErrors.push(error);
-    }
-  }
-
-  throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed.");
-
-}
-
-async function callGenAiMilEndpoint(url, apiKey, payload) {
-  return await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean)
+    || "GenAI.mil request failed. GenAI.mil may only be reachable from approved networks.";
+  throw new Error(msg);
 }
 
 async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
