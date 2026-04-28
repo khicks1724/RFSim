@@ -1848,16 +1848,19 @@ body:not(.ai-panel-open) .ai-panel {
 
 /* @mention autocomplete dropdown */
 .ai-mention-dropdown {
-  position: relative;
-  width: 100%;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  width: auto;
   background: var(--bg-card, #1e2229);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -6px 16px rgba(0,0,0,0.5);
   max-height: 180px;
   overflow-y: auto;
   z-index: 9100;
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
 
 .ai-mention-item {
@@ -1883,32 +1886,40 @@ body:not(.ai-panel-open) .ai-panel {
   flex-shrink: 0;
 }
 
-/* Slash command autocomplete dropdown */
-.ai-slash-dropdown {
+/* Slash command input wrapper — positions dropdowns above textarea */
+.ai-input-wrap {
   position: relative;
   width: 100%;
-  background: var(--bg-card, #1e2229);
-  border: 1px solid var(--border);
-  border-top: 2px solid #3b82f6;
-  border-radius: 6px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-  max-height: 260px;
+}
+
+/* Slash command autocomplete dropdown */
+.ai-slash-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: #1a1f2e;
+  border: 1px solid rgba(99,102,241,0.5);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -6px 24px rgba(0,0,0,0.6);
+  max-height: calc(5 * 44px);
   overflow-y: auto;
   z-index: 9100;
-  margin-bottom: 4px;
 }
 
 .ai-slash-item {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 160px 1fr auto;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 12px;
+  padding: 10px 14px;
   font-size: 12px;
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  min-height: 44px;
 }
 
 .ai-slash-item:last-child {
@@ -1917,30 +1928,31 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-slash-item:hover,
 .ai-slash-item.active {
-  background: var(--bg-selection-strong);
+  background: rgba(99,102,241,0.15);
 }
 
 .ai-slash-cmd {
   font-family: monospace;
-  font-size: 11px;
-  color: #60a5fa;
+  font-size: 11.5px;
+  color: #93c5fd;
   white-space: nowrap;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .ai-slash-label {
-  color: var(--text-primary, #e2e8f0);
+  color: #cbd5e1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 12px;
 }
 
 .ai-slash-category {
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 9px;
-  background: rgba(99,102,241,0.18);
-  color: #a5b4fc;
+  background: rgba(99,102,241,0.25);
+  color: #c4b5fd;
   white-space: nowrap;
   flex-shrink: 0;
 }

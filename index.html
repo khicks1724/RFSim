@@ -649,12 +649,14 @@
             <div id="aiFileChips" class="ai-context-chips"></div>
             <div id="aiContextChips" class="ai-context-chips"></div>
           </div>
-          <label>
-            Chat Prompt
-            <textarea id="aiChatInput" rows="4" placeholder="Ask anything, or type / for RF analysis commands, @ to mention map items. Paste images directly." disabled></textarea>
-          </label>
-          <div id="aiMentionDropdown" class="ai-mention-dropdown hidden"></div>
-          <div id="aiSlashDropdown" class="ai-slash-dropdown hidden"></div>
+          <div class="ai-input-wrap">
+            <div id="aiMentionDropdown" class="ai-mention-dropdown hidden"></div>
+            <div id="aiSlashDropdown" class="ai-slash-dropdown hidden"></div>
+            <label>
+              Chat Prompt
+              <textarea id="aiChatInput" rows="4" placeholder="Ask anything, or type / for RF analysis commands, @ to mention map items. Paste images directly." disabled></textarea>
+            </label>
+          </div>
           <div class="button-row ai-chat-actions">
             <div class="ai-attach-group">
               <div class="ai-context-picker-wrapper">

@@ -5824,7 +5824,41 @@ function onAiChatKeyDown(event) {
       items[idx <= 0 ? 0 : idx - 1]?.classList.add("active");
       return;
     }
-    if (event.key === "Tab" || event.key === "Enter") {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      if (active) {
+        active.click();
+        return;
+      }
+      // Terminal-style: complete to longest common prefix or sole match
+      const val = dom.aiChatInput.value;
+      const slashMatch = val.match(/^(\/[^\s]*)$/);
+      if (slashMatch) {
+        const partial = slashMatch[1].toLowerCase();
+        const matched = SLASH_COMMANDS.filter(c => c.cmd.startsWith(partial));
+        if (matched.length === 1) {
+          applySlashCommand(matched[0]);
+        } else if (matched.length > 1) {
+          // Complete to longest common prefix
+          let prefix = matched[0].cmd;
+          for (const sc of matched) {
+            let i = 0;
+            while (i < prefix.length && i < sc.cmd.length && prefix[i] === sc.cmd[i]) i++;
+            prefix = prefix.slice(0, i);
+          }
+          if (prefix.length > partial.length) {
+            dom.aiChatInput.value = prefix;
+            dom.aiChatInput.selectionStart = dom.aiChatInput.selectionEnd = prefix.length;
+            onAiChatInput();
+          } else {
+            // Highlight first item so next Tab selects it
+            items[0]?.classList.add("active");
+          }
+        }
+      }
+      return;
+    }
+    if (event.key === "Enter") {
       const pick = active ?? items[0];
       if (pick) {
         event.preventDefault();
@@ -5834,6 +5868,30 @@ function onAiChatKeyDown(event) {
     }
     if (event.key === "Escape") {
       dom.aiSlashDropdown.classList.add("hidden");
+      return;
+    }
+  }
+
+  // Tab completion when slash dropdown is closed but partial /cmd is typed
+  if (event.key === "Tab") {
+    const val = dom.aiChatInput.value;
+    if (val.startsWith("/") && !val.includes(" ")) {
+      event.preventDefault();
+      const partial = val.toLowerCase();
+      const matched = SLASH_COMMANDS.filter(c => c.cmd.startsWith(partial));
+      if (matched.length === 1) {
+        applySlashCommand(matched[0]);
+      } else if (matched.length > 1) {
+        let prefix = matched[0].cmd;
+        for (const sc of matched) {
+          let i = 0;
+          while (i < prefix.length && i < sc.cmd.length && prefix[i] === sc.cmd[i]) i++;
+          prefix = prefix.slice(0, i);
+        }
+        dom.aiChatInput.value = prefix;
+        dom.aiChatInput.selectionStart = dom.aiChatInput.selectionEnd = prefix.length;
+        onAiChatInput();
+      }
       return;
     }
   }
@@ -6044,13 +6102,15 @@ const SLASH_COMMANDS = [
 ];
 
 function renderSlashDropdown(query) {
-  const filtered = query.length === 0
-    ? SLASH_COMMANDS
-    : SLASH_COMMANDS.filter(c =>
-        c.cmd.includes(query.toLowerCase()) ||
-        c.label.toLowerCase().includes(query.toLowerCase()) ||
-        c.category.toLowerCase().includes(query.toLowerCase())
-      );
+  const q = query.toLowerCase();
+  const filtered = SLASH_COMMANDS
+    .filter(c =>
+      q.length === 0 ||
+      c.cmd.includes(q) ||
+      c.label.toLowerCase().includes(q) ||
+      c.category.toLowerCase().includes(q)
+    )
+    .sort((a, b) => a.cmd.localeCompare(b.cmd));
 
   if (!filtered.length) {
     dom.aiSlashDropdown.classList.add("hidden");
@@ -6058,7 +6118,7 @@ function renderSlashDropdown(query) {
   }
 
   dom.aiSlashDropdown.innerHTML = "";
-  filtered.slice(0, 12).forEach((sc) => {
+  filtered.forEach((sc) => {
     const item = document.createElement("div");
     item.className = "ai-slash-item";
     item.innerHTML = `<span class="ai-slash-cmd">${escapeHtml(sc.cmd)}</span><span class="ai-slash-label">${escapeHtml(sc.label)}</span><span class="ai-slash-category">${escapeHtml(sc.category)}</span>`;
