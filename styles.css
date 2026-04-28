@@ -5238,11 +5238,40 @@ body.emitter-modal-open {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* Hide the native checkbox — use a custom box */
 .shape-label-toggle-row input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent, #3b82f6);
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-strong, #4a5568);
+  border-radius: 3px;
+  background: var(--bg, #17191d);
   cursor: pointer;
   flex-shrink: 0;
+  position: relative;
+  display: grid;
+  place-content: center;
+  transition: border-color 0.15s;
+}
+.shape-label-toggle-row input[type="checkbox"]:hover {
+  border-color: var(--accent, #3b82f6);
+}
+/* X mark when checked */
+.shape-label-toggle-row input[type="checkbox"]::after {
+  content: "✕";
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text, #e8edf3);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.shape-label-toggle-row input[type="checkbox"]:checked {
+  border-color: var(--accent, #3b82f6);
+  background: var(--bg-elevated, #1f2227);
+}
+.shape-label-toggle-row input[type="checkbox"]:checked::after {
+  opacity: 1;
 }
 
