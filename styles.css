@@ -1448,6 +1448,84 @@ body:not(.ai-panel-open) .ai-panel {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 10px 22px rgba(0, 0, 0, 0.12);
 }
 
+/* Context item badges pinned to user messages */
+.ai-message-context-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  order: -1;
+}
+
+.ai-message-context-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  background: rgba(99, 179, 237, 0.18);
+  border: 1px solid rgba(99, 179, 237, 0.45);
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.ai-message-context-badge::before {
+  content: "◈";
+  font-size: 9px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.ai-message-context-badge:hover {
+  background: rgba(99, 179, 237, 0.3);
+  border-color: rgba(99, 179, 237, 0.7);
+}
+
+/* Markdown table */
+.ai-chat-message-body .ai-md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.78rem;
+  margin: 6px 0;
+}
+
+.ai-chat-message-body .ai-md-table th,
+.ai-chat-message-body .ai-md-table td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ai-chat-message-body .ai-md-table th {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-chat-message-body .ai-md-table tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Paragraph spacing in assistant messages */
+.ai-chat-message-body p {
+  margin: 0 0 6px;
+  line-height: 1.6;
+}
+
+.ai-chat-message-body p:last-child {
+  margin-bottom: 0;
+}
+
 /* ── Planning document blocks ── */
 .ai-document-block {
   max-width: min(96%, 660px);
@@ -4484,7 +4562,7 @@ body.emitter-modal-open {
 
 /* ─── Analytics Modal ────────────────────────────────────────────────────── */
 .analytics-modal {
-  width: min(960px, calc(100vw - 32px));
+  width: min(1320px, calc(100vw - 24px));
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
@@ -4493,13 +4571,14 @@ body.emitter-modal-open {
 
 .analytics-kpi-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 14px 20px 0;
   flex-shrink: 0;
 }
 
 .analytics-kpi-card {
-  flex: 1;
+  flex: 1 1 140px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -4610,6 +4689,32 @@ body.emitter-modal-open {
   min-height: 0;
 }
 
+.analytics-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.analytics-overview-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+
+.analytics-overview-card-wide {
+  grid-column: 1 / -1;
+}
+
+.analytics-overview-title {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 .analytics-table {
   width: 100%;
   border-collapse: collapse;
@@ -4654,7 +4759,7 @@ body.emitter-modal-open {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  max-width: 280px;
 }
 
 .analytics-sidebar {
@@ -4682,6 +4787,30 @@ body.emitter-modal-open {
   display: block;
   border-radius: 4px;
   background: var(--bg-soft);
+}
+
+@media (max-width: 1080px) {
+  .analytics-body {
+    flex-direction: column;
+  }
+
+  .analytics-sidebar {
+    width: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    margin-left: 0;
+    margin-top: 14px;
+    padding-left: 0;
+    padding-top: 14px;
+  }
+
+  .analytics-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-overview-card-wide {
+    grid-column: auto;
+  }
 }
 
 /* Workspace admin link */

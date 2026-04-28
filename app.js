@@ -911,6 +911,7 @@ async function idbLoadKmzItems(projectId) {
 const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
 const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
 const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
+const ANALYTICS_SESSION_ID_STORAGE_KEY = "ew-sim-analytics-session-id";
 const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
 const GENAI_MIL_BACKEND_MODELS_PATH = "/ai/genai-mil/models";
 const GENAI_MIL_BACKEND_CHAT_PATH = "/ai/genai-mil/chat/completions";
@@ -1936,6 +1937,10 @@ function getSavedAiConfig(configId = state.ai.activeConfigId) {
   return state.ai.savedConfigs.find((config) => config.id === configId) ?? null;
 }
 
+function isAnalyticsAdmin() {
+  return !isGuestSession() && state.session.user?.email === "kyle.hicks@rfsim.local";
+}
+
 function setActiveAiDraft(provider, apiKey, model, configId = "", label = "") {
   state.ai.provider = provider;
   state.ai.apiKey = apiKey;
@@ -2204,8 +2209,10 @@ function syncWorkspaceUi() {
   dom.workspaceAuthGuest.classList.toggle("hidden", hasAccess);
   dom.workspaceAuthMember.classList.toggle("hidden", !hasAccess);
   dom.workspaceSignOutBtn.classList.toggle("hidden", !hasAccess);
-  const isAdmin = hasAccess && !guest && state.session.user?.email === "kyle.hicks@rfsim.local";
+  const isAdmin = hasAccess && !guest && isAnalyticsAdmin();
   dom.workspaceAdminRow?.classList.toggle("hidden", !isAdmin);
+  dom.workspaceAnalyticsBtn?.setAttribute("aria-hidden", String(!isAdmin));
+  dom.workspaceAnalyticsBtn?.toggleAttribute("hidden", !isAdmin);
 
   if (!hasAccess) {
     dom.workspaceMenuValue.textContent = "Sign In";
@@ -5299,9 +5306,10 @@ async function onAiChatSubmit(event) {
   const images = [...state.ai.pendingImages];
   const files = [...state.ai.pendingFiles];
   const contextIds = getAiContextIds(state.ai.contextItemIds);
+  const contextItems = state.ai.contextItemIds.map((id) => ({ id, name: getMapContentName(id) })).filter((c) => c.name);
 
   // Render user message in chat
-  appendAiMessage("user", prompt, images);
+  appendAiMessage("user", prompt, images, contextItems);
 
   // Clear inputs
   dom.aiChatInput.value = "";
@@ -5366,79 +5374,128 @@ function clearAiChat() {
 function renderMarkdown(text) {
   if (!text) return "";
 
-  // Escape HTML first (work on raw text)
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // Process line by line for block elements, then inline
-  const lines = text.split("\n");
-  const out = [];
-  let inList = false;
-
-  const flushList = () => { if (inList) { out.push("</ul>"); inList = false; } };
-
   const inlineFormat = (s) => {
-    // Handle map content links [label](contentId) BEFORE escaping
     const withLinks = s.replace(/\[([^\]]+)\]\(((?:asset|imported|viewshed|terrain|planning-region|planning-results):[^\)]+)\)/g, (_, label, contentId) => {
       return `\x00LINK\x00${label}\x00${contentId}\x00`;
     });
     let result = esc(withLinks)
-      // Bold **text** or __text__
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/__(.+?)__/g, "<strong>$1</strong>")
-      // Italic *text* or _text_ (single, not double)
       .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
       .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, "<em>$1</em>")
-      // Inline code `code`
       .replace(/`([^`]+)`/g, "<code>$1</code>");
-    // Restore map content links as clickable buttons
     result = result.replace(/\x00LINK\x00([^\x00]+)\x00([^\x00]+)\x00/g, (_, label, contentId) => {
       return `<button class="ai-map-link" data-content-id="${contentId}" title="Navigate to ${label}">${label}</button>`;
     });
     return result;
   };
 
+  const lines = text.split("\n");
+  const out = [];
+  let inList = false;
+  let listType = "ul";
+  let inTable = false;
+  let tableHeaderDone = false;
+  let pendingParagraphLines = [];
+
+  const flushParagraph = () => {
+    if (pendingParagraphLines.length === 0) return;
+    out.push(`<p>${pendingParagraphLines.join("<br>")}</p>`);
+    pendingParagraphLines = [];
+  };
+
+  const flushList = () => {
+    if (inList) { out.push(`</${listType}>`); inList = false; }
+  };
+
+  const flushTable = () => {
+    if (inTable) { out.push("</tbody></table>"); inTable = false; tableHeaderDone = false; }
+  };
+
+  const isTableRow = (line) => /^\|.+\|/.test(line.trim());
+  const isSeparatorRow = (line) => /^\|[\s\-:|]+\|/.test(line.trim());
+
   lines.forEach((line) => {
     // Horizontal rule
     if (/^---+$/.test(line.trim())) {
-      flushList();
+      flushParagraph(); flushList(); flushTable();
       out.push("<hr>");
       return;
     }
-    // Heading ## or ###
+
+    // Headings
     const h3 = line.match(/^###\s+(.+)/);
     const h2 = line.match(/^##\s+(.+)/);
     const h1 = line.match(/^#\s+(.+)/);
-    if (h3) { flushList(); out.push(`<h4>${inlineFormat(h3[1])}</h4>`); return; }
-    if (h2) { flushList(); out.push(`<h4>${inlineFormat(h2[1])}</h4>`); return; }
-    if (h1) { flushList(); out.push(`<h4>${inlineFormat(h1[1])}</h4>`); return; }
-    // Bullet list - or *
+    if (h1 || h2 || h3) {
+      flushParagraph(); flushList(); flushTable();
+      const content = (h3 || h2 || h1)[1];
+      out.push(`<h4>${inlineFormat(content)}</h4>`);
+      return;
+    }
+
+    // Table rows
+    if (isTableRow(line)) {
+      flushParagraph(); flushList();
+      if (isSeparatorRow(line)) {
+        // separator row — marks end of header
+        tableHeaderDone = true;
+        return;
+      }
+      const cells = line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      if (!inTable) {
+        out.push('<table class="ai-md-table"><thead><tr>');
+        cells.forEach((c) => out.push(`<th>${inlineFormat(c)}</th>`));
+        out.push("</tr></thead><tbody>");
+        inTable = true;
+        tableHeaderDone = false;
+      } else {
+        out.push("<tr>");
+        cells.forEach((c) => out.push(`<td>${inlineFormat(c)}</td>`));
+        out.push("</tr>");
+      }
+      return;
+    }
+    if (inTable) { flushTable(); }
+
+    // Bullet list
     const bullet = line.match(/^[\-\*]\s+(.+)/);
     if (bullet) {
-      if (!inList) { out.push("<ul>"); inList = true; }
+      flushParagraph();
+      if (!inList || listType !== "ul") { flushList(); out.push("<ul>"); inList = true; listType = "ul"; }
       out.push(`<li>${inlineFormat(bullet[1])}</li>`);
       return;
     }
+
     // Numbered list
     const numbered = line.match(/^\d+\.\s+(.+)/);
     if (numbered) {
-      if (!inList) { out.push("<ul>"); inList = true; }
+      flushParagraph();
+      if (!inList || listType !== "ol") { flushList(); out.push("<ol>"); inList = true; listType = "ol"; }
       out.push(`<li>${inlineFormat(numbered[1])}</li>`);
       return;
     }
+
     flushList();
-    // Blank line → paragraph break
+
+    // Blank line = paragraph break
     if (line.trim() === "") {
-      out.push("<br>");
+      flushParagraph();
       return;
     }
-    out.push(`<span>${inlineFormat(line)}</span><br>`);
+
+    pendingParagraphLines.push(inlineFormat(line));
   });
 
+  flushParagraph();
   flushList();
+  flushTable();
   return out.join("");
 }
 
-function createAiMessageController(role, text = "", images = []) {
+function createAiMessageController(role, text = "", images = [], contextItems = []) {
   state.ai.messages.push({ role, text });
   const article = document.createElement("article");
   article.className = `ai-chat-message ${role === "user" ? "ai-chat-message-user" : role === "assistant" ? "ai-chat-message-assistant" : "ai-chat-message-system"}`;
@@ -5466,6 +5523,22 @@ function createAiMessageController(role, text = "", images = []) {
       imgRow.appendChild(img);
     });
     article.appendChild(imgRow);
+  }
+
+  if (role === "user" && contextItems.length > 0) {
+    const badges = document.createElement("div");
+    badges.className = "ai-message-context-badges";
+    contextItems.forEach(({ id, name }) => {
+      const badge = document.createElement("button");
+      badge.className = "ai-message-context-badge";
+      badge.dataset.contentId = id;
+      badge.title = `Context: ${name}`;
+      badge.textContent = name;
+      badge.type = "button";
+      badge.addEventListener("click", () => focusMapContent(id));
+      badges.appendChild(badge);
+    });
+    article.appendChild(badges);
   }
 
   const body = document.createElement("div");
@@ -6691,8 +6764,27 @@ function getAiContextIds(explicitContextIds = []) {
   return merged.filter((contentId, index) => merged.indexOf(contentId) === index && Boolean(serializeMapContentForAi(contentId)));
 }
 
-function appendAiMessage(role, text, images = []) {
-  const controller = createAiMessageController(role, text, images);
+function getMapContentName(contentId) {
+  if (!contentId) return null;
+  if (contentId.startsWith("asset:")) {
+    return state.assets.find((a) => `asset:${a.id}` === contentId)?.name ?? null;
+  }
+  if (contentId.startsWith("imported:")) {
+    return state.importedItems.find((i) => `imported:${i.id}` === contentId)?.name ?? null;
+  }
+  if (contentId.startsWith("viewshed:")) {
+    return state.viewsheds.find((v) => `viewshed:${v.id}` === contentId)?.name ?? null;
+  }
+  if (contentId.startsWith("terrain:")) {
+    return state.terrains.find((t) => `terrain:${t.id}` === contentId)?.name ?? null;
+  }
+  if (contentId === "planning-region") return "Planning Region";
+  if (contentId === "planning-results") return "Planning Results";
+  return null;
+}
+
+function appendAiMessage(role, text, images = [], contextItems = []) {
+  const controller = createAiMessageController(role, text, images, contextItems);
   controller.setStatus(role === "assistant" ? "Response ready" : "Sent");
 }
 
@@ -7047,7 +7139,15 @@ async function postGenAiMilChatViaTransport(transport, apiKey, payload) {
   if (!content) {
     throw new Error(`GenAI.mil returned an empty completion via ${transport.label}.`);
   }
-  return { content, transport };
+  const inputTokens = Number(parsed?.usage?.prompt_tokens ?? parsed?.usage?.input_tokens ?? 0) || 0;
+  const outputTokens = Number(parsed?.usage?.completion_tokens ?? parsed?.usage?.output_tokens ?? 0) || 0;
+  return {
+    content,
+    transport,
+    inputTokens,
+    outputTokens,
+    totalTokens: Number(parsed?.usage?.total_tokens ?? (inputTokens + outputTokens)) || (inputTokens + outputTokens),
+  };
 }
 
 async function discoverGenAiMilModels(apiKey) {
@@ -7082,7 +7182,7 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
     syncAiUi();
     try {
       const models = await ensureGenAiMilModelsLoaded({ forceRefresh: true, returnModels: true });
-      const text = await callGenAiMil([{ role: "user", content: "Reply with READY only." }], 16, 0);
+      const text = (await callGenAiMil([{ role: "user", content: "Reply with READY only." }], 16, 0)).text;
       if (!/READY/i.test(text)) throw new Error("GenAI.mil returned an unexpected validation response.");
       state.ai.status = "ready";
       const selectedModel = ensureAiModelForProvider("genai-mil", state.ai.model);
@@ -7196,7 +7296,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  update-asset          → assetId (exact id), lat?, lon?, emitterType?, name?, force?, unit?, frequencyMHz?, powerW?, antennaHeightM?, antennaGainDbi?, receiverSensitivityDbm?, systemLossDb?",
     "  remove-asset          → assetId (exact id)",
     "  draw-shape            → shapeType (circle|rectangle|polyline|polygon), name?, color?, fillOpacity?, weight?, coordinates [{lat,lon}], radiusM? (circle only)",
-    "  update-shape          → shapeId or name, color?, fillOpacity?, weight?, coordinates?",
+    "  update-shape          → shapeId or name (use exact item name or id), newName?, color?, fillOpacity?, weight?, lineStyle?, radiusM? (resize circle by regenerating from its center), coordinates?",
     "  remove-shape          → shapeId or name",
     "  set-planning-parameters → txAssetId?, rxAssetId?, gridMeters?, minSeparation?, enemyWeight?, separationWeight?, floorM?, ceilingM?",
     "  set-planning-region   → polygon [{lat,lon}], name?",
@@ -7299,6 +7399,17 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  • For 3 radios requiring mutual coverage: a triangular arrangement on elevated terrain at polygon corners/ridges is ideal — NOT a cluster in one area.",
     "  • Earth curvature matters for links >30 km: a 5 W VHF radio at 2 m antenna height has radio horizon of ~7–10 km in flat terrain.",
     "  • If terrain data is NOT available from any source, state this and place assets conservatively on estimated high ground based on polygon geometry.",
+    "",
+    "═══════════════════════════════════════",
+    "LINKED SHAPE (CONTEXT ITEMS):",
+    "═══════════════════════════════════════",
+    "- The user can attach map items as context. These appear in explicitAiContextIds[] and activeAiContextId.",
+    "- When the user says 'the linked shape', 'the linked circle', 'the context shape', or similar, they mean the item in explicitAiContextIds[0] (or activeAiContextId if explicitAiContextIds is empty). Look up its name and id from drawnShapes[] or importedItems[].",
+    "- Use the item's exact name as the 'name' field in update-shape (the resolver matches by name or id).",
+    "- update-shape supports: color (#hex), fillOpacity (0–1), weight (px), lineStyle (solid|dashed|dotted), newName (rename), radiusM (resize circle by center+radius), coordinates (replace geometry).",
+    "- Example: user says 'make the linked shape green' → {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"color\":\"#00cc44\"}",
+    "- Example: user says 'change the linked circle radius to 3km' → {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"radiusM\":3000}",
+    "- Example: user says 'rename the linked shape to AO Alpha' → {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"newName\":\"AO Alpha\"}",
     "",
     "═══════════════════════════════════════",
     "SPATIAL REASONING:",
@@ -7506,14 +7617,30 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   }
 
   onStatus?.("Contacting provider");
-  const raw = state.ai.provider === "anthropic"
+  const providerResponse = state.ai.provider === "anthropic"
     ? await callAnthropic(messages, 16000, 0.2)
     : state.ai.provider === "local-model"
       ? await callLocalModel(messages, 999999, 0.1)
       : await callGenAiMil(messages, 32000, 0.2);
-  fireAnalyticsEvent({ event_type: "ai_request", provider: state.ai.provider, model: state.ai.model });
+  const raw = providerResponse.text;
   onStatus?.("Parsing response");
   const parsed = parseAiAssistantResponse(raw, prompt);
+  fireAnalyticsEvent({
+    event_type: "ai_request",
+    provider: state.ai.provider,
+    model: state.ai.model,
+    input_tokens: providerResponse.inputTokens,
+    output_tokens: providerResponse.outputTokens,
+    meta: buildAiAnalyticsMeta({
+      prompt,
+      rawResponse: raw,
+      parsedResponse: parsed,
+      images,
+      files,
+      contextIds,
+      providerResponse,
+    }),
+  });
   return {
     assistantMessage: typeof parsed.assistantMessage === "string" && parsed.assistantMessage.trim()
       ? parsed.assistantMessage.trim()
@@ -7531,7 +7658,13 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
     try {
       const result = await postGenAiMilChatViaTransport(transport, state.ai.apiKey, payload);
       state.ai.genAiMilPreferredTransportId = transport.id;
-      return result.content;
+      return {
+        text: result.content,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        totalTokens: result.totalTokens,
+        transportId: transport.id,
+      };
     } catch (error) {
       errors.push(error);
     }
@@ -7578,7 +7711,12 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
   }
   const content = parsed?.content?.[0]?.text;
   if (!content) throw new Error("Anthropic returned an empty completion.");
-  return content;
+  return {
+    text: content,
+    inputTokens: Number(parsed?.usage?.input_tokens ?? 0) || 0,
+    outputTokens: Number(parsed?.usage?.output_tokens ?? 0) || 0,
+    totalTokens: (Number(parsed?.usage?.input_tokens ?? 0) || 0) + (Number(parsed?.usage?.output_tokens ?? 0) || 0),
+  };
 }
 
 async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2) {
@@ -7627,7 +7765,14 @@ async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2) {
   }
   const content = parsed?.choices?.[0]?.message?.content;
   if (!content) throw new Error("Local model returned an empty completion.");
-  return content;
+  const inputTokens = Number(parsed?.usage?.prompt_tokens ?? parsed?.usage?.input_tokens ?? 0) || 0;
+  const outputTokens = Number(parsed?.usage?.completion_tokens ?? parsed?.usage?.output_tokens ?? 0) || 0;
+  return {
+    text: content,
+    inputTokens,
+    outputTokens,
+    totalTokens: Number(parsed?.usage?.total_tokens ?? (inputTokens + outputTokens)) || (inputTokens + outputTokens),
+  };
 }
 
 async function fetchLocalModelList() {
@@ -8530,6 +8675,33 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     if (Array.isArray(action.coordinates) && action.coordinates.length >= 2) {
       const pts = action.coordinates.map((c) => [Number(c.lat ?? c[0]), Number(c.lon ?? c.lng ?? c[1])]);
       item.layer.setLatLngs(pts);
+    }
+    // Resize circle by regenerating polygon from stored center + new radius
+    if (Number.isFinite(Number(action.radiusM)) && action.radiusM > 0) {
+      const newRadiusM = Number(action.radiusM);
+      // Prefer the stored circle center/radiusM if available
+      let center = item.properties?.center;
+      if (!center) {
+        // Fall back to computing centroid from polygon vertices
+        const flat = item.layer?.getLatLngs?.() ?? [];
+        const pts = Array.isArray(flat[0]) ? flat[0] : flat;
+        if (pts.length >= 3) {
+          const avgLat = pts.reduce((s, p) => s + (p.lat ?? p[0]), 0) / pts.length;
+          const avgLng = pts.reduce((s, p) => s + (p.lng ?? p[1]), 0) / pts.length;
+          center = { lat: avgLat, lng: avgLng };
+        }
+      }
+      if (center) {
+        const newCoords = circleToPolygonLatLngs(center, newRadiusM);
+        item.layer.setLatLngs(newCoords.map((p) => [p[0], p[1]]));
+        if (item.geometry?.coordinates) item.geometry.coordinates = [newCoords.map((p) => [p[0], p[1]])];
+        if (item.properties) item.properties.radiusM = newRadiusM;
+      }
+    }
+    // Rename shape
+    if (typeof action.newName === "string" && action.newName.trim()) {
+      item.name = action.newName.trim();
+      renderMapContents();
     }
     saveMapState();
     syncCesiumEntities();
@@ -17689,20 +17861,30 @@ function fireAnalyticsEvent(event) {
   if (!state.session.token) return;
   apiFetch("/analytics/event", {
     method: "POST",
-    body: JSON.stringify(event),
+    body: JSON.stringify({
+      ...event,
+      meta: {
+        ...buildAnalyticsDefaultMeta(),
+        ...(event.meta ?? {}),
+      },
+    }),
   }).catch(() => {});
 }
 
 const _analytics = {
   data: null,
   error: "",
-  activeTab: "users",
+  activeTab: "overview",
   sortCol: null,
   sortDir: "desc",
   filterText: "",
 };
 
 function openAnalyticsModal() {
+  if (!isAnalyticsAdmin()) {
+    closeAnalyticsModal();
+    return;
+  }
   dom.analyticsModal?.classList.remove("hidden");
   fetchAndRenderAnalytics();
 }
@@ -17937,6 +18119,9 @@ function drawTokenBarChart() {
 
 function initAnalytics() {
   dom.workspaceAnalyticsBtn?.addEventListener("click", () => {
+    if (!isAnalyticsAdmin()) {
+      return;
+    }
     closeWorkspaceMenu();
     openAnalyticsModal();
   });
@@ -17984,6 +18169,463 @@ function initAnalytics() {
   });
 
   updateSortSelect("users");
+}
+
+function getAnalyticsSessionId() {
+  let sessionId = window.sessionStorage.getItem(ANALYTICS_SESSION_ID_STORAGE_KEY);
+  if (!sessionId) {
+    sessionId = window.crypto?.randomUUID?.() ?? `analytics-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    window.sessionStorage.setItem(ANALYTICS_SESSION_ID_STORAGE_KEY, sessionId);
+  }
+  return sessionId;
+}
+
+function summarizeAnalyticsProjectContext() {
+  const activeProject = state.session.projects.find((project) => project.id === state.session.activeProjectId) ?? null;
+  return {
+    session_id: getAnalyticsSessionId(),
+    route: window.location.pathname,
+    hostname: window.location.hostname,
+    workspace_mode: isGuestSession() ? "guest" : (state.session.token ? "member" : "signed_out"),
+    project_id: state.session.activeProjectId || "",
+    project_name: activeProject?.name || "",
+    project_asset_count: state.assets.length,
+    project_import_count: state.importedItems.length,
+    project_viewshed_count: state.viewsheds.length,
+    project_terrain_count: state.terrains.length,
+  };
+}
+
+function buildAnalyticsDefaultMeta() {
+  return summarizeAnalyticsProjectContext();
+}
+
+function inferAnalyticsIntent(text = "") {
+  const normalized = String(text ?? "").toLowerCase();
+  if (!normalized) return "general_assistant";
+  if (/(pace|ceoi|soi|aar|spectrum|topology|relay|document|report|brief|plan)/.test(normalized)) return "planning_document";
+  if (/(simulate|simulation|coverage|signal|interference|terrain|line of sight|los|propagation)/.test(normalized)) return "simulation_analysis";
+  if (/(draw|polygon|polyline|circle|rectangle|route|boundary|shape)/.test(normalized)) return "map_drawing";
+  if (/(place|add|asset|radio|emitter|antenna|node|relay)/.test(normalized)) return "asset_placement";
+  if (/(lookup|mgrs|coordinate|where is|find|locate)/.test(normalized)) return "map_lookup";
+  if (/(import|kmz|kml|geojson|layer|overlay)/.test(normalized)) return "data_import";
+  return "general_assistant";
+}
+
+function buildAiAnalyticsMeta({ prompt, rawResponse, parsedResponse, images, files, contextIds, providerResponse }) {
+  const assistantText = parsedResponse?.assistantMessage ?? rawResponse ?? "";
+  const actions = Array.isArray(parsedResponse?.actions) ? parsedResponse.actions : [];
+  return {
+    ...buildAnalyticsDefaultMeta(),
+    intent_category: inferAnalyticsIntent(prompt),
+    prompt_excerpt: String(prompt ?? "").replace(/\s+/g, " ").trim().slice(0, 240),
+    response_excerpt: String(assistantText ?? "").replace(/\s+/g, " ").trim().slice(0, 240),
+    outcome: actions.length ? "actions_applied" : "answer_only",
+    action_count: actions.length,
+    action_types: actions.map((action) => action?.type).filter(Boolean).slice(0, 12),
+    image_count: images.length,
+    attachment_count: files.length,
+    context_count: contextIds.length,
+    transport_id: providerResponse?.transportId ?? "",
+  };
+}
+
+function clampText(value, max = 80) {
+  const text = String(value ?? "");
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function getEmptyAnalyticsPayload() {
+  return {
+    summary: {
+      registered_users: 0,
+      total_visits: 0,
+      total_projects: 0,
+      total_snapshots: 0,
+      total_logins: 0,
+      ai_requests: 0,
+      active_users_7d: 0,
+      active_users_30d: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_tokens: 0,
+    },
+    users: [],
+    events: [],
+    aiUsage: [],
+    projects: [],
+    daily: [],
+    providers: [],
+    intents: [],
+  };
+}
+
+function formatAnalyticsDate(value) {
+  return value ? new Date(value).toLocaleDateString() : "—";
+}
+
+function formatAnalyticsDateTime(value) {
+  return value ? new Date(value).toLocaleString() : "—";
+}
+
+function formatAnalyticsCompactNumber(value) {
+  const numeric = Number(value ?? 0) || 0;
+  return numeric >= 1000 ? `${(numeric / 1000).toFixed(1)}k` : String(numeric);
+}
+
+function buildSearchBlob(row) {
+  return Object.values(row)
+    .map((value) => typeof value === "object" && value !== null ? (value.sortValue ?? value.text ?? "") : value)
+    .join(" ")
+    .toLowerCase();
+}
+
+function filterAnalyticsRows(rows) {
+  const filter = _analytics.filterText.trim().toLowerCase();
+  if (!filter) return rows;
+  return rows.filter((row) => buildSearchBlob(row).includes(filter));
+}
+
+function getSortableAnalyticsValue(value) {
+  if (value && typeof value === "object") {
+    return value.sortValue ?? value.text ?? "";
+  }
+  return value ?? "";
+}
+
+function sortRows(rows, col, dir) {
+  if (!col) return rows;
+  return [...rows].sort((a, b) => {
+    const av = getSortableAnalyticsValue(a[col]);
+    const bv = getSortableAnalyticsValue(b[col]);
+    const aNum = Number(av);
+    const bNum = Number(bv);
+    const cmp = Number.isFinite(aNum) && Number.isFinite(bNum) && String(av).trim() !== "" && String(bv).trim() !== ""
+      ? aNum - bNum
+      : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+    return dir === "asc" ? cmp : -cmp;
+  });
+}
+
+function fillTable(tableId, rows, cols) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = cols.length;
+    td.textContent = _analytics.error || "No data";
+    td.style.color = "var(--muted)";
+    td.style.textAlign = "center";
+    td.style.padding = "16px";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    for (const col of cols) {
+      const td = document.createElement("td");
+      const cell = row[col];
+      if (cell && typeof cell === "object") {
+        td.textContent = cell.text ?? "";
+        if (cell.title) td.title = cell.title;
+        if (cell.className) td.className = cell.className;
+      } else {
+        td.textContent = cell === null || cell === undefined ? "" : cell;
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+async function fetchAndRenderAnalytics() {
+  try {
+    _analytics.error = "";
+    _analytics.data = await apiFetch("/admin/analytics");
+  } catch (err) {
+    _analytics.data = getEmptyAnalyticsPayload();
+    _analytics.error = err?.message || "Analytics request failed.";
+    console.error("Analytics fetch failed:", err);
+  }
+  renderAnalyticsKpis();
+  renderAnalyticsActiveTab();
+  drawAnalyticsCharts();
+}
+
+function renderAnalyticsKpis() {
+  const summary = (_analytics.data ?? getEmptyAnalyticsPayload()).summary ?? {};
+  document.getElementById("akpiUsers").textContent = formatAnalyticsCompactNumber(summary.registered_users);
+  document.getElementById("akpiVisits").textContent = formatAnalyticsCompactNumber(summary.total_visits);
+  document.getElementById("akpiProjects").textContent = formatAnalyticsCompactNumber(summary.total_projects);
+  document.getElementById("akpiAiRequests").textContent = formatAnalyticsCompactNumber(summary.ai_requests);
+  document.getElementById("akpiTokens").textContent = formatAnalyticsCompactNumber(summary.total_tokens);
+  document.getElementById("akpiActive30").textContent = formatAnalyticsCompactNumber(summary.active_users_30d);
+  document.getElementById("akpiLogins").textContent = formatAnalyticsCompactNumber(summary.total_logins);
+}
+
+function renderAnalyticsOverview() {
+  const providers = sortRows(
+    filterAnalyticsRows((_analytics.data?.providers ?? []).map((row) => ({
+      provider: row.provider ?? "",
+      request_count: row.request_count ?? 0,
+      user_count: row.user_count ?? 0,
+      total_tokens: row.total_tokens ?? 0,
+    }))),
+    _analytics.sortCol || "total_tokens",
+    _analytics.sortDir
+  ).slice(0, 12);
+
+  const intents = sortRows(
+    filterAnalyticsRows((_analytics.data?.intents ?? []).map((row) => ({
+      intent_category: row.intent_category ?? "",
+      ai_requests: row.ai_requests ?? 0,
+      user_count: row.user_count ?? 0,
+      total_tokens: row.total_tokens ?? 0,
+    }))),
+    _analytics.sortCol || "ai_requests",
+    _analytics.sortDir
+  ).slice(0, 12);
+
+  const users = sortRows(
+    filterAnalyticsRows((_analytics.data?.users ?? []).map((row) => ({
+      username: row.username ?? "",
+      last_seen: { text: formatAnalyticsDateTime(row.last_seen), sortValue: row.last_seen || "" },
+      login_count: row.login_count ?? 0,
+      ai_request_count: row.ai_request_count ?? 0,
+      total_tokens: row.total_tokens ?? 0,
+      top_intent: row.top_intent ?? "—",
+    }))),
+    _analytics.sortCol || "total_tokens",
+    _analytics.sortDir
+  ).slice(0, 12);
+
+  fillTable("analyticsOverviewProvidersTable", providers, ["provider", "request_count", "user_count", "total_tokens"]);
+  fillTable("analyticsOverviewIntentsTable", intents, ["intent_category", "ai_requests", "user_count", "total_tokens"]);
+  fillTable("analyticsOverviewUsersTable", users, ["username", "last_seen", "login_count", "ai_request_count", "total_tokens", "top_intent"]);
+}
+
+function renderAnalyticsUsers() {
+  const rows = sortRows(
+    filterAnalyticsRows((_analytics.data?.users ?? []).map((u) => ({
+      username: u.username ?? "",
+      email: u.email ?? "",
+      created_at: { text: formatAnalyticsDate(u.created_at), sortValue: u.created_at || "" },
+      login_count: u.login_count ?? 0,
+      visit_count: u.visit_count ?? 0,
+      project_count: u.project_count ?? 0,
+      ai_request_count: u.ai_request_count ?? 0,
+      total_tokens: u.total_tokens ?? 0,
+      favorite_provider: u.favorite_provider ?? "—",
+      top_intent: u.top_intent ?? "—",
+      last_seen: { text: formatAnalyticsDateTime(u.last_seen), sortValue: u.last_seen || "" },
+    }))),
+    _analytics.sortCol || "last_seen",
+    _analytics.sortDir
+  );
+  fillTable("analyticsUsersTable", rows, ["username", "email", "created_at", "login_count", "visit_count", "project_count", "ai_request_count", "total_tokens", "favorite_provider", "top_intent", "last_seen"]);
+}
+
+function renderAnalyticsAiUsage() {
+  const rows = sortRows(
+    filterAnalyticsRows((_analytics.data?.aiUsage ?? []).map((r) => ({
+      username: r.username ?? "",
+      provider: r.provider ?? "",
+      model: r.model ?? "",
+      intent_category: r.intent_category ?? "—",
+      request_count: r.request_count ?? 0,
+      total_input_tokens: r.total_input_tokens ?? 0,
+      total_output_tokens: r.total_output_tokens ?? 0,
+      total_tokens: r.total_tokens ?? 0,
+      avg_total_tokens: r.avg_total_tokens ?? 0,
+      last_request_at: { text: formatAnalyticsDateTime(r.last_request_at), sortValue: r.last_request_at || "" },
+    }))),
+    _analytics.sortCol || "total_tokens",
+    _analytics.sortDir
+  );
+  fillTable("analyticsAiTable", rows, ["username", "provider", "model", "intent_category", "request_count", "total_input_tokens", "total_output_tokens", "total_tokens", "avg_total_tokens", "last_request_at"]);
+}
+
+function renderAnalyticsProjects() {
+  const rows = sortRows(
+    filterAnalyticsRows((_analytics.data?.projects ?? []).map((p) => ({
+      username: p.username ?? "",
+      name: p.name ?? "",
+      description: { text: clampText(p.description ?? "", 90), title: p.description ?? "" },
+      created_at: { text: formatAnalyticsDate(p.created_at), sortValue: p.created_at || "" },
+      updated_at: { text: formatAnalyticsDateTime(p.updated_at), sortValue: p.updated_at || "" },
+      save_count: p.save_count ?? 0,
+      snapshot_count: p.snapshot_count ?? 0,
+      last_snapshot_at: { text: formatAnalyticsDateTime(p.last_snapshot_at), sortValue: p.last_snapshot_at || "" },
+      latest_intent: p.latest_intent ?? "—",
+    }))),
+    _analytics.sortCol || "updated_at",
+    _analytics.sortDir
+  );
+  fillTable("analyticsProjectsTable", rows, ["username", "name", "description", "created_at", "updated_at", "save_count", "snapshot_count", "last_snapshot_at", "latest_intent"]);
+}
+
+function renderAnalyticsEvents() {
+  const rows = sortRows(
+    filterAnalyticsRows((_analytics.data?.events ?? []).map((e) => ({
+      created_at: { text: formatAnalyticsDateTime(e.created_at), sortValue: e.created_at || "" },
+      username: e.username ?? "",
+      event_type: e.event_type ?? "",
+      provider: e.provider ?? "",
+      model: e.model ?? "",
+      project_name: e.project_name ?? "—",
+      intent_category: e.intent_category ?? "—",
+      total_tokens: e.total_tokens ?? 0,
+      outcome: e.outcome ?? "—",
+      prompt_excerpt: { text: clampText(e.prompt_excerpt ?? "", 110), title: e.prompt_excerpt ?? "" },
+    }))),
+    _analytics.sortCol || "created_at",
+    _analytics.sortDir
+  );
+  fillTable("analyticsEventsTable", rows, ["created_at", "username", "event_type", "provider", "model", "project_name", "intent_category", "total_tokens", "outcome", "prompt_excerpt"]);
+}
+
+function renderAnalyticsActiveTab() {
+  if (!_analytics.data) {
+    _analytics.data = getEmptyAnalyticsPayload();
+  }
+  if (_analytics.activeTab === "overview") return renderAnalyticsOverview();
+  if (_analytics.activeTab === "users") return renderAnalyticsUsers();
+  if (_analytics.activeTab === "ai") return renderAnalyticsAiUsage();
+  if (_analytics.activeTab === "projects") return renderAnalyticsProjects();
+  return renderAnalyticsEvents();
+}
+
+function setAnalyticsTab(tab) {
+  _analytics.activeTab = tab;
+  _analytics.sortCol = null;
+  _analytics.sortDir = "desc";
+  document.querySelectorAll(".analytics-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+  });
+  document.querySelectorAll(".analytics-tab-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.id !== `analyticsTab${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+  });
+  document.querySelectorAll(".analytics-table thead th[data-col]").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+  updateSortSelect(tab);
+  renderAnalyticsActiveTab();
+}
+
+function updateSortSelect(tab) {
+  const sel = dom.analyticsSortSelect;
+  if (!sel) return;
+  const options = {
+    overview: [["", "Default"], ["total_tokens", "Tokens"], ["request_count", "Requests"], ["user_count", "Users"], ["username", "User"]],
+    users: [["", "Default"], ["last_seen", "Last Seen"], ["total_tokens", "Tokens"], ["ai_request_count", "AI Requests"], ["project_count", "Projects"], ["login_count", "Logins"], ["username", "Name"]],
+    ai: [["", "Default"], ["total_tokens", "Total Tokens"], ["request_count", "Requests"], ["avg_total_tokens", "Avg / Req"], ["last_request_at", "Last Request"], ["provider", "Provider"]],
+    projects: [["", "Default"], ["updated_at", "Last Saved"], ["save_count", "Saves"], ["snapshot_count", "Snapshots"], ["username", "Owner"]],
+    events: [["", "Default"], ["created_at", "Time"], ["total_tokens", "Tokens"], ["username", "User"], ["event_type", "Event"]],
+  };
+  sel.innerHTML = (options[tab] ?? [["", "Default"]]).map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+  sel.value = "";
+}
+
+function drawAnalyticsCharts() {
+  drawVisitSparkline();
+  drawTokenBarChart();
+}
+
+function drawVisitSparkline() {
+  const canvas = document.getElementById("analyticsVisitChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const daily = _analytics.data?.daily ?? [];
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!daily.length) return;
+  const counts = daily.map((d) => Number(d.total_visits ?? 0) || 0);
+  const maxVal = Math.max(1, ...counts);
+  const pad = { top: 8, bottom: 6, left: 4, right: 4 };
+  const barW = Math.max(1, (W - pad.left - pad.right) / counts.length - 1);
+  const accent = "#8fb7ff";
+  const accentFaint = "rgba(143,183,255,0.18)";
+  counts.forEach((val, i) => {
+    const x = pad.left + i * ((W - pad.left - pad.right) / counts.length);
+    const barH = ((val / maxVal) * (H - pad.top - pad.bottom));
+    const y = H - pad.bottom - barH;
+    ctx.fillStyle = val > 0 ? accent : accentFaint;
+    ctx.fillRect(x, y, barW, barH);
+  });
+}
+
+function drawTokenBarChart() {
+  const canvas = document.getElementById("analyticsTokenChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const entries = (_analytics.data?.users ?? [])
+    .map((row) => [row.username || "(unknown)", Number(row.total_tokens ?? 0) || 0])
+    .filter(([, tokens]) => tokens > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+  if (!entries.length) return;
+
+  const maxVal = Math.max(1, entries[0][1]);
+  const rowH = Math.floor((H - 4) / entries.length);
+  const colors = ["#8fb7ff", "#6ee7b7", "#fbbf24", "#f87171", "#a78bfa", "#34d399", "#fb923c", "#60a5fa"];
+  entries.forEach(([username, tokens], i) => {
+    const barW = Math.max(2, (tokens / maxVal) * (W - 8));
+    const y = 2 + i * rowH;
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(0, y + 1, barW, rowH - 3);
+    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.font = `${Math.min(10, rowH - 2)}px sans-serif`;
+    ctx.fillText(username.length > 16 ? `${username.slice(0, 15)}…` : username, 4, y + rowH - 3);
+  });
+}
+
+function initAnalytics() {
+  dom.workspaceAnalyticsBtn?.addEventListener("click", () => {
+    if (!isAnalyticsAdmin()) {
+      return;
+    }
+    closeWorkspaceMenu();
+    openAnalyticsModal();
+  });
+
+  dom.analyticsModalCloseBtn?.addEventListener("click", closeAnalyticsModal);
+  dom.analyticsModal?.addEventListener("click", (e) => {
+    if (e.target === dom.analyticsModal) closeAnalyticsModal();
+  });
+  dom.analyticsRefreshBtn?.addEventListener("click", fetchAndRenderAnalytics);
+  dom.analyticsSearchInput?.addEventListener("input", () => {
+    _analytics.filterText = dom.analyticsSearchInput.value;
+    renderAnalyticsActiveTab();
+  });
+  dom.analyticsSortSelect?.addEventListener("change", () => {
+    _analytics.sortCol = dom.analyticsSortSelect.value || null;
+    _analytics.sortDir = "desc";
+    renderAnalyticsActiveTab();
+  });
+  document.querySelectorAll(".analytics-tab").forEach((btn) => {
+    btn.addEventListener("click", () => setAnalyticsTab(btn.dataset.tab));
+  });
+  document.querySelectorAll(".analytics-table thead th[data-col]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (_analytics.sortCol === col) {
+        _analytics.sortDir = _analytics.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        _analytics.sortCol = col;
+        _analytics.sortDir = "desc";
+      }
+      const table = th.closest("table");
+      table.querySelectorAll("th[data-col]").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+      th.classList.add(_analytics.sortDir === "asc" ? "sort-asc" : "sort-desc");
+      renderAnalyticsActiveTab();
+    });
+  });
+  updateSortSelect("overview");
 }
 
 init().catch((error) => {

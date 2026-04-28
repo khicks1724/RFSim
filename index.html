@@ -1618,7 +1618,7 @@
       <div class="emitter-modal-header">
         <div class="emitter-modal-title-group">
           <h2 id="analyticsModalTitle">Site Analytics</h2>
-          <p>Usage monitoring — visible to administrators only</p>
+          <p>Usage monitoring — restricted to kyle.hicks</p>
         </div>
         <button id="analyticsModalCloseBtn" class="ghost-button small icon-button" type="button" aria-label="Close">&#10005;</button>
       </div>
@@ -1645,16 +1645,25 @@
           <span class="analytics-kpi-value" id="akpiTokens">—</span>
           <span class="analytics-kpi-label">Total Tokens</span>
         </div>
+        <div class="analytics-kpi-card">
+          <span class="analytics-kpi-value" id="akpiActive30">—</span>
+          <span class="analytics-kpi-label">Active Users (30d)</span>
+        </div>
+        <div class="analytics-kpi-card">
+          <span class="analytics-kpi-value" id="akpiLogins">—</span>
+          <span class="analytics-kpi-label">Total Logins</span>
+        </div>
       </div>
 
       <div class="analytics-body">
         <!-- Left: tabs + content -->
         <div class="analytics-main">
           <div class="analytics-tab-bar">
-            <button class="analytics-tab active" data-tab="users">Users</button>
+            <button class="analytics-tab active" data-tab="overview">Overview</button>
+            <button class="analytics-tab" data-tab="users">Users</button>
             <button class="analytics-tab" data-tab="ai">AI Usage</button>
             <button class="analytics-tab" data-tab="projects">Projects</button>
-            <button class="analytics-tab" data-tab="events">Event Log</button>
+            <button class="analytics-tab" data-tab="events">Activity Log</button>
           </div>
 
           <!-- Filter bar -->
@@ -1667,13 +1676,62 @@
           </div>
 
           <!-- Tab panels -->
-          <div id="analyticsTabUsers" class="analytics-tab-panel">
+          <div id="analyticsTabOverview" class="analytics-tab-panel">
+            <div class="analytics-overview-grid">
+              <section class="analytics-overview-card">
+                <div class="analytics-overview-title">Provider Usage</div>
+                <table class="analytics-table" id="analyticsOverviewProvidersTable">
+                  <thead><tr>
+                    <th data-col="provider">Provider</th>
+                    <th data-col="request_count">Reqs</th>
+                    <th data-col="user_count">Users</th>
+                    <th data-col="total_tokens">Tokens</th>
+                  </tr></thead>
+                  <tbody></tbody>
+                </table>
+              </section>
+              <section class="analytics-overview-card">
+                <div class="analytics-overview-title">Top Use Cases</div>
+                <table class="analytics-table" id="analyticsOverviewIntentsTable">
+                  <thead><tr>
+                    <th data-col="intent_category">Intent</th>
+                    <th data-col="ai_requests">AI Reqs</th>
+                    <th data-col="user_count">Users</th>
+                    <th data-col="total_tokens">Tokens</th>
+                  </tr></thead>
+                  <tbody></tbody>
+                </table>
+              </section>
+              <section class="analytics-overview-card analytics-overview-card-wide">
+                <div class="analytics-overview-title">Most Active Users</div>
+                <table class="analytics-table" id="analyticsOverviewUsersTable">
+                  <thead><tr>
+                    <th data-col="username">User</th>
+                    <th data-col="last_seen">Last Seen</th>
+                    <th data-col="login_count">Logins</th>
+                    <th data-col="ai_request_count">AI Reqs</th>
+                    <th data-col="total_tokens">Tokens</th>
+                    <th data-col="top_intent">Top Intent</th>
+                  </tr></thead>
+                  <tbody></tbody>
+                </table>
+              </section>
+            </div>
+          </div>
+
+          <div id="analyticsTabUsers" class="analytics-tab-panel hidden">
             <table class="analytics-table" id="analyticsUsersTable">
               <thead><tr>
                 <th data-col="username">User</th>
+                <th data-col="email">Email</th>
                 <th data-col="created_at">Joined</th>
+                <th data-col="login_count">Logins</th>
                 <th data-col="visit_count">Visits</th>
                 <th data-col="project_count">Projects</th>
+                <th data-col="ai_request_count">AI Reqs</th>
+                <th data-col="total_tokens">Tokens</th>
+                <th data-col="favorite_provider">Top Provider</th>
+                <th data-col="top_intent">Top Intent</th>
                 <th data-col="last_seen">Last Seen</th>
               </tr></thead>
               <tbody></tbody>
@@ -1686,10 +1744,13 @@
                 <th data-col="username">User</th>
                 <th data-col="provider">Provider</th>
                 <th data-col="model">Model</th>
+                <th data-col="intent_category">Intent</th>
                 <th data-col="request_count">Requests</th>
-                <th data-col="total_input">Input Tokens</th>
-                <th data-col="total_output">Output Tokens</th>
-                <th data-col="total">Total Tokens</th>
+                <th data-col="total_input_tokens">Input Tokens</th>
+                <th data-col="total_output_tokens">Output Tokens</th>
+                <th data-col="total_tokens">Total Tokens</th>
+                <th data-col="avg_total_tokens">Avg / Req</th>
+                <th data-col="last_request_at">Last Request</th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -1700,9 +1761,13 @@
               <thead><tr>
                 <th data-col="username">Owner</th>
                 <th data-col="name">Project</th>
+                <th data-col="description">Description</th>
                 <th data-col="created_at">Created</th>
                 <th data-col="updated_at">Last Saved</th>
+                <th data-col="save_count">Saves</th>
                 <th data-col="snapshot_count">Snapshots</th>
+                <th data-col="last_snapshot_at">Last Snapshot</th>
+                <th data-col="latest_intent">Latest Intent</th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -1716,8 +1781,11 @@
                 <th data-col="event_type">Event</th>
                 <th data-col="provider">Provider</th>
                 <th data-col="model">Model</th>
-                <th data-col="input_tokens">In</th>
-                <th data-col="output_tokens">Out</th>
+                <th data-col="project_name">Project</th>
+                <th data-col="intent_category">Intent</th>
+                <th data-col="total_tokens">Tokens</th>
+                <th data-col="outcome">Outcome</th>
+                <th data-col="prompt_excerpt">Prompt / Detail</th>
               </tr></thead>
               <tbody></tbody>
             </table>

@@ -291,6 +291,10 @@ app.post("/api/auth/register", async (request, response) => {
       [internalEmail, passwordHash, fullName]
     );
     const user = result.rows[0];
+    await logAnalyticsEventForUser(user.id, {
+      event_type: "auth_register",
+      meta: { source: "self_service", username },
+    }, { username: user.full_name || user.email });
     response.status(201).json({
       token: signToken(user),
       user: { id: user.id, email: user.email, fullName: user.full_name }
@@ -327,6 +331,10 @@ app.post("/api/auth/login", async (request, response) => {
       return;
     }
 
+    await logAnalyticsEventForUser(user.id, {
+      event_type: "auth_login",
+      meta: { source: "password_login" },
+    }, { username: user.full_name || user.email });
     response.json({
       token: signToken(user),
       user: { id: user.id, email: user.email, fullName: user.full_name }
@@ -483,6 +491,14 @@ app.post("/api/projects", authRequired, async (request, response) => {
       "insert into project (owner_user_id, name, description, latest_state_json) values ($1, $2, $3, $4::jsonb) returning id, name, description, latest_state_json, updated_at",
       [request.user.sub, name, description, JSON.stringify(state)]
     );
+    await logAnalyticsEventForUser(request.user.sub, {
+      event_type: "project_create",
+      meta: {
+        project_id: result.rows[0].id,
+        project_name: result.rows[0].name,
+        description_excerpt: clampExcerpt(description, 120),
+      },
+    }, { username: request.user.email });
     response.status(201).json({ project: result.rows[0] });
   } catch (error) {
     response.status(500).json({ error: error.message });
@@ -499,6 +515,16 @@ app.get("/api/projects/:projectId", authRequired, async (request, response) => {
       response.status(404).json({ error: "Project not found." });
       return;
     }
+    await logAnalyticsEventForUser(request.user.sub, {
+      event_type: "project_save",
+      meta: {
+        project_id: result.rows[0].id,
+        project_name: result.rows[0].name,
+        field_count: updates.length,
+        schema_version: parsed.data.schemaVersion ?? null,
+        client_saved_at: parsed.data.clientSavedAt ?? null,
+      },
+    }, { username: request.user.email });
     response.json({ project: result.rows[0] });
   } catch (error) {
     response.status(500).json({ error: error.message });
@@ -561,6 +587,14 @@ app.put("/api/projects/:projectId", authRequired, async (request, response) => {
 
 app.delete("/api/projects/:projectId", authRequired, async (request, response) => {
   try {
+    const projectInfo = await query(
+      "select id, name from project where id = $1 and owner_user_id = $2",
+      [request.params.projectId, request.user.sub]
+    );
+    if (projectInfo.rowCount === 0) {
+      response.status(404).json({ error: "Project not found." });
+      return;
+    }
     const result = await query(
       "delete from project where id = $1 and owner_user_id = $2",
       [request.params.projectId, request.user.sub]
@@ -569,6 +603,13 @@ app.delete("/api/projects/:projectId", authRequired, async (request, response) =
       response.status(404).json({ error: "Project not found." });
       return;
     }
+    await logAnalyticsEventForUser(request.user.sub, {
+      event_type: "project_delete",
+      meta: {
+        project_id: projectInfo.rows[0].id,
+        project_name: projectInfo.rows[0].name,
+      },
+    }, { username: request.user.email });
     response.status(204).send();
   } catch (error) {
     response.status(500).json({ error: error.message });
@@ -591,6 +632,15 @@ app.post("/api/projects/:projectId/duplicate", authRequired, async (request, res
       "insert into project (owner_user_id, name, description, latest_state_json) values ($1, $2, $3, $4::jsonb) returning id, name, description, latest_state_json, updated_at",
       [request.user.sub, `${source.name} Copy`, source.description, JSON.stringify(source.latest_state_json)]
     );
+    await logAnalyticsEventForUser(request.user.sub, {
+      event_type: "project_duplicate",
+      meta: {
+        project_id: duplicateResult.rows[0].id,
+        project_name: duplicateResult.rows[0].name,
+        source_project_id: source.id,
+        source_project_name: source.name,
+      },
+    }, { username: request.user.email });
     response.status(201).json({ project: duplicateResult.rows[0] });
   } catch (error) {
     response.status(500).json({ error: error.message });
@@ -622,7 +672,7 @@ app.post("/api/projects/:projectId/snapshots", authRequired, async (request, res
 
   try {
     const projectResult = await query(
-      "select latest_state_json from project where id = $1 and owner_user_id = $2",
+      "select name, latest_state_json from project where id = $1 and owner_user_id = $2",
       [request.params.projectId, request.user.sub]
     );
     if (projectResult.rowCount === 0) {
@@ -635,6 +685,15 @@ app.post("/api/projects/:projectId/snapshots", authRequired, async (request, res
       "insert into project_snapshot (project_id, label, state_json) values ($1, $2, $3::jsonb) returning id, label, created_at",
       [request.params.projectId, parsed.data.label, JSON.stringify(snapshotState)]
     );
+    await logAnalyticsEventForUser(request.user.sub, {
+      event_type: "snapshot",
+      meta: {
+        project_id: request.params.projectId,
+        project_name: projectResult.rows[0].name,
+        snapshot_id: result.rows[0].id,
+        snapshot_label: result.rows[0].label,
+      },
+    }, { username: request.user.email });
     response.status(201).json({ snapshot: result.rows[0] });
   } catch (error) {
     response.status(500).json({ error: error.message });
@@ -656,13 +715,61 @@ function adminRequired(request, response, next) {
 }
 
 const analyticsEventSchema = z.object({
-  event_type: z.enum(["visit", "ai_request", "project_create", "project_save", "snapshot"]),
+  event_type: z.enum([
+    "visit",
+    "auth_login",
+    "auth_register",
+    "ai_request",
+    "project_create",
+    "project_save",
+    "project_duplicate",
+    "project_delete",
+    "snapshot"
+  ]),
   provider:       z.string().max(80).optional(),
   model:          z.string().max(120).optional(),
   input_tokens:   z.number().int().nonnegative().optional(),
   output_tokens:  z.number().int().nonnegative().optional(),
   meta:           z.record(z.any()).optional().default({}),
 });
+
+async function fetchAnalyticsUsername(userId, fallback = "") {
+  const userResult = await query(
+    "select full_name, email from app_user where id = $1",
+    [userId]
+  );
+  return userResult.rows[0]?.full_name || userResult.rows[0]?.email || fallback || null;
+}
+
+async function logAnalyticsEventForUser(userId, event, { username: explicitUsername = "" } = {}) {
+  try {
+    const username = explicitUsername || await fetchAnalyticsUsername(userId);
+    await query(
+      `insert into analytics_event (user_id, username, event_type, provider, model, input_tokens, output_tokens, meta)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [
+        userId,
+        username,
+        event.event_type,
+        event.provider ?? null,
+        event.model ?? null,
+        event.input_tokens ?? null,
+        event.output_tokens ?? null,
+        JSON.stringify(event.meta ?? {}),
+      ]
+    );
+  } catch (error) {
+    console.warn(`[Analytics] event dropped (${event?.event_type || "unknown"}): ${error.message}`);
+  }
+}
+
+function clampExcerpt(value, max = 220) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
 
 app.post("/api/analytics/event", authRequired, async (request, response) => {
   const parsed = analyticsEventSchema.safeParse(request.body);
@@ -672,17 +779,13 @@ app.post("/api/analytics/event", authRequired, async (request, response) => {
   }
   const { event_type, provider, model, input_tokens, output_tokens, meta } = parsed.data;
   try {
-    const userResult = await query("select full_name from app_user where id = $1", [request.user.sub]);
-    const username = userResult.rows[0]?.full_name ?? request.user.email;
-    await query(
-      `insert into analytics_event (user_id, username, event_type, provider, model, input_tokens, output_tokens, meta)
-       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-      [request.user.sub, username, event_type, provider ?? null, model ?? null,
-       input_tokens ?? null, output_tokens ?? null, JSON.stringify(meta)]
+    await logAnalyticsEventForUser(
+      request.user.sub,
+      { event_type, provider, model, input_tokens, output_tokens, meta },
+      { username: request.user.email }
     );
     response.status(204).send();
   } catch (error) {
-    if (error.code === "42P01") { response.status(204).send(); return; } // table not yet created
     response.status(500).json({ error: error.message });
   }
 });
@@ -699,106 +802,291 @@ app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, re
     const hasProjectTable = Boolean(tableAvailability.rows[0]?.project_table);
     const hasProjectSnapshotTable = Boolean(tableAvailability.rows[0]?.project_snapshot_table);
 
-    let usersQuery;
-    if (hasAnalyticsTable && hasProjectTable) {
-      usersQuery = query(`
-        select u.id, u.full_name as username, u.email, u.created_at,
-               count(distinct p.id)::int as project_count,
-               count(distinct case when e.event_type='visit' then e.id end)::int as visit_count,
-               max(e.created_at) as last_seen
-        from app_user u
-        left join project p on p.owner_user_id = u.id
-        left join analytics_event e on e.user_id = u.id
-        group by u.id
-        order by last_seen desc nulls last, u.created_at desc
-      `);
-    } else if (hasProjectTable) {
-      usersQuery = query(`
-        select u.id, u.full_name as username, u.email, u.created_at,
-               count(distinct p.id)::int as project_count,
-               0::int as visit_count,
-               null::timestamptz as last_seen
-        from app_user u
-        left join project p on p.owner_user_id = u.id
-        group by u.id
-        order by u.created_at desc
-      `);
-    } else if (hasAnalyticsTable) {
-      usersQuery = query(`
-        select u.id, u.full_name as username, u.email, u.created_at,
-               0::int as project_count,
-               count(distinct case when e.event_type='visit' then e.id end)::int as visit_count,
-               max(e.created_at) as last_seen
-        from app_user u
-        left join analytics_event e on e.user_id = u.id
-        group by u.id
-        order by last_seen desc nulls last, u.created_at desc
-      `);
-    } else {
-      usersQuery = query(`
-        select u.id, u.full_name as username, u.email, u.created_at,
-               0::int as project_count,
-               0::int as visit_count,
-               null::timestamptz as last_seen
-        from app_user u
-        order by u.created_at desc
-      `);
-    }
+    const usersPromise = query(`
+      with project_counts as (
+        select owner_user_id as user_id,
+               count(*)::int as project_count,
+               max(updated_at) as last_project_updated_at
+        from project
+        group by owner_user_id
+      ),
+      last_project as (
+        select distinct on (owner_user_id)
+               owner_user_id as user_id,
+               name as last_project_name
+        from project
+        order by owner_user_id, updated_at desc
+      ),
+      snapshot_counts as (
+        ${hasProjectSnapshotTable
+          ? `select p.owner_user_id as user_id,
+                    count(s.id)::int as snapshot_count,
+                    max(s.created_at) as last_snapshot_at
+             from project_snapshot s
+             join project p on p.id = s.project_id
+             group by p.owner_user_id`
+          : `select null::uuid as user_id, 0::int as snapshot_count, null::timestamptz as last_snapshot_at where false`}
+      ),
+      event_counts as (
+        ${hasAnalyticsTable
+          ? `select e.user_id,
+                    count(*) filter (where e.event_type = 'visit')::int as visit_count,
+                    count(*) filter (where e.event_type = 'auth_login')::int as login_count,
+                    count(*) filter (where e.event_type = 'ai_request')::int as ai_request_count,
+                    coalesce(sum(e.input_tokens), 0)::int as total_input_tokens,
+                    coalesce(sum(e.output_tokens), 0)::int as total_output_tokens,
+                    max(e.created_at) as last_seen,
+                    max(e.created_at) filter (where e.event_type = 'auth_login') as last_login_at
+             from analytics_event e
+             group by e.user_id`
+          : `select null::uuid as user_id,
+                    0::int as visit_count,
+                    0::int as login_count,
+                    0::int as ai_request_count,
+                    0::int as total_input_tokens,
+                    0::int as total_output_tokens,
+                    null::timestamptz as last_seen,
+                    null::timestamptz as last_login_at
+             where false`}
+      ),
+      favorite_provider as (
+        ${hasAnalyticsTable
+          ? `select distinct on (e.user_id)
+                    e.user_id,
+                    e.provider as favorite_provider
+             from analytics_event e
+             where e.event_type = 'ai_request' and coalesce(e.provider, '') <> ''
+             group by e.user_id, e.provider
+             order by e.user_id, count(*) desc, max(e.created_at) desc`
+          : `select null::uuid as user_id, null::text as favorite_provider where false`}
+      ),
+      top_intent as (
+        ${hasAnalyticsTable
+          ? `select distinct on (e.user_id)
+                    e.user_id,
+                    nullif(e.meta->>'intent_category', '') as top_intent
+             from analytics_event e
+             where e.event_type = 'ai_request' and nullif(e.meta->>'intent_category', '') is not null
+             group by e.user_id, e.meta->>'intent_category'
+             order by e.user_id, count(*) desc, max(e.created_at) desc`
+          : `select null::uuid as user_id, null::text as top_intent where false`}
+      )
+      select u.id,
+             u.full_name as username,
+             u.email,
+             u.created_at,
+             coalesce(pc.project_count, 0)::int as project_count,
+             coalesce(sc.snapshot_count, 0)::int as snapshot_count,
+             coalesce(ec.visit_count, 0)::int as visit_count,
+             coalesce(ec.login_count, 0)::int as login_count,
+             coalesce(ec.ai_request_count, 0)::int as ai_request_count,
+             coalesce(ec.total_input_tokens, 0)::int as total_input_tokens,
+             coalesce(ec.total_output_tokens, 0)::int as total_output_tokens,
+             (coalesce(ec.total_input_tokens, 0) + coalesce(ec.total_output_tokens, 0))::int as total_tokens,
+             ec.last_seen,
+             ec.last_login_at,
+             sc.last_snapshot_at,
+             pc.last_project_updated_at,
+             lp.last_project_name,
+             fp.favorite_provider,
+             ti.top_intent
+      from app_user u
+      left join project_counts pc on pc.user_id = u.id
+      left join snapshot_counts sc on sc.user_id = u.id
+      left join event_counts ec on ec.user_id = u.id
+      left join last_project lp on lp.user_id = u.id
+      left join favorite_provider fp on fp.user_id = u.id
+      left join top_intent ti on ti.user_id = u.id
+      order by ec.last_seen desc nulls last, u.created_at desc
+    `);
 
-    const [usersRes, eventsRes, aiRes, projectsRes, dailyRes] = await Promise.all([
-      usersQuery,
-      hasAnalyticsTable
-        ? query(`
-            select e.id, e.username, e.event_type, e.provider, e.model,
-                   e.input_tokens, e.output_tokens, e.meta, e.created_at
-            from analytics_event e
-            order by e.created_at desc
-            limit 500
-          `)
-        : Promise.resolve({ rows: [] }),
-      hasAnalyticsTable
-        ? query(`
-            select username, provider, model,
-                   count(*)::int                        as request_count,
-                   coalesce(sum(input_tokens),0)::int   as total_input,
-                   coalesce(sum(output_tokens),0)::int  as total_output
-            from analytics_event
-            where event_type = 'ai_request'
-            group by username, provider, model
-            order by total_input + total_output desc
-          `)
-        : Promise.resolve({ rows: [] }),
+    const eventsPromise = hasAnalyticsTable
+      ? query(`
+          select e.id, e.username, e.event_type, e.provider, e.model,
+                 e.input_tokens, e.output_tokens,
+                 (coalesce(e.input_tokens, 0) + coalesce(e.output_tokens, 0))::int as total_tokens,
+                 nullif(e.meta->>'intent_category', '') as intent_category,
+                 nullif(e.meta->>'project_name', '') as project_name,
+                 nullif(e.meta->>'prompt_excerpt', '') as prompt_excerpt,
+                 nullif(e.meta->>'outcome', '') as outcome,
+                 e.meta,
+                 e.created_at
+          from analytics_event e
+          order by e.created_at desc
+          limit 800
+        `)
+      : Promise.resolve({ rows: [] });
+
+    const aiUsagePromise = hasAnalyticsTable
+      ? query(`
+          select username,
+                 provider,
+                 model,
+                 nullif(meta->>'intent_category', '') as intent_category,
+                 count(*)::int as request_count,
+                 coalesce(sum(input_tokens), 0)::int as total_input_tokens,
+                 coalesce(sum(output_tokens), 0)::int as total_output_tokens,
+                 (coalesce(sum(input_tokens), 0) + coalesce(sum(output_tokens), 0))::int as total_tokens,
+                 round(avg(coalesce(input_tokens, 0) + coalesce(output_tokens, 0)))::int as avg_total_tokens,
+                 max(created_at) as last_request_at
+          from analytics_event
+          where event_type = 'ai_request'
+          group by username, provider, model, nullif(meta->>'intent_category', '')
+          order by total_tokens desc, request_count desc
+        `)
+      : Promise.resolve({ rows: [] });
+
+    const projectsPromise = hasProjectTable
+      ? query(`
+          select u.full_name as username,
+                 u.email,
+                 p.id,
+                 p.name,
+                 p.description,
+                 p.created_at,
+                 p.updated_at,
+                 ${hasProjectSnapshotTable
+                   ? "(select count(*) from project_snapshot s where s.project_id = p.id)::int"
+                   : "0::int"} as snapshot_count,
+                 ${hasProjectSnapshotTable
+                   ? "(select max(created_at) from project_snapshot s where s.project_id = p.id)"
+                   : "null::timestamptz"} as last_snapshot_at,
+                 ${hasAnalyticsTable
+                   ? "(select count(*) from analytics_event e where e.event_type = 'project_save' and nullif(e.meta->>'project_id','') = p.id::text)::int"
+                   : "0::int"} as save_count,
+                 ${hasAnalyticsTable
+                   ? "(select nullif(e.meta->>'intent_category','') from analytics_event e where e.event_type = 'ai_request' and nullif(e.meta->>'project_id','') = p.id::text order by e.created_at desc limit 1)"
+                   : "null::text"} as latest_intent
+          from project p
+          join app_user u on u.id = p.owner_user_id
+          order by p.updated_at desc
+        `)
+      : Promise.resolve({ rows: [] });
+
+    const dailyPromise = hasAnalyticsTable
+      ? query(`
+          select date_trunc('day', created_at)::date as day,
+                 count(distinct user_id)::int as unique_users,
+                 count(*) filter (where event_type = 'visit')::int as total_visits,
+                 count(*) filter (where event_type = 'ai_request')::int as ai_requests,
+                 (coalesce(sum(input_tokens), 0) + coalesce(sum(output_tokens), 0))::int as total_tokens
+          from analytics_event
+          where created_at >= now() - interval '60 days'
+          group by 1
+          order by 1
+        `)
+      : Promise.resolve({ rows: [] });
+
+    const providerUsagePromise = hasAnalyticsTable
+      ? query(`
+          select coalesce(provider, '(unspecified)') as provider,
+                 count(*)::int as request_count,
+                 count(distinct user_id)::int as user_count,
+                 coalesce(sum(input_tokens), 0)::int as total_input_tokens,
+                 coalesce(sum(output_tokens), 0)::int as total_output_tokens,
+                 (coalesce(sum(input_tokens), 0) + coalesce(sum(output_tokens), 0))::int as total_tokens
+          from analytics_event
+          where event_type = 'ai_request'
+          group by coalesce(provider, '(unspecified)')
+          order by total_tokens desc, request_count desc
+        `)
+      : Promise.resolve({ rows: [] });
+
+    const intentUsagePromise = hasAnalyticsTable
+      ? query(`
+          select coalesce(nullif(meta->>'intent_category', ''), '(uncategorized)') as intent_category,
+                 count(*)::int as event_count,
+                 count(distinct user_id)::int as user_count,
+                 count(*) filter (where event_type = 'ai_request')::int as ai_requests,
+                 (coalesce(sum(input_tokens), 0) + coalesce(sum(output_tokens), 0))::int as total_tokens
+          from analytics_event
+          group by coalesce(nullif(meta->>'intent_category', ''), '(uncategorized)')
+          order by ai_requests desc, event_count desc
+        `)
+      : Promise.resolve({ rows: [] });
+
+    const summaryPromise = Promise.all([
+      query("select count(*)::int as registered_users from app_user"),
       hasProjectTable
-        ? query(`
-            select u.full_name as username, p.name, p.created_at, p.updated_at,
-                   ${hasProjectSnapshotTable
-                     ? "(select count(*) from project_snapshot s where s.project_id = p.id)::int"
-                     : "0::int"} as snapshot_count
-            from project p
-            join app_user u on u.id = p.owner_user_id
-            order by p.updated_at desc
-          `)
-        : Promise.resolve({ rows: [] }),
+        ? query("select count(*)::int as total_projects from project")
+        : Promise.resolve({ rows: [{ total_projects: 0 }] }),
+      hasProjectSnapshotTable
+        ? query("select count(*)::int as total_snapshots from project_snapshot")
+        : Promise.resolve({ rows: [{ total_snapshots: 0 }] }),
       hasAnalyticsTable
         ? query(`
-            select date_trunc('day', created_at)::date as day,
-                   count(distinct user_id)::int         as unique_users,
-                   count(*)::int                        as total_visits
+            select
+              count(*) filter (where event_type = 'visit')::int as total_visits,
+              count(*) filter (where event_type = 'auth_login')::int as total_logins,
+              count(*) filter (where event_type = 'ai_request')::int as ai_requests,
+              count(distinct user_id) filter (where created_at >= now() - interval '7 days')::int as active_users_7d,
+              count(distinct user_id) filter (where created_at >= now() - interval '30 days')::int as active_users_30d,
+              coalesce(sum(input_tokens), 0)::int as total_input_tokens,
+              coalesce(sum(output_tokens), 0)::int as total_output_tokens
             from analytics_event
-            where event_type = 'visit'
-              and created_at >= now() - interval '60 days'
-            group by 1
-            order by 1
           `)
-        : Promise.resolve({ rows: [] }),
+        : Promise.resolve({
+            rows: [{
+              total_visits: 0,
+              total_logins: 0,
+              ai_requests: 0,
+              active_users_7d: 0,
+              active_users_30d: 0,
+              total_input_tokens: 0,
+              total_output_tokens: 0,
+            }]
+          }),
+    ]).then(([usersCountRes, projectsCountRes, snapshotsCountRes, analyticsSummaryRes]) => {
+      const analytics = analyticsSummaryRes.rows[0] ?? {};
+      const totalInput = Number(analytics.total_input_tokens ?? 0);
+      const totalOutput = Number(analytics.total_output_tokens ?? 0);
+      return {
+        registered_users: Number(usersCountRes.rows[0]?.registered_users ?? 0),
+        total_projects: Number(projectsCountRes.rows[0]?.total_projects ?? 0),
+        total_snapshots: Number(snapshotsCountRes.rows[0]?.total_snapshots ?? 0),
+        total_visits: Number(analytics.total_visits ?? 0),
+        total_logins: Number(analytics.total_logins ?? 0),
+        ai_requests: Number(analytics.ai_requests ?? 0),
+        active_users_7d: Number(analytics.active_users_7d ?? 0),
+        active_users_30d: Number(analytics.active_users_30d ?? 0),
+        total_input_tokens: totalInput,
+        total_output_tokens: totalOutput,
+        total_tokens: totalInput + totalOutput,
+      };
+    });
+
+    const [
+      summary,
+      usersRes,
+      eventsRes,
+      aiUsageRes,
+      projectsRes,
+      dailyRes,
+      providerUsageRes,
+      intentUsageRes,
+    ] = await Promise.all([
+      summaryPromise,
+      usersPromise,
+      eventsPromise,
+      aiUsagePromise,
+      projectsPromise,
+      dailyPromise,
+      providerUsagePromise,
+      intentUsagePromise,
     ]);
 
     response.json({
-      users:    usersRes.rows,
-      events:   eventsRes.rows,
-      aiTokens: aiRes.rows,
+      summary,
+      users: usersRes.rows,
+      events: eventsRes.rows.map((row) => ({
+        ...row,
+        prompt_excerpt: clampExcerpt(row.prompt_excerpt),
+      })),
+      aiUsage: aiUsageRes.rows,
       projects: projectsRes.rows,
-      daily:    dailyRes.rows,
+      daily: dailyRes.rows,
+      providers: providerUsageRes.rows,
+      intents: intentUsageRes.rows,
     });
   } catch (error) {
     response.status(500).json({ error: error.message });
