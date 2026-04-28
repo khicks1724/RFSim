@@ -48,6 +48,35 @@ const LOCAL_MODEL_MODE = process.argv.includes("--local-model");
 const LOCAL_MODEL_ENDPOINT = process.env.LOCAL_MODEL_URL
   || "http://localhost:11434/v1/chat/completions";
 
+function getOpenSslInvocation() {
+  if (process.platform === "win32") {
+    const candidates = [
+      path.join(process.env["ProgramFiles"] || "C:\\Program Files", "Git", "usr", "bin", "openssl.exe"),
+      path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "usr", "bin", "openssl.exe"),
+    ];
+    const windowsPath = candidates.find((candidate) => fs.existsSync(candidate));
+    if (windowsPath) return { command: windowsPath, source: "Git for Windows" };
+  }
+  return { command: "openssl", source: "PATH" };
+}
+
+function printManualCertInstructions() {
+  console.error("\nManual certificate generation:");
+  if (process.platform === "win32") {
+    console.error("  1. Install Git for Windows so OpenSSL is available.");
+    console.error("  2. Open PowerShell in the folder that contains genai-proxy.js.");
+    console.error('     Tip: in File Explorer, open that folder, type "powershell" in the address bar, and press Enter.');
+    console.error("  3. Run:");
+    console.error(`\n    & \"C:\\Program Files\\Git\\usr\\bin\\openssl.exe\" req -x509 -newkey rsa:2048 -keyout \"${KEY_FILE}\" -out \"${CERT_FILE}\" -days 3650 -nodes -subj \"/CN=localhost\" -addext \"subjectAltName=IP:127.0.0.1,DNS:localhost\"\n`);
+    console.error("  4. Then run: node genai-proxy.js --local-model");
+  } else {
+    console.error("  Open Terminal in the folder that contains genai-proxy.js and run:");
+    console.error(`\n    mkdir -p \"${CERTS_DIR}\" && openssl req -x509 -newkey rsa:2048 -keyout \"${KEY_FILE}\" -out \"${CERT_FILE}\" -days 3650 -nodes -subj \"/CN=localhost\" -addext \"subjectAltName=IP:127.0.0.1,DNS:localhost\"\n`);
+    console.error("  Then run: node genai-proxy.js --local-model");
+  }
+  console.error("  Alternatively set LOCAL_MODEL_URL to an http:// address and access the app over http://.");
+}
+
 // ─── CORS headers ────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -96,8 +125,8 @@ function ensureCert() {
   console.log("\n🔐  Generating self-signed TLS certificate for localhost...");
   fs.mkdirSync(CERTS_DIR, { recursive: true });
 
-  // Try openssl (available on macOS, Linux, Git Bash on Windows)
-  const openssl = spawnSync("openssl", [
+  const opensslInfo = getOpenSslInvocation();
+  const openssl = spawnSync(opensslInfo.command, [
     "req", "-x509", "-newkey", "rsa:2048",
     "-keyout", KEY_FILE,
     "-out",    CERT_FILE,
@@ -108,8 +137,11 @@ function ensureCert() {
   ], { stdio: "pipe" });
 
   if (openssl.status !== 0) {
-    console.error("openssl not found. Install Git for Windows (includes OpenSSL) or use WSL.");
-    console.error("Alternatively set LOCAL_MODEL_URL to an http:// address and access the app over http://.");
+    console.error(`OpenSSL certificate generation failed using ${opensslInfo.source}.`);
+    if (openssl.error?.message) console.error(openssl.error.message);
+    const stderr = openssl.stderr?.toString().trim();
+    if (stderr) console.error(stderr);
+    printManualCertInstructions();
     process.exit(1);
   }
 

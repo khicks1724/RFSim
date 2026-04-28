@@ -1964,7 +1964,14 @@ body:not(.ai-panel-open) .ai-panel {
   background: rgba(0, 0, 0, 0.12);
 }
 
-.ai-genai-mil-step strong {
+.ai-genai-mil-step-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ai-genai-mil-step-copy > strong {
   display: block;
   color: #fde68a;
   margin-bottom: 2px;
@@ -4183,6 +4190,7 @@ button:focus {
   display: grid;
   grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.2fr);
   gap: 22px;
+  align-items: start;
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
@@ -4194,6 +4202,7 @@ button:focus {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  align-self: start;
   min-height: 0;
   padding: 22px;
   border: 1px solid var(--border);
