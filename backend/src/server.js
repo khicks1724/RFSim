@@ -3,6 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const OpenAI = require("openai");
 const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
@@ -104,39 +105,24 @@ const aiGenAiMilChatSchema = z.object({
 
 const GENAI_MIL_BASE_URL = "https://api.genai.mil/v1";
 
-async function relayGenAiMil(response, upstreamUrl, { apiKey, body, method = "POST" }) {
-  const keySnippet = apiKey ? `${apiKey.slice(0, 10)}...` : "(none)";
-  const bodyJson = body ? JSON.stringify(body) : null;
-  console.log(`[GenAI relay] ${method} ${upstreamUrl}`);
-  console.log(`[GenAI relay] key: ${keySnippet}`);
-  if (bodyJson) console.log(`[GenAI relay] body: ${bodyJson.slice(0, 300)}`);
+function createGenAiMilClient(apiKey) {
+  return new OpenAI({
+    baseURL: GENAI_MIL_BASE_URL,
+    apiKey,
+    timeout: 30000,
+    defaultHeaders: {
+      Accept: "application/json",
+    },
+  });
+}
 
-  try {
-    const upstream = await fetch(upstreamUrl, {
-      method,
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-        "X-Api-Key": apiKey,
-        ...(bodyJson ? { "Content-Type": "application/json" } : {}),
-      },
-      signal: AbortSignal.timeout(30000),
-      ...(bodyJson ? { body: bodyJson } : {}),
-    });
-
-    const text = await upstream.text();
-    console.log(`[GenAI relay] status: ${upstream.status}`);
-    console.log(`[GenAI relay] response: ${text.slice(0, 300)}`);
-
-    response.status(upstream.status);
-    if (upstream.headers.get("content-type")) {
-      response.set("Content-Type", upstream.headers.get("content-type"));
-    }
-    response.send(text);
-  } catch (error) {
-    console.error(`[GenAI relay] fetch error: ${error.message}`);
-    response.status(502).json({ error: error.message || "GenAI.mil relay request failed." });
-  }
+function sendGenAiMilClientError(response, error, fallbackMessage) {
+  const status = Number.isInteger(error?.status) ? error.status : 502;
+  const payload = error?.error && typeof error.error === "object"
+    ? error.error
+    : { message: error?.message || fallbackMessage };
+  console.error(`[GenAI relay] client error (${status}): ${payload.message || error?.message || fallbackMessage}`);
+  response.status(status).json({ error: payload });
 }
 
 app.get("/api/health", async (_request, response) => {
@@ -330,10 +316,13 @@ app.post("/api/ai/genai-mil/models", async (request, response) => {
     return;
   }
 
-  await relayGenAiMil(response, `${GENAI_MIL_BASE_URL}/models`, {
-    apiKey: parsed.data.apiKey,
-    method: "GET",
-  });
+  try {
+    const client = createGenAiMilClient(parsed.data.apiKey);
+    const models = await client.models.list();
+    response.json(models);
+  } catch (error) {
+    sendGenAiMilClientError(response, error, "GenAI.mil model discovery failed.");
+  }
 });
 
 app.post("/api/ai/genai-mil/chat/completions", async (request, response) => {
@@ -343,14 +332,14 @@ app.post("/api/ai/genai-mil/chat/completions", async (request, response) => {
     return;
   }
 
-  // Strip apiKey — auth goes in the Authorization header only, not the body
-  const { apiKey, ...chatBody } = parsed.data;
-
-  await relayGenAiMil(response, `${GENAI_MIL_BASE_URL}/chat/completions`, {
-    apiKey,
-    body: chatBody,
-    method: "POST",
-  });
+  try {
+    const { apiKey, ...chatBody } = parsed.data;
+    const client = createGenAiMilClient(apiKey);
+    const completion = await client.chat.completions.create(chatBody);
+    response.json(completion);
+  } catch (error) {
+    sendGenAiMilClientError(response, error, "GenAI.mil chat completion failed.");
+  }
 });
 
 app.get("/api/projects", authRequired, async (request, response) => {

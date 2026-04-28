@@ -938,6 +938,8 @@ const AI_PROVIDER_CATALOG = {
     models: [
       { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
       { value: "gemini-3.1", label: "Gemini 3.1" },
+      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
     ],
     supportsModelDiscovery: true,
   },
@@ -1788,7 +1790,12 @@ function choosePreferredGenAiMilModel(models = []) {
   if (!available.length) {
     return "";
   }
-  const exactPreferences = ["gemini-3.1-pro", "gemini-3.1"];
+  const exactPreferences = [
+    "gemini-3.1-pro",
+    "gemini-3.1",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+  ];
   for (const preference of exactPreferences) {
     const exact = available.find((model) => model.value.toLowerCase() === preference);
     if (exact) {
@@ -1798,6 +1805,9 @@ function choosePreferredGenAiMilModel(models = []) {
   const regexPreferences = [
     /gemini[-_]?3(?:\.|-)?1.*pro/i,
     /gemini[-_]?3(?:\.|-)?1/i,
+    /gemini[-_]?2(?:\.|-)?5.*pro/i,
+    /gemini[-_]?2(?:\.|-)?5.*flash/i,
+    /gemini[-_]?2(?:\.|-)?5/i,
     /gemini/i,
   ];
   for (const pattern of regexPreferences) {
