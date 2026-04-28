@@ -1353,7 +1353,7 @@
           </div>
 
           <div id="aiGenAiMilNetworkWarning" class="ai-genai-mil-warning hidden">
-            <strong>Network restriction:</strong> api.genai.mil only accepts requests from approved networks (.mil / CAC). The hosted site at rfsim.us cannot reach it directly. To use GenAI.mil, run <code>local_run.bat</code> and open <code>http://localhost:8080</code> instead.
+            <strong>Network restriction:</strong> api.genai.mil only accepts requests from approved networks (.mil / CAC). When using the hosted site, start <code>node genai-proxy.js --local-model</code> on this machine so the app can relay GenAI.mil requests through <code>https://127.0.0.1:8788</code>. The first run requires trusting the localhost certificate.
           </div>
 
           <div id="aiLocalModelSection" class="ai-local-model-section hidden">

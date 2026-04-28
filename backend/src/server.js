@@ -3,7 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const OpenAI = require("openai");
+const { Readable } = require("stream");
 const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
@@ -104,25 +104,131 @@ const aiGenAiMilChatSchema = z.object({
 });
 
 const GENAI_MIL_BASE_URL = "https://api.genai.mil/v1";
+const GENAI_MIL_TIMEOUT_MS = 30000;
 
-function createGenAiMilClient(apiKey) {
-  return new OpenAI({
-    baseURL: GENAI_MIL_BASE_URL,
-    apiKey,
-    timeout: 30000,
-    defaultHeaders: {
-      Accept: "application/json",
-    },
+function isHtmlLike(text = "") {
+  const normalized = String(text).trimStart();
+  return normalized.startsWith("<!doctype")
+    || normalized.startsWith("<!DOCTYPE")
+    || normalized.startsWith("<html")
+    || normalized.startsWith("<head")
+    || normalized.startsWith("<body");
+}
+
+function stripHtml(text = "") {
+  return String(text)
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildGenAiMilErrorPayload(status, bodyText, fallbackMessage) {
+  if (!bodyText) {
+    return { message: fallbackMessage };
+  }
+
+  if (!isHtmlLike(bodyText)) {
+    try {
+      const parsed = JSON.parse(bodyText);
+      if (parsed?.error && typeof parsed.error === "object") {
+        return parsed.error;
+      }
+      if (typeof parsed?.error === "string") {
+        return { message: parsed.error };
+      }
+      if (parsed && typeof parsed === "object") {
+        if (typeof parsed.message === "string") {
+          return { ...parsed, message: parsed.message };
+        }
+        return parsed;
+      }
+    } catch {}
+  }
+
+  const plainText = stripHtml(bodyText).slice(0, 400);
+  if (/Unauthorized Access - GenAI\.mil/i.test(plainText)) {
+    return {
+      type: "unauthorized",
+      message: `GenAI.mil rejected this network path (HTTP ${status}). Run the relay from an approved workstation/network and unlock the key if required.`,
+    };
+  }
+  return { message: plainText || fallbackMessage };
+}
+
+function sendGenAiMilError(response, status, payload, fallbackMessage) {
+  const safeStatus = Number.isInteger(status) ? status : 502;
+  const safePayload = payload && typeof payload === "object"
+    ? payload
+    : { message: fallbackMessage };
+  console.error(`[GenAI relay] client error (${safeStatus}): ${safePayload.message || fallbackMessage}`);
+  response.status(safeStatus).json({ error: safePayload });
+}
+
+async function requestGenAiMil(pathname, { apiKey, method = "GET", body, stream = false } = {}) {
+  const headers = {
+    Accept: stream ? "text/event-stream, application/json" : "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return fetch(`${GENAI_MIL_BASE_URL}${pathname}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(GENAI_MIL_TIMEOUT_MS),
   });
 }
 
-function sendGenAiMilClientError(response, error, fallbackMessage) {
-  const status = Number.isInteger(error?.status) ? error.status : 502;
-  const payload = error?.error && typeof error.error === "object"
-    ? error.error
-    : { message: error?.message || fallbackMessage };
-  console.error(`[GenAI relay] client error (${status}): ${payload.message || error?.message || fallbackMessage}`);
-  response.status(status).json({ error: payload });
+async function relayGenAiMilJson(response, upstreamResponse, fallbackMessage) {
+  const bodyText = await upstreamResponse.text();
+  if (!upstreamResponse.ok) {
+    const payload = buildGenAiMilErrorPayload(upstreamResponse.status, bodyText, fallbackMessage);
+    sendGenAiMilError(response, upstreamResponse.status, payload, fallbackMessage);
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText);
+    response.status(upstreamResponse.status).json(parsed);
+  } catch {
+    sendGenAiMilError(
+      response,
+      502,
+      { message: "GenAI.mil returned a non-JSON response." },
+      fallbackMessage
+    );
+  }
+}
+
+async function relayGenAiMilStream(response, upstreamResponse, fallbackMessage) {
+  if (!upstreamResponse.ok) {
+    const bodyText = await upstreamResponse.text();
+    const payload = buildGenAiMilErrorPayload(upstreamResponse.status, bodyText, fallbackMessage);
+    sendGenAiMilError(response, upstreamResponse.status, payload, fallbackMessage);
+    return;
+  }
+
+  response.status(upstreamResponse.status);
+  response.setHeader("Content-Type", upstreamResponse.headers.get("content-type") || "text/event-stream; charset=utf-8");
+  response.setHeader("Cache-Control", upstreamResponse.headers.get("cache-control") || "no-cache, no-transform");
+  response.setHeader("Connection", "keep-alive");
+  response.flushHeaders?.();
+
+  if (!upstreamResponse.body) {
+    response.end();
+    return;
+  }
+
+  const stream = Readable.fromWeb(upstreamResponse.body);
+  stream.on("error", (error) => {
+    console.error(`[GenAI relay] stream error: ${error.message}`);
+    response.end();
+  });
+  stream.pipe(response);
 }
 
 app.get("/api/health", async (_request, response) => {
@@ -137,7 +243,7 @@ app.get("/api/health", async (_request, response) => {
 // Diagnostic: test raw reachability of api.genai.mil (no key needed)
 app.get("/api/ai/genai-mil/ping", async (_request, response) => {
   try {
-    const res = await fetch("https://api.genai.mil/v1/models", {
+    const res = await fetch(`${GENAI_MIL_BASE_URL}/models`, {
       method: "GET",
       headers: { "Authorization": "Bearer test_ping_no_key" },
       signal: AbortSignal.timeout(8000),
@@ -317,11 +423,13 @@ app.post("/api/ai/genai-mil/models", async (request, response) => {
   }
 
   try {
-    const client = createGenAiMilClient(parsed.data.apiKey);
-    const models = await client.models.list();
-    response.json(models);
+    const upstream = await requestGenAiMil("/models", {
+      apiKey: parsed.data.apiKey,
+      method: "GET",
+    });
+    await relayGenAiMilJson(response, upstream, "GenAI.mil model discovery failed.");
   } catch (error) {
-    sendGenAiMilClientError(response, error, "GenAI.mil model discovery failed.");
+    sendGenAiMilError(response, 502, { message: error.message }, "GenAI.mil model discovery failed.");
   }
 });
 
@@ -334,11 +442,19 @@ app.post("/api/ai/genai-mil/chat/completions", async (request, response) => {
 
   try {
     const { apiKey, ...chatBody } = parsed.data;
-    const client = createGenAiMilClient(apiKey);
-    const completion = await client.chat.completions.create(chatBody);
-    response.json(completion);
+    const upstream = await requestGenAiMil("/chat/completions", {
+      apiKey,
+      method: "POST",
+      body: chatBody,
+      stream: Boolean(chatBody.stream),
+    });
+    if (chatBody.stream) {
+      await relayGenAiMilStream(response, upstream, "GenAI.mil chat completion failed.");
+      return;
+    }
+    await relayGenAiMilJson(response, upstream, "GenAI.mil chat completion failed.");
   } catch (error) {
-    sendGenAiMilClientError(response, error, "GenAI.mil chat completion failed.");
+    sendGenAiMilError(response, 502, { message: error.message }, "GenAI.mil chat completion failed.");
   }
 });
 

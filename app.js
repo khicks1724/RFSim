@@ -918,14 +918,16 @@ const DEFAULT_CESIUM_ION_TOKEN = typeof window.EW_SIM_CONFIG?.cesiumIonDefaultTo
   ? window.EW_SIM_CONFIG.cesiumIonDefaultToken.trim()
   : "";
 const GENAI_MIL_BASE_URL = "https://api.genai.mil/v1";
-const GENAI_MIL_SITE_PROXY_BASE_URL = `${window.location.origin}/genai-mil/v1`;
+const GENAI_MIL_BACKEND_MODELS_ENDPOINT = `${API_BASE_URL}${GENAI_MIL_BACKEND_MODELS_PATH}`;
+const GENAI_MIL_BACKEND_CHAT_ENDPOINT = `${API_BASE_URL}${GENAI_MIL_BACKEND_CHAT_PATH}`;
 const GENAI_MIL_ENDPOINT = `${GENAI_MIL_BASE_URL}/chat/completions`;
 const GENAI_MIL_MODELS_ENDPOINT = `${GENAI_MIL_BASE_URL}/models`;
-const GENAI_MIL_SITE_PROXY_ENDPOINT = `${GENAI_MIL_SITE_PROXY_BASE_URL}/chat/completions`;
-const GENAI_MIL_SITE_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_SITE_PROXY_BASE_URL}/models`;
-const GENAI_MIL_PROXY_BASE_URL = "http://127.0.0.1:8787/v1";
-const GENAI_MIL_PROXY_ENDPOINT = `${GENAI_MIL_PROXY_BASE_URL}/chat/completions`;
-const GENAI_MIL_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_PROXY_BASE_URL}/models`;
+const GENAI_MIL_LOCAL_HTTPS_PROXY_BASE_URL = "https://127.0.0.1:8788/v1";
+const GENAI_MIL_LOCAL_HTTPS_PROXY_ENDPOINT = `${GENAI_MIL_LOCAL_HTTPS_PROXY_BASE_URL}/chat/completions`;
+const GENAI_MIL_LOCAL_HTTPS_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_LOCAL_HTTPS_PROXY_BASE_URL}/models`;
+const GENAI_MIL_LOCAL_HTTP_PROXY_BASE_URL = "http://127.0.0.1:8787/v1";
+const GENAI_MIL_LOCAL_HTTP_PROXY_ENDPOINT = `${GENAI_MIL_LOCAL_HTTP_PROXY_BASE_URL}/chat/completions`;
+const GENAI_MIL_LOCAL_HTTP_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_LOCAL_HTTP_PROXY_BASE_URL}/models`;
 const LOCAL_MODEL_PROXY_ENDPOINT = "https://127.0.0.1:8788/v1/local/chat/completions";
 const LOCAL_MODEL_HEALTH_ENDPOINT = "https://127.0.0.1:8788/v1/local/health";
 const INITIAL_GUEST_SESSION = window.sessionStorage.getItem(GUEST_SESSION_STORAGE_KEY) === "1";
@@ -1396,6 +1398,7 @@ const state = {
     activeConfigId: "",
     savedConfigs: [],
     discoveredModelsByProvider: {},
+    genAiMilPreferredTransportId: "",
     configLabel: "",
     provider: "",
     apiKey: "",
@@ -6699,13 +6702,17 @@ function isGenAiMilKey(key) {
 
 function parseGenAiMilApiError(status, bodyText, fallbackMessage) {
   if (bodyText.startsWith("<!doctype") || bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")) {
+    const plainText = stripHtmlToText(bodyText);
     if (/Unauthorized Access - GenAI\.mil/i.test(bodyText)) {
-      return new Error(`GenAI.mil rejected the hosted site connection (HTTP ${status}). The rfsim.us server is not on an approved GenAI.mil network path, so user API keys cannot be used from this deployment until that server access is approved.`);
+      return new Error(
+        `GenAI.mil rejected this network path (HTTP ${status}). ` +
+        "Use the secure local proxy on the approved workstation: `node genai-proxy.js --local-model`."
+      );
     }
     if (status === 401 || status === 403) {
       return new Error(`GenAI.mil authentication failed (HTTP ${status}). Check your STARK API key and network access.`);
     }
-    return new Error(`GenAI.mil may only be reachable from approved networks. HTTP ${status}.`);
+    return new Error(plainText || `GenAI.mil may only be reachable from approved networks. HTTP ${status}.`);
   }
   try {
     const parsedError = JSON.parse(bodyText);
@@ -6833,36 +6840,231 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
     state.ai.model = ensureAiModelForProvider("genai-mil", state.ai.model);
     return returnModels ? cachedModels : state.ai.model;
   }
-
-  const errors = [];
-  let models;
-
-  if (!isLocalhost()) {
-    // Deployed site: nginx proxies /genai-mil/v1/ → api.genai.mil server-side (no CORS)
-    try { models = await fetchGenAiMilModels(GENAI_MIL_SITE_PROXY_MODELS_ENDPOINT, state.ai.apiKey); }
-    catch (e) { errors.push(e); }
-  } else {
-    // Localhost: direct call (no CORS restriction from 127.0.0.1)
-    try { models = await fetchGenAiMilModels(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey); }
-    catch (e) { errors.push(e); }
-    // Localhost fallback: local genai-proxy on 8787
-    if (!models && !state.session.token) {
-      try {
-        models = await fetchGenAiMilModels(GENAI_MIL_PROXY_MODELS_ENDPOINT, state.ai.apiKey);
-        state.ai.statusMessage = "Connected via local GenAI proxy (127.0.0.1:8787).";
-      } catch (e) { errors.push(e); }
-    }
-  }
-
-  if (!models) {
-    const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean) || "GenAI.mil model discovery failed.";
-    throw new Error(msg);
+  const { models, transport } = await discoverGenAiMilModels(state.ai.apiKey);
+  if (transport.id === "local-https-proxy") {
+    state.ai.statusMessage = "Connected via secure local GenAI.mil proxy (127.0.0.1:8788).";
+  } else if (transport.id === "local-http-proxy") {
+    state.ai.statusMessage = "Connected via local GenAI.mil proxy (127.0.0.1:8787).";
   }
 
   setDiscoveredAiProviderModels("genai-mil", models);
   state.ai.model = ensureAiModelForProvider("genai-mil", state.ai.model || choosePreferredGenAiMilModel(models));
   syncAiUi();
   return returnModels ? models : state.ai.model;
+}
+
+function stripHtmlToText(text = "") {
+  return String(text)
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildGenAiMilTransportHeaders(apiKey) {
+  return {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`,
+  };
+}
+
+function createGenAiMilProxyTransport(id, label, modelsEndpoint, chatEndpoint) {
+  return {
+    id,
+    label,
+    async fetchModels(apiKey) {
+      return fetch(modelsEndpoint, {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${apiKey}` },
+      });
+    },
+    async postChat(apiKey, payload) {
+      return fetch(chatEndpoint, {
+        method: "POST",
+        headers: buildGenAiMilTransportHeaders(apiKey),
+        body: JSON.stringify(payload),
+      });
+    },
+  };
+}
+
+const GENAI_MIL_TRANSPORTS = {
+  "local-https-proxy": createGenAiMilProxyTransport(
+    "local-https-proxy",
+    "local GenAI.mil proxy (https://127.0.0.1:8788)",
+    GENAI_MIL_LOCAL_HTTPS_PROXY_MODELS_ENDPOINT,
+    GENAI_MIL_LOCAL_HTTPS_PROXY_ENDPOINT
+  ),
+  backend: {
+    id: "backend",
+    label: "RF Planner backend relay",
+    async fetchModels(apiKey) {
+      return fetch(GENAI_MIL_BACKEND_MODELS_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey }),
+      });
+    },
+    async postChat(apiKey, payload) {
+      return fetch(GENAI_MIL_BACKEND_CHAT_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, ...payload }),
+      });
+    },
+  },
+  direct: createGenAiMilProxyTransport(
+    "direct",
+    "direct api.genai.mil access",
+    GENAI_MIL_MODELS_ENDPOINT,
+    GENAI_MIL_ENDPOINT
+  ),
+  "local-http-proxy": createGenAiMilProxyTransport(
+    "local-http-proxy",
+    "local GenAI.mil proxy (http://127.0.0.1:8787)",
+    GENAI_MIL_LOCAL_HTTP_PROXY_MODELS_ENDPOINT,
+    GENAI_MIL_LOCAL_HTTP_PROXY_ENDPOINT
+  ),
+};
+
+function getGenAiMilTransportPlan() {
+  const plan = [];
+  if (window.isSecureContext) {
+    plan.push(GENAI_MIL_TRANSPORTS["local-https-proxy"]);
+  }
+  plan.push(GENAI_MIL_TRANSPORTS.backend);
+  if (isLocalhost()) {
+    plan.push(GENAI_MIL_TRANSPORTS.direct);
+  }
+  if (isLocalhost() || window.location.protocol === "http:") {
+    plan.push(GENAI_MIL_TRANSPORTS["local-http-proxy"]);
+  }
+
+  const deduped = plan.filter((transport, index, all) => (
+    all.findIndex((entry) => entry.id === transport.id) === index
+  ));
+  const preferredId = state.ai?.genAiMilPreferredTransportId;
+  if (!preferredId) {
+    return deduped;
+  }
+  return deduped.slice().sort((left, right) => {
+    if (left.id === preferredId) return -1;
+    if (right.id === preferredId) return 1;
+    return 0;
+  });
+}
+
+function explainGenAiMilNetworkFailure(transport, operation, networkErr) {
+  const detail = networkErr?.message ? ` ${networkErr.message}` : "";
+  if (transport.id === "local-https-proxy") {
+    return new Error(
+      `Could not reach the secure local GenAI.mil proxy for ${operation}. ` +
+      "Start `node genai-proxy.js --local-model` on this machine and trust the localhost certificate." +
+      detail
+    );
+  }
+  if (transport.id === "local-http-proxy") {
+    return new Error(
+      `Could not reach the local GenAI.mil proxy for ${operation}. Start \`node genai-proxy.js\` on this machine.` +
+      detail
+    );
+  }
+  if (transport.id === "backend") {
+    return new Error(`RF Planner backend relay failed during ${operation}.${detail}`);
+  }
+  return new Error(`Direct GenAI.mil ${operation} request failed.${detail}`);
+}
+
+function parseGenAiMilErrorDetail(status, bodyText, fallbackMessage) {
+  if (isHtmlLikeResponse(bodyText)) {
+    return parseGenAiMilApiError(status, bodyText, fallbackMessage).message;
+  }
+  try {
+    const parsed = JSON.parse(bodyText);
+    const errorPayload = parsed?.error && typeof parsed.error === "object"
+      ? parsed.error
+      : null;
+    const message = errorPayload?.message
+      || (typeof parsed?.error === "string" ? parsed.error : "")
+      || parsed?.detail
+      || parsed?.message;
+    const unlockUrl = errorPayload?.unlock_url || parsed?.unlock_url;
+    if (message && unlockUrl) {
+      return `GenAI.mil (${status}): ${message} Unlock URL: ${unlockUrl}`;
+    }
+    if (message) {
+      return `GenAI.mil (${status}): ${message}`;
+    }
+  } catch {}
+  return fallbackMessage || `GenAI.mil request failed (HTTP ${status}).`;
+}
+
+async function readGenAiMilJsonResponse(response, fallbackMessage) {
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw new Error(parseGenAiMilErrorDetail(response.status, bodyText, fallbackMessage));
+  }
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    throw new Error(fallbackMessage);
+  }
+}
+
+async function fetchGenAiMilModelsViaTransport(transport, apiKey) {
+  let response;
+  try {
+    response = await transport.fetchModels(apiKey);
+  } catch (networkErr) {
+    throw explainGenAiMilNetworkFailure(transport, "model discovery", networkErr);
+  }
+
+  const parsed = await readGenAiMilJsonResponse(
+    response,
+    `GenAI.mil model discovery failed via ${transport.label}.`
+  );
+  const models = parseGenAiMilModelsPayload(parsed);
+  if (!models.length) {
+    throw new Error(`GenAI.mil returned no usable models via ${transport.label}.`);
+  }
+  return { models, transport };
+}
+
+async function postGenAiMilChatViaTransport(transport, apiKey, payload) {
+  let response;
+  try {
+    response = await transport.postChat(apiKey, payload);
+  } catch (networkErr) {
+    throw explainGenAiMilNetworkFailure(transport, "chat completion", networkErr);
+  }
+
+  const parsed = await readGenAiMilJsonResponse(
+    response,
+    `GenAI.mil chat completion failed via ${transport.label}.`
+  );
+  const content = parsed?.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error(`GenAI.mil returned an empty completion via ${transport.label}.`);
+  }
+  return { content, transport };
+}
+
+async function discoverGenAiMilModels(apiKey) {
+  const errors = [];
+  for (const transport of getGenAiMilTransportPlan()) {
+    try {
+      const result = await fetchGenAiMilModelsViaTransport(transport, apiKey);
+      state.ai.genAiMilPreferredTransportId = transport.id;
+      return result;
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  const msg = errors.map((error) => error?.message).filter(Boolean).find(Boolean)
+    || "GenAI.mil model discovery failed.";
+  throw new Error(msg);
 }
 
 async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
@@ -7325,18 +7527,13 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
   const payload = { model: selectedModel, messages, max_tokens: maxTokens, temperature };
   const errors = [];
 
-  if (!isLocalhost()) {
-    // Deployed site: nginx proxy
-    try { return await postGenAiMilChat(GENAI_MIL_SITE_PROXY_ENDPOINT, state.ai.apiKey, payload); }
-    catch (e) { errors.push(e); }
-  } else {
-    // Localhost: direct call
-    try { return await postGenAiMilChat(GENAI_MIL_ENDPOINT, state.ai.apiKey, payload); }
-    catch (e) { errors.push(e); }
-    // Localhost fallback: local proxy on 8787
-    if (!state.session.token) {
-      try { return await postGenAiMilChat(GENAI_MIL_PROXY_ENDPOINT, state.ai.apiKey, payload); }
-      catch (e) { errors.push(e); }
+  for (const transport of getGenAiMilTransportPlan()) {
+    try {
+      const result = await postGenAiMilChatViaTransport(transport, state.ai.apiKey, payload);
+      state.ai.genAiMilPreferredTransportId = transport.id;
+      return result.content;
+    } catch (error) {
+      errors.push(error);
     }
   }
 

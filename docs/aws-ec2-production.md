@@ -161,9 +161,9 @@ If you want, I can make that repo change next.
 - Do not expose admin-grade AI provider keys in the browser.
 - Route AI provider traffic through the backend for production use.
 
-GenAI.mil requests in the deployed app should now flow through the existing same-origin backend API (`/api/ai/genai-mil/models` and `/api/ai/genai-mil/chat/completions`). This avoids browser CORS and localhost proxy issues when using Chrome on the EC2-hosted site.
+GenAI.mil requests now prefer the secure localhost relay on `https://127.0.0.1:8788/v1/*` when it is available on the operator workstation. This allows the hosted site to use the operator's approved network path instead of relying on the EC2 host to reach `api.genai.mil`.
 
-The nginx web container also exposes a same-origin reverse-proxy path at `/genai-mil/v1/*` for hosted browser access to GenAI.mil. In practice, the deployed frontend will prefer that site-local path first, then fall back to the backend relay, and only use the localhost proxy for local development.
+If the secure localhost relay is not available, the frontend falls back to the same-origin backend API (`/api/ai/genai-mil/models` and `/api/ai/genai-mil/chat/completions`), then to direct localhost access / the legacy `http://127.0.0.1:8787` proxy for local development.
 
 ## Current Backend Scope
 

@@ -45,8 +45,8 @@ echo.
 echo  Ports in use:
 echo    3000  Backend API ^(Node + PostgreSQL^)
 echo    8080  Frontend web app  ^(proxies /api/* to 3000^)
-echo    8787  GenAI.mil proxy  ^(HTTP^)
-echo    8788  Local model      ^(HTTPS^)
+echo    8787  GenAI.mil proxy  ^(HTTP fallback^)
+echo    8788  Secure AI relay  ^(GenAI.mil + local model over HTTPS^)
 echo    8789  Offline data server
 echo.
 echo  Close this window at any time - services keep running in the background.

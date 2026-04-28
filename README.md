@@ -176,13 +176,18 @@ The AI assistant supports three provider types. Configure them in **Settings →
 
 ### Anthropic (Claude) / GenAI.mil (STARK)
 
-Enter your API key in the settings panel. GenAI.mil keys start with `STARK_`. If direct browser access to GenAI.mil is blocked by network policy, run the included HTTP proxy:
+Enter your API key in the settings panel. GenAI.mil keys start with `STARK_`. If GenAI.mil is restricted to approved workstation/network paths, run the included secure localhost relay:
 
 ```bash
-node genai-proxy.js
+node genai-proxy.js --local-model
 ```
 
-For GenAI.mil, the app now queries `/v1/models` for the selected key, populates the model dropdown in Settings, and prefers `gemini-3.1-pro` or `gemini-3.1` when those are available. In hosted deployments, GenAI.mil traffic is routed through the app backend under `/api/ai/genai-mil/*` so the browser does not need direct access to the provider. The local proxy at `http://127.0.0.1:8787` remains a fallback for browser-only local runs.
+For GenAI.mil, the app now queries `/v1/models` for the selected key, populates the model dropdown in Settings, and prefers `gemini-3.1-pro` or `gemini-3.1` when those are available. Transport order is now:
+
+1. `https://127.0.0.1:8788/v1/*` secure local relay on the operator workstation
+2. Same-origin backend relay under `/api/ai/genai-mil/*`
+3. Direct `https://api.genai.mil/v1/*` access when running on localhost
+4. Legacy `http://127.0.0.1:8787/v1/*` proxy for non-secure local runs
 
 ### Local Model (Ollama / LM Studio / llama.cpp)
 
