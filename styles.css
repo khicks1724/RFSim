@@ -1299,7 +1299,6 @@ body:not(.ai-panel-open) .ai-panel {
   gap: 8px;
   border-radius: 18px;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
-  overflow: hidden;
   word-break: break-word;
   overflow-wrap: break-word;
 }
@@ -1399,7 +1398,7 @@ body:not(.ai-panel-open) .ai-panel {
 .ai-chat-message-assistant {
   justify-self: start;
   border-bottom-left-radius: 8px;
-  width: min(88%, 540px);
+  max-width: min(88%, 540px);
 }
 
 .ai-chat-message-system {
@@ -1903,7 +1902,7 @@ body:not(.ai-panel-open) .ai-panel {
   border-bottom: none;
   border-radius: 8px 8px 0 0;
   box-shadow: 0 -6px 24px rgba(0,0,0,0.6);
-  max-height: calc(5 * 44px);
+  max-height: calc(5 * 30px);
   overflow-y: auto;
   z-index: 9100;
 }
@@ -1912,14 +1911,14 @@ body:not(.ai-panel-open) .ai-panel {
   display: grid;
   grid-template-columns: 160px 1fr auto;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 5px 12px;
   font-size: 12px;
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
   border-bottom: 1px solid rgba(255,255,255,0.06);
-  min-height: 44px;
+  min-height: 0;
 }
 
 .ai-slash-item:last-child {
