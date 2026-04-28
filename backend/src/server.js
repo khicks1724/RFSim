@@ -307,9 +307,12 @@ app.post("/api/ai/genai-mil/chat/completions", authRequired, async (request, res
     return;
   }
 
+  // Strip apiKey — auth goes in the header only, not the body
+  const { apiKey, ...chatBody } = parsed.data;
+
   await relayGenAiMil(response, `${GENAI_MIL_BASE_URL}/chat/completions`, {
-    apiKey: parsed.data.apiKey,
-    body: parsed.data,
+    apiKey,
+    body: chatBody,
     method: "POST",
   });
 });

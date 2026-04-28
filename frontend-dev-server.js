@@ -5,8 +5,9 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const PORT = Number(process.env.FRONTEND_PORT || 8080);
-const ROOT = __dirname;
+const PORT     = Number(process.env.FRONTEND_PORT || 8080);
+const API_PORT = Number(process.env.API_PORT || 3000);
+const ROOT     = __dirname;
 
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -41,7 +42,32 @@ function resolveRequestPath(urlPath) {
   return absolutePath;
 }
 
+function proxyToApi(request, response) {
+  const options = {
+    hostname: "127.0.0.1",
+    port: API_PORT,
+    path: request.url,
+    method: request.method,
+    headers: { ...request.headers, host: `127.0.0.1:${API_PORT}` },
+  };
+  const proxy = http.request(options, (upstream) => {
+    response.writeHead(upstream.statusCode, upstream.headers);
+    upstream.pipe(response);
+  });
+  proxy.on("error", (err) => {
+    const msg = `Backend unavailable (${err.message}). Start the backend: node backend/src/server.js`;
+    send(response, 502, { "Content-Type": "application/json" }, JSON.stringify({ error: msg }));
+  });
+  request.pipe(proxy);
+}
+
 const server = http.createServer((request, response) => {
+  // Proxy all /api/* requests to the backend
+  if ((request.url || "/").startsWith("/api/")) {
+    proxyToApi(request, response);
+    return;
+  }
+
   const absolutePath = resolveRequestPath(request.url || "/");
   if (!absolutePath) {
     send(response, 403, { "Content-Type": "text/plain; charset=utf-8" }, "Forbidden");
@@ -70,7 +96,8 @@ const server = http.createServer((request, response) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Frontend dev server listening on http://127.0.0.1:${PORT}`);
+  console.log(`\nRF Planner frontend  →  http://127.0.0.1:${PORT}`);
+  console.log(`API proxy            →  /api/* forwarded to http://127.0.0.1:${API_PORT}\n`);
 });
 
 process.on("SIGINT", () => {

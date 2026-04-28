@@ -6732,11 +6732,10 @@ function summarizeGenAiMilErrors(errors, fallbackMessage) {
 }
 
 function shouldPreferHostedGenAiMilSiteProxy() {
-  const { protocol, hostname } = window.location;
-  if (!/^https?:$/.test(protocol)) {
-    return false;
-  }
-  return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1";
+  // Never use the nginx site-proxy path — it's not deployed.
+  // Always use the backend relay (/api/ai/genai-mil/*) when signed in,
+  // or the local proxy on localhost when not signed in.
+  return false;
 }
 
 function shouldAllowLocalGenAiMilProxyFallback() {

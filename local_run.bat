@@ -18,31 +18,33 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Start GenAI proxy (port 8787 / 8788)
-echo  [1/3] Frontend web server  ^(port  8080^)
+echo  [1/4] Backend API server   ^(port  3000^)
+start "RF Planner - Backend" /min cmd /c "node "%~dp0backend\src\server.js" & pause"
+
+REM Give backend time to bind before frontend proxy tries to reach it
+timeout /t 2 /nobreak >nul
+
+echo  [2/4] Frontend web server  ^(port  8080^)
 start "RF Planner - Frontend" /min cmd /c "node "%~dp0frontend-dev-server.js" & pause"
 
-REM Short delay so frontend binds first
 timeout /t 1 /nobreak >nul
 
-echo  [2/3] GenAI proxy          ^(ports 8787 / 8788^)
+echo  [3/4] GenAI proxy          ^(ports 8787 / 8788^)
 start "RF Planner - GenAI Proxy" /min cmd /c "node "%~dp0genai-proxy.js" --local-model & pause"
 
-REM Short delay so proxy binds first
 timeout /t 1 /nobreak >nul
 
-REM Start local data server (port 8789)
-echo  [3/3] Local data server    ^(port  8789^)
+echo  [4/4] Local data server    ^(port  8789^)
 start "RF Planner - Local Data Server" /min cmd /c "node "%~dp0local-data-server.js" & pause"
 
 echo.
-echo  Both services are running in separate windows.
+echo  All services are running in separate windows.
 echo.
 echo  Open the app:   http://localhost:8080
-echo    ^(the launcher now serves the frontend over HTTP; avoid file:// for browser API access^)
 echo.
 echo  Ports in use:
-echo    8080  Frontend web app
+echo    3000  Backend API ^(Node + PostgreSQL^)
+echo    8080  Frontend web app  ^(proxies /api/* to 3000^)
 echo    8787  GenAI.mil proxy  ^(HTTP^)
 echo    8788  Local model      ^(HTTPS^)
 echo    8789  Offline data server
