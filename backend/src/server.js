@@ -505,26 +505,49 @@ app.post("/api/projects", authRequired, async (request, response) => {
   }
 });
 
-app.get("/api/projects/:projectId", authRequired, async (request, response) => {
+async function getProjectSchemaCapabilities() {
   try {
     const result = await query(
-      "select id, name, description, latest_state_json, state_schema_version, client_saved_at, updated_at from project where id = $1 and owner_user_id = $2",
+      `select column_name
+       from information_schema.columns
+       where table_schema = 'public'
+         and table_name = 'project'
+         and column_name in ('state_schema_version', 'client_saved_at')`
+    );
+    const columns = new Set(result.rows.map((row) => row.column_name));
+    return {
+      hasStateSchemaVersion: columns.has("state_schema_version"),
+      hasClientSavedAt: columns.has("client_saved_at"),
+    };
+  } catch {
+    return {
+      hasStateSchemaVersion: false,
+      hasClientSavedAt: false,
+    };
+  }
+}
+
+app.get("/api/projects/:projectId", authRequired, async (request, response) => {
+  try {
+    const schema = await getProjectSchemaCapabilities();
+    const optionalSelect = [
+      schema.hasStateSchemaVersion
+        ? "state_schema_version"
+        : "0::integer as state_schema_version",
+      schema.hasClientSavedAt
+        ? "client_saved_at"
+        : "null::timestamptz as client_saved_at",
+    ].join(", ");
+    const result = await query(
+      `select id, name, description, latest_state_json, ${optionalSelect}, updated_at
+       from project
+       where id = $1 and owner_user_id = $2`,
       [request.params.projectId, request.user.sub]
     );
     if (result.rowCount === 0) {
       response.status(404).json({ error: "Project not found." });
       return;
     }
-    await logAnalyticsEventForUser(request.user.sub, {
-      event_type: "project_save",
-      meta: {
-        project_id: result.rows[0].id,
-        project_name: result.rows[0].name,
-        field_count: updates.length,
-        schema_version: parsed.data.schemaVersion ?? null,
-        client_saved_at: parsed.data.clientSavedAt ?? null,
-      },
-    }, { username: request.user.email });
     response.json({ project: result.rows[0] });
   } catch (error) {
     response.status(500).json({ error: error.message });
@@ -541,6 +564,7 @@ app.put("/api/projects/:projectId", authRequired, async (request, response) => {
   const updates = [];
   const values = [request.params.projectId, request.user.sub];
   let index = values.length;
+  const schema = await getProjectSchemaCapabilities();
 
   if (parsed.data.name !== undefined) {
     index += 1;
@@ -557,12 +581,12 @@ app.put("/api/projects/:projectId", authRequired, async (request, response) => {
     updates.push(`latest_state_json = $${index}::jsonb`);
     values.push(JSON.stringify(parsed.data.state));
   }
-  if (parsed.data.schemaVersion !== undefined) {
+  if (parsed.data.schemaVersion !== undefined && schema.hasStateSchemaVersion) {
     index += 1;
     updates.push(`state_schema_version = $${index}`);
     values.push(parsed.data.schemaVersion);
   }
-  if (parsed.data.clientSavedAt !== undefined) {
+  if (parsed.data.clientSavedAt !== undefined && schema.hasClientSavedAt) {
     index += 1;
     updates.push(`client_saved_at = $${index}`);
     values.push(parsed.data.clientSavedAt);
@@ -579,6 +603,16 @@ app.put("/api/projects/:projectId", authRequired, async (request, response) => {
       response.status(404).json({ error: "Project not found." });
       return;
     }
+    await logAnalyticsEventForUser(request.user.sub, {
+      event_type: "project_save",
+      meta: {
+        project_id: result.rows[0].id,
+        project_name: result.rows[0].name,
+        field_count: updates.length,
+        schema_version: schema.hasStateSchemaVersion ? (parsed.data.schemaVersion ?? null) : null,
+        client_saved_at: schema.hasClientSavedAt ? (parsed.data.clientSavedAt ?? null) : null,
+      },
+    }, { username: request.user.email });
     response.json({ project: result.rows[0] });
   } catch (error) {
     response.status(500).json({ error: error.message });
