@@ -1883,6 +1883,68 @@ body:not(.ai-panel-open) .ai-panel {
   flex-shrink: 0;
 }
 
+/* Slash command autocomplete dropdown */
+.ai-slash-dropdown {
+  position: relative;
+  width: 100%;
+  background: var(--bg-card, #1e2229);
+  border: 1px solid var(--border);
+  border-top: 2px solid #3b82f6;
+  border-radius: 6px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 9100;
+  margin-bottom: 4px;
+}
+
+.ai-slash-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.ai-slash-item:last-child {
+  border-bottom: none;
+}
+
+.ai-slash-item:hover,
+.ai-slash-item.active {
+  background: var(--bg-selection-strong);
+}
+
+.ai-slash-cmd {
+  font-family: monospace;
+  font-size: 11px;
+  color: #60a5fa;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.ai-slash-label {
+  color: var(--text-primary, #e2e8f0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-slash-category {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: rgba(99,102,241,0.18);
+  color: #a5b4fc;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* Voice button recording state */
 .ai-voice-recording {
   color: #f87171 !important;
