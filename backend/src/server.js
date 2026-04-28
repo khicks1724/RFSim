@@ -287,7 +287,7 @@ app.put("/api/user/ai-configs", authRequired, async (request, response) => {
   }
 });
 
-app.post("/api/ai/genai-mil/models", authRequired, async (request, response) => {
+app.post("/api/ai/genai-mil/models", async (request, response) => {
   const parsed = aiGenAiMilModelsSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: parsed.error.flatten() });
@@ -300,14 +300,14 @@ app.post("/api/ai/genai-mil/models", authRequired, async (request, response) => 
   });
 });
 
-app.post("/api/ai/genai-mil/chat/completions", authRequired, async (request, response) => {
+app.post("/api/ai/genai-mil/chat/completions", async (request, response) => {
   const parsed = aiGenAiMilChatSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: parsed.error.flatten() });
     return;
   }
 
-  // Strip apiKey — auth goes in the header only, not the body
+  // Strip apiKey — auth goes in the Authorization header only, not the body
   const { apiKey, ...chatBody } = parsed.data;
 
   await relayGenAiMil(response, `${GENAI_MIL_BASE_URL}/chat/completions`, {
