@@ -18302,6 +18302,19 @@ function fillTable(tableId, rows, cols) {
   }
 }
 
+function openAnalyticsModal() {
+  if (!isAnalyticsAdmin()) {
+    closeAnalyticsModal();
+    return;
+  }
+  dom.analyticsModal?.classList.remove("hidden");
+  fetchAndRenderAnalytics();
+}
+
+function closeAnalyticsModal() {
+  dom.analyticsModal?.classList.add("hidden");
+}
+
 async function fetchAndRenderAnalytics() {
   try {
     _analytics.error = "";
