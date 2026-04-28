@@ -4,7 +4,9 @@ title RF Planner GenAI.mil Relay
 color 0A
 
 set "SCRIPT_DIR=%~dp0"
-set "PROXY_SCRIPT=%SCRIPT_DIR%genai-proxy.js"
+set "BASE_DIR=%SCRIPT_DIR%"
+if not exist "%BASE_DIR%genai-proxy.js" if exist "%SCRIPT_DIR%..\genai-proxy.js" set "BASE_DIR=%SCRIPT_DIR%..\"
+set "PROXY_SCRIPT=%BASE_DIR%genai-proxy.js"
 
 echo.
 echo  ==========================================

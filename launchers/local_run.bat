@@ -2,6 +2,10 @@
 title RF Planner Local Stack
 color 0A
 
+set "SCRIPT_DIR=%~dp0"
+set "BASE_DIR=%SCRIPT_DIR%"
+if not exist "%BASE_DIR%backend\src\server.js" if exist "%SCRIPT_DIR%..\backend\src\server.js" set "BASE_DIR=%SCRIPT_DIR%..\"
+
 echo.
 echo  ==========================================
 echo   RF Planner - Local Development Stack
@@ -19,23 +23,23 @@ if errorlevel 1 (
 )
 
 echo  [1/4] Backend API server   ^(port  3000^)
-start "RF Planner - Backend" /min cmd /c "node "%~dp0backend\src\server.js" & pause"
+start "RF Planner - Backend" /min cmd /c "node "%BASE_DIR%backend\src\server.js" & pause"
 
 REM Give backend time to bind before frontend proxy tries to reach it
 timeout /t 2 /nobreak >nul
 
 echo  [2/4] Frontend web server  ^(port  8080^)
-start "RF Planner - Frontend" /min cmd /c "node "%~dp0frontend-dev-server.js" & pause"
+start "RF Planner - Frontend" /min cmd /c "node "%BASE_DIR%frontend-dev-server.js" & pause"
 
 timeout /t 1 /nobreak >nul
 
 echo  [3/4] GenAI proxy          ^(ports 8787 / 8788^)
-start "RF Planner - GenAI Proxy" /min cmd /c "node "%~dp0genai-proxy.js" --local-model & pause"
+start "RF Planner - GenAI Proxy" /min cmd /c "node "%BASE_DIR%genai-proxy.js" --local-model & pause"
 
 timeout /t 1 /nobreak >nul
 
 echo  [4/4] Local data server    ^(port  8789^)
-start "RF Planner - Local Data Server" /min cmd /c "node "%~dp0local-data-server.js" & pause"
+start "RF Planner - Local Data Server" /min cmd /c "node "%BASE_DIR%local-data-server.js" & pause"
 
 echo.
 echo  All services are running in separate windows.

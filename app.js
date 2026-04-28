@@ -17501,7 +17501,7 @@ async function refreshOfflineServerStatus() {
   } else {
     dot?.classList.remove("offline-dot-unknown", "offline-dot-ok");
     dot?.classList.add("offline-dot-err");
-    if (label) label.textContent = "Local server offline — run local_run.bat to start";
+    if (label) label.textContent = "Local server offline — run launchers/local_run.bat to start";
     badge?.classList.add("hidden");
   }
 }
@@ -17868,7 +17868,7 @@ function initOfflineDownload() {
 
   startBtn?.addEventListener("click", () => {
     if (!_offline.serverOnline) {
-      offlineLog("Local server not running. Use 'Save as ZIP' or start local_run.bat.", "err");
+      offlineLog("Local server not running. Use 'Save as ZIP' or start launchers/local_run.bat.", "err");
       return;
     }
     runOfflineDownload("server");

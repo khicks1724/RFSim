@@ -1,17 +1,20 @@
 @echo off
 setlocal
-title RF Planner Local Model Relay
+title RF Planner GenAI.mil Relay
 color 0A
 
 set "SCRIPT_DIR=%~dp0"
-set "PROXY_SCRIPT=%SCRIPT_DIR%genai-proxy.js"
+set "BASE_DIR=%SCRIPT_DIR%"
+if not exist "%BASE_DIR%genai-proxy.js" if exist "%SCRIPT_DIR%..\genai-proxy.js" set "BASE_DIR=%SCRIPT_DIR%..\"
+set "PROXY_SCRIPT=%BASE_DIR%genai-proxy.js"
+set "ART_SCRIPT=%BASE_DIR%rf-sim-terminal-art.ps1"
 set "NODE_EXE="
 
-call :printFlag
+call :printArt
 
 echo.
 echo  ==========================================
-echo   RF Planner Local Model Relay
+echo   RF Planner GenAI.mil Relay
 echo  ==========================================
 echo.
 
@@ -35,8 +38,8 @@ if not exist "%PROXY_SCRIPT%" (
     exit /b 1
 )
 
-echo  Starting the secure relay for local models...
-echo  Leave this window open while using the hosted site.
+echo  Starting the secure relay for the GenAI.mil provider...
+echo  Leave this window open while using www.rfsim.us.
 echo  Using Node.js at: %NODE_EXE%
 echo.
 
@@ -75,6 +78,8 @@ for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$cmd = Get-Co
 )
 goto :eof
 
-:printFlag
-powershell -NoProfile -Command "Write-Host '* * * * * * * * * * * * * * * * * * * *' -ForegroundColor Blue; Write-Host ' * * * * * * * * * * * * * * * * * * * ' -ForegroundColor Blue; Write-Host '* * * * * * * * * * * * * * * * * * * *' -ForegroundColor Blue; Write-Host ' * * * * * * * * * * * * * * * * * * * ' -ForegroundColor Blue; Write-Host '* * * * * * * * * * * * * * * * * * * *' -ForegroundColor Blue; Write-Host ' * * * * * * * * * * * * * * * * * * * ' -ForegroundColor Blue; Write-Host '========================================' -ForegroundColor Blue; Write-Host '========================================' -ForegroundColor Red; Write-Host '========================================' -ForegroundColor White; Write-Host '========================================' -ForegroundColor Red; Write-Host '========================================' -ForegroundColor White; Write-Host '========================================' -ForegroundColor Red; Write-Host '========================================' -ForegroundColor White; Write-Host '========================================' -ForegroundColor Red"
+:printArt
+if exist "%ART_SCRIPT%" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ART_SCRIPT%"
+)
 exit /b 0

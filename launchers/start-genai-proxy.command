@@ -2,7 +2,11 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR" || exit 1
+BASE_DIR="$SCRIPT_DIR"
+if [ ! -f "$BASE_DIR/genai-proxy.js" ] && [ -f "$SCRIPT_DIR/../genai-proxy.js" ]; then
+  BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+cd "$BASE_DIR" || exit 1
 
 echo "RF Planner GenAI.mil Relay"
 echo
@@ -15,9 +19,9 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -f "$SCRIPT_DIR/genai-proxy.js" ]; then
+if [ ! -f "$BASE_DIR/genai-proxy.js" ]; then
   echo "Could not find genai-proxy.js in:"
-  echo "  $SCRIPT_DIR"
+  echo "  $BASE_DIR"
   echo
   echo "Place this launcher in the same folder as genai-proxy.js, then try again."
   echo
@@ -25,11 +29,11 @@ if [ ! -f "$SCRIPT_DIR/genai-proxy.js" ]; then
   exit 1
 fi
 
-echo "Starting the secure relay for the GenAI.mil provider..."
+echo "Starting local relay on https://127.0.0.1:8788 ..."
 echo "Leave this window open while using www.rfsim.us."
 echo
 
-node "$SCRIPT_DIR/genai-proxy.js" --local-model
+node "$BASE_DIR/genai-proxy.js" --local-model
 
 EXIT_CODE=$?
 echo
