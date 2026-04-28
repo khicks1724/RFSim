@@ -911,6 +911,7 @@ async function idbLoadKmzItems(projectId) {
 const AUTH_TOKEN_STORAGE_KEY = "ew-sim-auth-token";
 const ACTIVE_PROJECT_STORAGE_KEY = "ew-sim-active-project";
 const GUEST_SESSION_STORAGE_KEY = "ew-sim-guest-session";
+const AI_CHAT_HISTORY_STORAGE_KEY_PREFIX = "ew-sim-ai-chat";
 const ANALYTICS_SESSION_ID_STORAGE_KEY = "ew-sim-analytics-session-id";
 const API_BASE_URL = window.EW_SIM_CONFIG?.apiBaseUrl ?? `${window.location.origin}/api`;
 const GENAI_MIL_BACKEND_MODELS_PATH = "/ai/genai-mil/models";
@@ -2099,6 +2100,8 @@ function clearSessionState({ preserveGuest = false } = {}) {
   if (!preserveGuest) {
     setGuestSessionEnabled(false);
   }
+  clearAiChatHistory();
+  state.ai.messages = [];
   state.session.token = null;
   state.session.user = null;
   state.session.projects = [];
@@ -2123,6 +2126,7 @@ async function hydrateSession() {
     state.session.user = payload.user;
     await loadProjectList();
     await loadServerAiProviderSettings();
+    loadAiChatHistory();
     fireAnalyticsEvent({ event_type: "visit" });
   } catch (error) {
     if (/Invalid token|Authentication required|User not found/i.test(error.message)) {
@@ -5412,12 +5416,14 @@ async function onAiChatSubmit(event) {
     await streamAiMessageText(assistantMessageController, reply);
     state.ai.status = "ready";
     state.ai.statusMessage = "AI assistant ready.";
+    saveAiChatHistory();
   } catch (error) {
     stopThinkingIndicator();
     assistantMessageController.setStatus("Request failed");
     assistantMessageController.setText(`I couldn't complete that request. ${error.message}`);
     state.ai.status = "error";
     state.ai.statusMessage = error.message;
+    saveAiChatHistory();
   } finally {
     state.ai.requestInFlight = false;
   }
@@ -5425,6 +5431,7 @@ async function onAiChatSubmit(event) {
 }
 
 function clearAiChat() {
+  clearAiChatHistory();
   state.ai.messages = [];
   clearAiAttachments();
   renderAiEmptyState();
@@ -5555,7 +5562,8 @@ function renderMarkdown(text) {
 }
 
 function createAiMessageController(role, text = "", images = [], contextItems = []) {
-  state.ai.messages.push({ role, text });
+  const msgRecord = { role, text };
+  state.ai.messages.push(msgRecord);
   const article = document.createElement("article");
   article.className = `ai-chat-message ${role === "user" ? "ai-chat-message-user" : role === "assistant" ? "ai-chat-message-assistant" : "ai-chat-message-system"}`;
 
@@ -5613,6 +5621,7 @@ function createAiMessageController(role, text = "", images = [], contextItems = 
     body,
     status,
     setText(nextText) {
+      msgRecord.text = nextText;
       body.innerHTML = renderMarkdown(nextText);
       dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
     },
@@ -6847,6 +6856,67 @@ function appendAiMessage(role, text, images = [], contextItems = []) {
   controller.setStatus(role === "assistant" ? "Response ready" : "Sent");
 }
 
+function getAiChatHistoryStorageKey() {
+  const userId = state.session.user?.id;
+  if (!userId) return null;
+  return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:${userId}`;
+}
+
+function saveAiChatHistory() {
+  const key = getAiChatHistoryStorageKey();
+  if (!key) return;
+  try {
+    // Keep last 200 messages to cap storage usage
+    const trimmed = state.ai.messages.slice(-200);
+    localStorage.setItem(key, JSON.stringify(trimmed));
+  } catch { /* storage full or unavailable */ }
+}
+
+function loadAiChatHistory() {
+  const key = getAiChatHistoryStorageKey();
+  if (!key) return;
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem(key));
+  } catch { return; }
+  if (!Array.isArray(stored) || stored.length === 0) return;
+
+  // Prevent double-restore if messages already loaded
+  if (state.ai.messages.length > 0) return;
+
+  // Clear the empty-state placeholder before rendering messages
+  if (dom.aiChatMessages) dom.aiChatMessages.innerHTML = "";
+
+  for (const msg of stored) {
+    if (typeof msg.role !== "string" || typeof msg.text !== "string") continue;
+    // Push directly — appendAiMessage would double-push via createAiMessageController
+    state.ai.messages.push({ role: msg.role, text: msg.text });
+    const article = document.createElement("article");
+    article.className = `ai-chat-message ${msg.role === "user" ? "ai-chat-message-user" : "ai-chat-message-assistant"}`;
+    const header = document.createElement("div");
+    header.className = "ai-chat-message-header";
+    const title = document.createElement("strong");
+    title.textContent = msg.role === "user" ? "You" : "Assistant";
+    header.appendChild(title);
+    const statusEl = document.createElement("span");
+    statusEl.className = "ai-chat-message-status";
+    statusEl.textContent = msg.role === "assistant" ? "Response ready" : "Sent";
+    header.appendChild(statusEl);
+    article.appendChild(header);
+    const body = document.createElement("div");
+    body.className = "ai-chat-message-body";
+    body.innerHTML = renderMarkdown(msg.text);
+    article.appendChild(body);
+    dom.aiChatMessages.appendChild(article);
+  }
+  dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
+}
+
+function clearAiChatHistory() {
+  const key = getAiChatHistoryStorageKey();
+  if (key) localStorage.removeItem(key);
+}
+
 function isGenAiMilKey(key) {
   return key.startsWith("STARK_") || key.startsWith("STARK-");
 }
@@ -7499,8 +7569,9 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "═══════════════════════════════════════",
     "LINKED SHAPE (CONTEXT ITEMS):",
     "═══════════════════════════════════════",
-    "- The user can attach map items as context. These appear in explicitAiContextIds[] and activeAiContextId.",
-    "- When the user says 'the linked shape', 'the linked circle', 'the context shape', or similar, they mean the item in explicitAiContextIds[0] (or activeAiContextId if explicitAiContextIds is empty). Look up its name and id from drawnShapes[] or importedItems[].",
+    "- The user can attach map items as context. These appear in explicitAiContextObjects[] (each has contentId and name) and activeAiContextId.",
+    "- When the user says 'the linked shape', 'that shape', 'the context shape', 'make it red', or refers to a shape without naming it, they mean the first item in explicitAiContextObjects[]. Use its 'name' field directly as the 'name' value in update-shape/remove-shape. Do NOT use the contentId string.",
+    "- Example: explicitAiContextObjects = [{contentId:'imported:abc',name:'DC Landmarks Polygon 61'}], user says 'make that shape red' → {\"type\":\"update-shape\",\"name\":\"DC Landmarks Polygon 61\",\"color\":\"#ff0000\"}",
     "- Use the item's exact name as the 'name' field in update-shape (the resolver matches by name or id).",
     "- update-shape supports: color (#hex), fillOpacity (0–1), weight (px), lineStyle (solid|dashed|dotted), newName (rename), radiusM (resize circle by center+radius), coordinates (replace geometry).",
     "- Example: user says 'make the linked shape green' → {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"color\":\"#00cc44\"}",
@@ -7705,6 +7776,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: shapeType=circle, coordinates[0] is center, radiusM is radius. ALWAYS use this when user asks to draw/highlight a circle area, polygon, or line.",
       "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
       "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
+      "update-shape: {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"color\":\"#hex\",\"fillOpacity\":0-1,\"weight\":px,\"lineStyle\":\"solid|dashed|dotted\",\"newName\":\"string\",\"radiusM\":meters}. When user says 'make it/that red' or refers to a linked shape, use the name from explicitAiContextObjects[0].name. NEVER use the contentId as the name.",
       "Use exact ids from the scenario summary.",
       "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
       "Do not invent tools, URLs, or ids.",
@@ -8322,6 +8394,10 @@ function buildAiScenarioSummary() {
     activeAiContextId: state.ai.activeContextId,
     activeAiContext,
     explicitAiContextIds: [...state.ai.contextItemIds],
+    explicitAiContextObjects: state.ai.contextItemIds.map((cid) => {
+      const name = getMapContentName(cid);
+      return { contentId: cid, name };
+    }).filter((o) => o.name),
     drawnShapes: importedItems.filter((item) => item?.drawn),
     // Pre-computed terrain LOS matrix for all current asset pairs
     terrainLosMatrix: buildLosMatrix(state.assets),
@@ -8817,7 +8893,13 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
 
   if (action.type === "update-shape") {
     const ref = action.shapeId ?? action.name;
-    const item = state.importedItems.find((i) => i.drawn && (i.id === ref || i.name === ref));
+    const item = state.importedItems.find((i) =>
+      i.drawn && (
+        i.id === ref ||
+        i.name === ref ||
+        `imported:${i.id}` === ref
+      )
+    ) ?? state.importedItems.find((i) => i.drawn && i.name?.toLowerCase() === ref?.toLowerCase());
     if (!item) return `I couldn't update the shape "${ref}" because it was not found.`;
     if (typeof action.color === "string") {
       item.shapeStyle.color = action.color;
@@ -8866,7 +8948,9 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
 
   if (action.type === "remove-shape") {
     const ref = action.shapeId ?? action.name;
-    const item = state.importedItems.find((i) => i.drawn && (i.id === ref || i.name === ref));
+    const item = state.importedItems.find((i) =>
+      i.drawn && (i.id === ref || i.name === ref || `imported:${i.id}` === ref)
+    ) ?? state.importedItems.find((i) => i.drawn && i.name?.toLowerCase() === ref?.toLowerCase());
     if (!item) return `I couldn't remove the shape "${ref}" because it was not found.`;
     removeImportedItem(item.id);
     return `Removed shape "${ref}".`;
@@ -9000,6 +9084,42 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
       });
     });
     header.appendChild(copyBtn);
+
+    const pdfBtn = document.createElement("button");
+    pdfBtn.className = "ai-doc-pdf-btn";
+    pdfBtn.type = "button";
+    pdfBtn.textContent = "Download PDF";
+    pdfBtn.addEventListener("click", () => {
+      const escaped = content
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>${title.replace(/</g, "&lt;")}</title>
+<style>
+  body { font-family: "Courier New", Courier, monospace; font-size: 11pt; margin: 1in; color: #000; background: #fff; }
+  h1 { font-size: 14pt; text-align: center; margin-bottom: 0.5em; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 10pt; line-height: 1.4; }
+  @page { size: letter; margin: 1in; }
+  @media print { body { margin: 0; } }
+</style></head><body>
+<h1>${title.replace(/</g, "&lt;")}</h1>
+<pre>${escaped}</pre>
+</body></html>`;
+      const blob = new Blob([htmlDoc], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:fixed;width:0;height:0;border:none;opacity:0;pointer-events:none;";
+      document.body.appendChild(iframe);
+      iframe.onload = () => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        setTimeout(() => { document.body.removeChild(iframe); URL.revokeObjectURL(url); }, 2000);
+      };
+      iframe.src = url;
+    });
+    header.appendChild(pdfBtn);
+
     article.appendChild(header);
 
     const pre = document.createElement("pre");
