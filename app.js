@@ -1063,6 +1063,9 @@ const dom = {
   coordinateSystemSelect: document.querySelector("#coordinateSystemSelect"),
   gridlinesToggle: document.querySelector("#gridlinesToggle"),
   centerGridToggle: document.querySelector("#centerGridToggle"),
+  labelDefaultPointToggle: document.querySelector("#labelDefaultPointToggle"),
+  labelDefaultPolygonToggle: document.querySelector("#labelDefaultPolygonToggle"),
+  labelDefaultLineToggle: document.querySelector("#labelDefaultLineToggle"),
   gridlinesColor: document.querySelector("#gridlinesColor"),
   clockValue: document.querySelector("#clockValue"),
   gpsStatusValue: document.querySelector("#gpsStatusValue"),
@@ -1116,6 +1119,7 @@ const dom = {
   shapeWeightValue: document.querySelector("#shapeWeightValue"),
   shapeStyleEditVerticesBtn: document.querySelector("#shapeStyleEditVerticesBtn"),
   shapeStyleDoneBtn: document.querySelector("#shapeStyleDoneBtn"),
+  shapeLabelToggle: document.querySelector("#shapeLabelToggle"),
   pointStyleControls: document.querySelector("#pointStyleControls"),
   shapeOnlyControls: document.querySelector("#shapeOnlyControls"),
   circleShapeControls: document.querySelector("#circleShapeControls"),
@@ -1348,6 +1352,9 @@ const state = {
     cesiumPhotorealisticTilesEnabled: false,
     cesiumOsmBuildingsEnabled: false,
     buildingMaterialPreset: "reinforced-concrete",
+    labelDefaultPoint: true,
+    labelDefaultPolygon: false,
+    labelDefaultLine: false,
   },
   weather: {
     temperatureC: 20,
@@ -3508,6 +3515,13 @@ function wireEvents() {
   dom.shapeWeightInput.addEventListener("input", onShapeStyleChanged);
   dom.shapeStyleEditVerticesBtn.addEventListener("click", onShapeStyleEditVertices);
   dom.shapeStyleDoneBtn.addEventListener("click", () => closeShapeStylePanel());
+  dom.shapeLabelToggle?.addEventListener("change", () => {
+    const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+    if (!item) return;
+    item.showLabel = dom.shapeLabelToggle.checked;
+    applyItemLabel(item);
+    saveMapState();
+  });
   dom.shapeStyleCloseBtn?.addEventListener("click", () => closeShapeStylePanel());
   dom.pointSizeInput?.addEventListener("input", onPointStyleChanged);
   dom.circleCenterInput?.addEventListener("change", onCircleGeometryChanged);
@@ -3571,6 +3585,9 @@ function wireEvents() {
   dom.coordinateSystemSelect.addEventListener("change", onSettingsChanged);
   dom.gridlinesToggle.addEventListener("change", onSettingsChanged);
   dom.centerGridToggle.addEventListener("change", onSettingsChanged);
+  dom.labelDefaultPointToggle?.addEventListener("change", onSettingsChanged);
+  dom.labelDefaultPolygonToggle?.addEventListener("change", onSettingsChanged);
+  dom.labelDefaultLineToggle?.addEventListener("change", onSettingsChanged);
   dom.gridlinesColor.addEventListener("input", onSettingsChanged);
   dom.view3dToggleBtn.addEventListener("click", toggle3dView);
   dom.cesiumCompassBtn.addEventListener("click", resetCesiumNorthUp);
@@ -3725,6 +3742,9 @@ function loadSettings() {
     state.settings.buildingMaterialPreset = BUILDING_MATERIAL_MODELS[parsed.buildingMaterialPreset]
       ? parsed.buildingMaterialPreset
       : state.settings.buildingMaterialPreset;
+    if (typeof parsed.labelDefaultPoint === "boolean") state.settings.labelDefaultPoint = parsed.labelDefaultPoint;
+    if (typeof parsed.labelDefaultPolygon === "boolean") state.settings.labelDefaultPolygon = parsed.labelDefaultPolygon;
+    if (typeof parsed.labelDefaultLine === "boolean") state.settings.labelDefaultLine = parsed.labelDefaultLine;
   } catch {
     window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
   }
@@ -3936,6 +3956,9 @@ function applySavedMapState(rawSaved) {
           geometryType: saved.geometryType,
           properties: saved.properties ?? {},
           drawn: saved.drawn ?? false,
+          showLabel: typeof saved.showLabel === "boolean"
+            ? saved.showLabel
+            : getLabelDefaultForGeometryType(saved.geometryType),
           shapeStyle: normalizeImportedShapeStyle(saved.geometryType, saved.shapeStyle),
           markerStyle: normalizeImportedMarkerStyle(saved.markerStyle),
           layer: null,
@@ -3953,6 +3976,7 @@ function applySavedMapState(rawSaved) {
         item.layer.on?.("click", () => focusMapContent(contentId));
         item.layer.on?.("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
         attachImportedLayerEditUndo(item);
+        applyItemLabel(item);
         state.importedItems.push(item);
       } catch (err) {
         skipped++;
@@ -4214,6 +4238,9 @@ function onSettingsChanged() {
   state.settings.gridLinesEnabled = dom.gridlinesToggle.checked;
   state.settings.centerGridEnabled = dom.centerGridToggle.checked;
   state.settings.gridColor = dom.gridlinesColor.value;
+  if (dom.labelDefaultPointToggle) state.settings.labelDefaultPoint = dom.labelDefaultPointToggle.checked;
+  if (dom.labelDefaultPolygonToggle) state.settings.labelDefaultPolygon = dom.labelDefaultPolygonToggle.checked;
+  if (dom.labelDefaultLineToggle) state.settings.labelDefaultLine = dom.labelDefaultLineToggle.checked;
   persistSettings();
   applySettings();
 }
@@ -4225,6 +4252,9 @@ function applySettings() {
   dom.gridlinesToggle.checked = state.settings.gridLinesEnabled;
   dom.centerGridToggle.checked = state.settings.centerGridEnabled;
   dom.gridlinesColor.value = state.settings.gridColor;
+  if (dom.labelDefaultPointToggle) dom.labelDefaultPointToggle.checked = state.settings.labelDefaultPoint ?? true;
+  if (dom.labelDefaultPolygonToggle) dom.labelDefaultPolygonToggle.checked = state.settings.labelDefaultPolygon ?? false;
+  if (dom.labelDefaultLineToggle) dom.labelDefaultLineToggle.checked = state.settings.labelDefaultLine ?? false;
   dom.cesiumPhotorealisticTilesToggle.value = state.settings.cesiumPhotorealisticTilesEnabled ? "on" : "off";
   dom.cesiumOsmBuildingsToggle.value = state.settings.cesiumOsmBuildingsEnabled ? "on" : "off";
   dom.buildingMaterialPreset.value = state.settings.buildingMaterialPreset;
@@ -4239,6 +4269,7 @@ function applySettings() {
   renderViewsheds();
   renderPlanningResults();
   syncCesiumEntities();
+  applyAllItemLabels();
 }
 
 function updateCenterCrosshairVisibility() {
@@ -8799,6 +8830,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
       item.name = action.newName.trim();
       renderMapContents();
     }
+    applyItemLabel(item);
     saveMapState();
     syncCesiumEntities();
     return `Updated shape "${item.name}".`;
@@ -12798,7 +12830,6 @@ function focusMapContent(contentId) {
       return;
     }
     state.map.setView(marker.getLatLng(), Math.max(state.map.getZoom(), 15));
-    marker.openPopup();
     return;
   }
 
@@ -12849,7 +12880,6 @@ function focusMapContent(contentId) {
       state.map.fitBounds(item.layer.getBounds().pad(0.08));
     } else if (typeof item.layer.getLatLng === "function") {
       state.map.setView(item.layer.getLatLng(), Math.max(state.map.getZoom(), 15));
-      item.layer.openPopup?.();
     }
   }
 }
@@ -13063,6 +13093,7 @@ function commitRenameMapContent() {
     if (item) {
       item.name = nextName;
       item.layer.setPopupContent?.(renderImportedItemPopup(item));
+      applyItemLabel(item);
     }
   }
 
@@ -13120,13 +13151,9 @@ function editMapContent(contentId) {
   if (contentId.startsWith("imported:")) {
     const item = state.importedItems.find((entry) => `imported:${entry.id}` === contentId);
     if (!item) return;
-    if (item.geometryType === "Point") {
-      focusMapContent(contentId);
-    } else {
-      closeMapContentsMenu();
-      openShapeStylePanel(item);
-      setStatus(`Editing ${item.name}.`);
-    }
+    closeMapContentsMenu();
+    openShapeStylePanel(item);
+    setStatus(`Editing ${item.name}.`);
   }
 }
 
@@ -13791,6 +13818,7 @@ function applyPointPopupEdits(itemId, root) {
     item.layer.setIcon(icon);
   }
 
+  applyItemLabel(item);
   refreshImportedItemPopup(item);
   renderMapContents();
   syncCesiumEntities();
@@ -14302,8 +14330,17 @@ function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
   setStatus(`${feature.name} added. Right-click it in Map Contents to edit style or vertices.`);
 }
 
+function getLabelDefaultForGeometryType(geometryType) {
+  if (geometryType === "Point") return state.settings.labelDefaultPoint ?? true;
+  if (geometryType === "LineString") return state.settings.labelDefaultLine ?? false;
+  return state.settings.labelDefaultPolygon ?? false;
+}
+
 function addDrawnFeature(feature, folderId = null) {
   const isPoint = feature.geometryType === "Point";
+  const showLabel = typeof feature.showLabel === "boolean"
+    ? feature.showLabel
+    : getLabelDefaultForGeometryType(feature.geometryType);
   const item = stampContentRecord({
     id: generateId(),
     name: feature.name,
@@ -14312,6 +14349,7 @@ function addDrawnFeature(feature, folderId = null) {
     geometryType: feature.geometryType,
     properties: feature.properties ?? {},
     drawn: true,
+    showLabel,
     shapeStyle: isPoint ? null : normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle ?? { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color }),
     markerStyle: isPoint ? normalizeDrawnPointMarkerStyle(feature.markerStyle) : null,
     layer: null,
@@ -14332,6 +14370,7 @@ function addDrawnFeature(feature, folderId = null) {
   item.layer.on("click", () => focusMapContent(contentId));
   item.layer.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
   attachImportedLayerEditUndo(item);
+  applyItemLabel(item);
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId ?? null);
   state.mapContentOrder.push(contentId);
@@ -14416,6 +14455,10 @@ function openShapeStylePanel(item, anchorEl) {
         dom.circleRadiusInput.value = String(Math.max(1, Math.round(Number(item.properties?.radiusM) || 1)));
       }
     }
+  }
+
+  if (dom.shapeLabelToggle) {
+    dom.shapeLabelToggle.checked = item.showLabel ?? getLabelDefaultForGeometryType(item.geometryType);
   }
 
   dom.shapeStyleModal?.classList.remove("hidden");
@@ -14615,6 +14658,24 @@ function applyShapeStyleToLayer(item) {
   } else {
     item.layer.setStyle({ color, opacity: 1, weight, dashArray });
   }
+}
+
+function applyItemLabel(item) {
+  if (!item?.layer) return;
+  item.layer.unbindTooltip();
+  if (!item.showLabel || !item.name) return;
+  const isPoint = item.geometryType === "Point";
+  item.layer.bindTooltip(item.name, {
+    permanent: true,
+    direction: isPoint ? "right" : "center",
+    className: `shape-map-label${isPoint ? " shape-map-label--point" : ""}`,
+    offset: isPoint ? [item.markerStyle?.size ? Math.round(item.markerStyle.size / 2) + 4 : 16, 0] : [0, 0],
+    interactive: false,
+  });
+}
+
+function applyAllItemLabels() {
+  state.importedItems.forEach(applyItemLabel);
 }
 
 // When a polygon has no fill (fillOpacity === 0), override _containsPoint so

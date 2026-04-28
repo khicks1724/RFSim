@@ -5193,3 +5193,43 @@ body.emitter-modal-open {
 .offline-dot-unknown { color: var(--muted); }
 .offline-dot-ok      { color: #34d399; }
 .offline-dot-err     { color: var(--enemy); }
+
+/* ── Shape / point map labels ─────────────────────────────────────────────── */
+.shape-map-label {
+  background: rgba(13, 17, 23, 0.82);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  color: #e8edf3;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 2px 6px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.55);
+  /* remove the default Leaflet tooltip arrow */
+}
+.shape-map-label::before { display: none !important; }
+
+/* Point labels sit to the right of the dot with a subtle connector */
+.shape-map-label--point {
+  margin-left: 4px;
+}
+
+/* Polygon / line labels sit centred over the shape, no background arrow */
+.leaflet-tooltip.shape-map-label:not(.shape-map-label--point) {
+  transform: translate(-50%, -50%);
+}
+
+/* Settings panel label-default row — matches existing check-row style */
+.shape-label-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #a0aec0);
+}
+

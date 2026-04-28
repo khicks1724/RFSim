@@ -766,6 +766,11 @@
       </div>
     </div>
 
+    <label class="shape-param-label shape-label-toggle-row">
+      <span>Show Label</span>
+      <input id="shapeLabelToggle" type="checkbox">
+    </label>
+
     <div class="shape-style-footer button-row">
       <button id="shapeStyleEditVerticesBtn" type="button" class="ghost-button small">Edit Vertices</button>
       <button id="shapeStyleDoneBtn" type="button" class="primary-button small">Done</button>
@@ -1295,6 +1300,18 @@
                 <option value="latlon">Lat / Long</option>
                 <option value="dms">Deg Min Sec</option>
               </select>
+            </label>
+            <label class="settings-check-row">
+              <input id="labelDefaultPointToggle" type="checkbox">
+              <span>Show Labels on Points by Default</span>
+            </label>
+            <label class="settings-check-row">
+              <input id="labelDefaultPolygonToggle" type="checkbox">
+              <span>Show Labels on Polygons by Default</span>
+            </label>
+            <label class="settings-check-row">
+              <input id="labelDefaultLineToggle" type="checkbox">
+              <span>Show Labels on Lines by Default</span>
             </label>
             <label class="settings-check-row">
               <input id="gridlinesToggle" type="checkbox">
