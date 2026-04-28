@@ -2126,7 +2126,6 @@ async function hydrateSession() {
     state.session.user = payload.user;
     await loadProjectList();
     await loadServerAiProviderSettings();
-    loadAiChatHistory();
     fireAnalyticsEvent({ event_type: "visit" });
   } catch (error) {
     if (/Invalid token|Authentication required|User not found/i.test(error.message)) {
@@ -3211,6 +3210,7 @@ async function init() {
   if (state.ai.provider && state.ai.apiKey && state.ai.status === "pending") {
     testAiProviderConnection({ openPanelOnSuccess: false });
   }
+  loadAiChatHistory();
   window.setInterval(updateClock, 1000);
   setStatus("Ready.");
   // Deferred render — guarantees map contents tray shows saved items after DOM settles
@@ -5373,6 +5373,7 @@ async function onAiChatSubmit(event) {
 
   // Render user message in chat
   appendAiMessage("user", prompt, images, contextItems);
+  saveAiChatHistory();
 
   // Clear inputs
   dom.aiChatInput.value = "";
@@ -6857,9 +6858,20 @@ function appendAiMessage(role, text, images = [], contextItems = []) {
 }
 
 function getAiChatHistoryStorageKey() {
+  // Prefer server-account ID for logged-in users — most stable identifier
   const userId = state.session.user?.id;
-  if (!userId) return null;
-  return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:${userId}`;
+  if (userId) return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:${userId}`;
+  // Guest sessions are ephemeral — never persist their chat
+  if (isGuestSession()) return null;
+  // Token-only session (user object not resolved yet) — use token tail
+  if (state.session.token) {
+    return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:tok:${state.session.token.slice(-16)}`;
+  }
+  // No server auth — key by AI provider+key so each API key gets its own history
+  if (state.ai.apiKey) {
+    return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:local:${state.ai.apiKey.slice(-16)}`;
+  }
+  return null;
 }
 
 function saveAiChatHistory() {
