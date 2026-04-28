@@ -191,19 +191,61 @@ body.auth-screen-active .app-shell {
   justify-content: space-between;
   gap: 12px;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.84rem;
+  margin-top: 2px;
 }
 
+.auth-screen-mode-copy {
+  color: var(--muted);
+}
+
+/* Prominent secondary CTA — create account */
+.auth-screen-register-btn {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  border-radius: 6px;
+  background: rgba(125, 211, 252, 0.07);
+  color: #7dd3fc;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  letter-spacing: 0.02em;
+}
+.auth-screen-register-btn:hover {
+  background: rgba(125, 211, 252, 0.14);
+  border-color: rgba(125, 211, 252, 0.6);
+  color: #e0f2fe;
+}
+
+/* Subtle text link — sign in toggle / back */
 .auth-screen-link {
   padding: 0;
   border: none;
   background: transparent;
   color: var(--accent-strong);
   cursor: pointer;
+  font-size: 0.84rem;
 }
-
 .auth-screen-link:hover {
   color: #ffffff;
+}
+
+/* Minimal ghost link for guest option */
+.auth-screen-guest-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  opacity: 0.7;
+  transition: opacity 0.15s, color 0.15s;
+}
+.auth-screen-guest-link:hover {
+  opacity: 1;
+  color: var(--text);
 }
 
 @keyframes auth-rf-waterfall-a {

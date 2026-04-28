@@ -2180,12 +2180,22 @@ function syncAuthScreenUi() {
   const isRegister = state.authScreenMode === "register";
   dom.authScreenTitle.textContent = "RF Sim";
   dom.authScreenCopy.textContent = isRegister
-    ? "Create an account with a username and password, or continue as a guest."
-    : "Sign in with a username and password, or continue as a guest.";
+    ? "Create a free account to save projects, retain your AI chat, and access all features."
+    : "Sign in to access your projects and AI planning tools.";
   dom.authScreenFullNameRow?.classList.add("hidden");
   dom.authScreenSubmitBtn.textContent = isRegister ? "Create Account" : "Sign In";
-  dom.authScreenModeCopy.textContent = isRegister ? "Already have an account?" : "Need an account?";
-  dom.authScreenToggleModeBtn.textContent = isRegister ? "Back to sign in" : "Create one";
+  // Toggle mode button switches role between register CTA and back-to-login link
+  dom.authScreenToggleModeBtn.textContent = isRegister ? "← Back to sign in" : "Create a free account";
+  dom.authScreenToggleModeBtn.className = isRegister ? "auth-screen-link" : "auth-screen-register-btn";
+  // Mode copy line only shown in register mode
+  if (dom.authScreenModeCopy) {
+    dom.authScreenModeCopy.textContent = isRegister ? "Already have an account?" : "";
+    dom.authScreenModeCopy.style.display = isRegister ? "" : "none";
+  }
+  // Guest link only shown on login screen
+  if (dom.authScreenGuestBtn) {
+    dom.authScreenGuestBtn.style.display = isRegister ? "none" : "";
+  }
   if (!dom.authScreenStatus.textContent.trim()) {
     setAuthScreenStatus("", false);
   }
@@ -7033,7 +7043,7 @@ ${renderedBody}
 </html>`;
 }
 
-function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount, format = "pdf") {
+function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount, format = "report") {
   const docTypeLabels = {
     pace: "PACE Plan", soi: "SOI", ceoi: "CEOI", aar: "AAR",
     spectrum: "Spectrum Plan", "route-narrative": "Route Narrative",
@@ -7042,6 +7052,7 @@ function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount, for
   };
   const typeLabel = docTypeLabels[docType] ?? "Document";
   const isHtml = format === "html";
+  const isReport = !isHtml;
 
   const article = document.createElement("article");
   article.className = "ai-chat-message ai-chat-message-assistant ai-document-card";
@@ -7073,14 +7084,14 @@ function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount, for
   info.appendChild(nameEl);
   const metaEl = document.createElement("div");
   metaEl.className = "ai-doc-card-meta";
-  metaEl.textContent = `${typeLabel} · ${isHtml ? "HTML" : "PDF"} · ${sizeLabel}`;
+  metaEl.textContent = `${typeLabel} · ${isHtml ? "HTML" : "Report"} · ${sizeLabel}`;
   info.appendChild(metaEl);
   card.appendChild(info);
 
   const dlBtn = document.createElement("button");
   dlBtn.className = "ai-doc-card-dl-btn";
   dlBtn.type = "button";
-  dlBtn.textContent = isHtml ? "Download HTML" : "Download";
+  dlBtn.textContent = isHtml ? "Download HTML" : "Download Report";
   dlBtn.addEventListener("click", () => {
     const slug = title.replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").toLowerCase() || "document";
     if (isHtml) {
@@ -7145,9 +7156,9 @@ function loadAiChatHistory() {
 
     // Detect stored document messages and rebuild the download card
     // Supports both new "[Document:pdf: Title]" and legacy "[Document: Title]" formats
-    const docMatch = msg.role === "assistant" && msg.text.match(/^\[Document(?::(pdf|html))?: (.+?)\]\n([\s\S]*)$/);
+    const docMatch = msg.role === "assistant" && msg.text.match(/^\[Document(?::(report|pdf|html))?: (.+?)\]\n([\s\S]*)$/);
     if (docMatch) {
-      const docFormat = docMatch[1] ?? "pdf";
+      const docFormat = docMatch[1] === "html" ? "html" : "report";
       const docTitle = docMatch[2];
       const docContent = docMatch[3];
       const lineCount = docContent.split("\n").filter((l) => l.trim()).length;
@@ -7884,11 +7895,11 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "PLANNING & DOCUMENTATION CAPABILITIES:",
     "═══════════════════════════════════════",
     "You can generate documents and reports using the generate-document action.",
-    "Schema: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology|analysis|visual\",\"format\":\"pdf|html\",\"title\":\"string\",\"content\":\"string\"}",
+    "Schema: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology|analysis|visual\",\"format\":\"report|html\",\"title\":\"string\",\"content\":\"string\"}",
     "",
     "FORMAT RULES:",
-    "  - Default format is 'pdf' for all documents. Only use format='html' when the output is a self-contained interactive visual (charts, diagrams, frequency spectrum plots, link budget visualizers, etc.).",
-    "  - For format='pdf': content must be rich markdown. Use # headings, ## subheadings, **bold**, *italic*, tables, bullet/numbered lists, horizontal rules, and code blocks freely. Be thorough and detailed.",
+    "  - Default format is 'report' for all documents and analyses. Only use format='html' when the output is a self-contained interactive visual (charts, diagrams, frequency spectrum plots, link budget visualizers, etc.).",
+    "  - For format='report': content must be rich markdown. Use # headings, ## subheadings, **bold**, *italic*, tables, bullet/numbered lists, horizontal rules, and code blocks freely. Be thorough and detailed.",
     "  - For format='html': content must be a complete standalone HTML document (<html>...<body>...) with embedded CSS and JS for the visual. Do not include markdown — write real HTML.",
     "  - Never truncate or summarize a report. Fill every section with real data, specific values, analysis, and recommendations.",
     "",
@@ -7959,7 +7970,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "",
     "  generate-document action: use for ALL of the above. Never write a document or report in assistantMessage — always use the action.",
     "  For complex requests (e.g. PACE + SOI + relay drawing), emit multiple generate-document actions and map actions together.",
-    "  Analysis/assessment requests always get docType='analysis', format='pdf', and a full multi-section report.",
+    "  Analysis/assessment requests always get docType='analysis', format='report', and a full multi-section report.",
     "  Visual/chart requests get docType='visual', format='html', with a complete self-contained HTML page.",
     "",
     "═══════════════════════════════════════",
@@ -8064,7 +8075,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "place-marker: {\"type\":\"place-marker\",\"lat\":N,\"lon\":N,\"name\":\"string\",\"color\":\"#hex\",\"size\":pt,\"outlineColor\":\"#hex\",\"outlineWidth\":px}. Use this — NOT draw-shape — whenever the user asks to mark a city, location, landmark, or place a point/pin/marker. color sets dot color, size sets dot size in pt (8–64, default 24). One action per location. NEVER use draw-shape circle for this.",
       "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: shapeType=circle, coordinates[0] is center, radiusM is radius. ALWAYS use this when user asks to draw/highlight a circle area, polygon, or line.",
       "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
-      "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology|analysis|visual\",\"format\":\"pdf|html\",\"title\":\"string\",\"content\":\"string\"}. Default format='pdf' (markdown content). Use format='html' only for interactive visuals (full HTML doc with embedded CSS/JS). For analysis reports be thorough: multiple sections, specific values, quantified findings. Never truncate. Always use this action — never write docs in assistantMessage.",
+      "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology|analysis|visual\",\"format\":\"report|html\",\"title\":\"string\",\"content\":\"string\"}. Default format='report' (markdown content, downloads as formatted HTML report). Use format='html' only for interactive visuals (full HTML doc with embedded CSS/JS). For analysis reports be thorough: multiple sections, specific values, quantified findings. Never truncate. Always use this action — never write docs in assistantMessage.",
       "update-shape: {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"color\":\"#hex\",\"fillOpacity\":0-1,\"weight\":px,\"lineStyle\":\"solid|dashed|dotted\",\"newName\":\"string\",\"radiusM\":meters}. When user says 'make it/that red' or refers to a linked shape, use the name from explicitAiContextObjects[0].name. NEVER use the contentId as the name.",
       "Use exact ids from the scenario summary.",
       "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
@@ -9346,7 +9357,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const docType = action.docType ?? "document";
     const title = action.title ?? docType.toUpperCase();
     const content = action.content ?? "";
-    const format = action.format === "html" ? "html" : "pdf";
+    const format = action.format === "html" ? "html" : "report";
     if (!content.trim()) return "I couldn't generate the document because the content was empty.";
 
     const wordCount = content.trim().split(/\s+/).length;
@@ -9359,7 +9370,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     state.ai.messages.push({ role: "assistant", text: `[Document:${format}: ${title}]\n${content}` });
     saveAiChatHistory();
 
-    return `Generated ${docType} (${format}): "${title}".`;
+    return `Generated ${docType}: "${title}".`;
   }
 
   return `I couldn't apply the action type "${action.type}" because it is not supported.`;
