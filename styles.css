@@ -1895,14 +1895,99 @@ body:not(.ai-panel-open) .ai-panel {
 /* ── Local model settings panel ─────────────────────────────────────────────── */
 .ai-genai-mil-warning {
   margin-top: 12px;
-  padding: 10px 14px;
+  padding: 14px 16px;
   border: 1px solid #b45309;
-  border-radius: 6px;
+  border-radius: 8px;
   background: rgba(180, 83, 9, 0.12);
   color: #fbbf24;
   font-size: 12px;
   line-height: 1.5;
 }
+
+.ai-genai-mil-warning-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ai-genai-mil-warning-header strong {
+  color: #fde68a;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+}
+
+.ai-genai-mil-warning-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
+  color: #fde68a;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.ai-genai-mil-warning p {
+  margin: 0;
+}
+
+.ai-genai-mil-warning-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ai-genai-mil-warning-actions .ghost-button {
+  text-decoration: none;
+}
+
+.ai-genai-mil-steps {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ai-genai-mil-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid rgba(251, 191, 36, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.ai-genai-mil-step strong {
+  display: block;
+  color: #fde68a;
+  margin-bottom: 2px;
+}
+
+.ai-genai-mil-step p + p {
+  margin-top: 3px;
+}
+
+.ai-genai-mil-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.16);
+  border: 1px solid rgba(251, 191, 36, 0.26);
+  color: #fde68a;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
 .ai-genai-mil-warning code {
   background: rgba(255,255,255,0.1);
   border-radius: 3px;
@@ -1910,6 +1995,13 @@ body:not(.ai-panel-open) .ai-panel {
   font-size: 11px;
 }
 .ai-genai-mil-warning.hidden { display: none; }
+
+@media (max-width: 720px) {
+  .ai-genai-mil-warning-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 
 .ai-local-model-section {
   margin-top: 12px;

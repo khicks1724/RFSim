@@ -7068,6 +7068,44 @@ function explainGenAiMilNetworkFailure(transport, operation, networkErr) {
   return new Error(`Direct GenAI.mil ${operation} request failed.${detail}`);
 }
 
+function summarizeGenAiMilTransportFailures(operation, errors) {
+  const messages = errors.map((error) => error?.message).filter(Boolean);
+  if (!messages.length) {
+    return new Error(`GenAI.mil ${operation} failed.`);
+  }
+
+  const localHttpsFailure = messages.find((message) => /secure local GenAI\.mil proxy/i.test(message));
+  const backendNetworkFailure = messages.find((message) => (
+    /GenAI\.mil \(503\)/i.test(message)
+    || /rejected this network path/i.test(message)
+    || /approved workstation\/network/i.test(message)
+  ));
+  const authLockFailure = messages.find((message) => /Unlock URL:/i.test(message));
+
+  if (authLockFailure) {
+    return new Error(authLockFailure);
+  }
+
+  if (localHttpsFailure && backendNetworkFailure) {
+    return new Error(
+      `This hosted site could not complete GenAI.mil ${operation}. ` +
+      `The secure local relay at https://127.0.0.1:8788 is not running on the user's machine, ` +
+      `and the RF Planner backend also cannot reach GenAI.mil from its current network path. ` +
+      `Run \`node genai-proxy.js --local-model\` on the user's approved workstation, trust the localhost certificate once, then retry.`
+    );
+  }
+
+  const backendOnlyFailure = messages.find((message) => /RF Planner backend relay failed/i.test(message));
+  if (backendOnlyFailure && backendNetworkFailure) {
+    return new Error(
+      `RF Planner reached its backend relay, but that server cannot complete GenAI.mil ${operation} from its current network path. ` +
+      `Use the secure localhost relay on the approved workstation instead: \`node genai-proxy.js --local-model\`.`
+    );
+  }
+
+  return new Error(messages[0]);
+}
+
 function parseGenAiMilErrorDetail(status, bodyText, fallbackMessage) {
   if (isHtmlLikeResponse(bodyText)) {
     return parseGenAiMilApiError(status, bodyText, fallbackMessage).message;
@@ -7162,9 +7200,7 @@ async function discoverGenAiMilModels(apiKey) {
     }
   }
 
-  const msg = errors.map((error) => error?.message).filter(Boolean).find(Boolean)
-    || "GenAI.mil model discovery failed.";
-  throw new Error(msg);
+  throw summarizeGenAiMilTransportFailures("model discovery", errors);
 }
 
 async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
@@ -7670,8 +7706,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
     }
   }
 
-  const msg = errors.map(e => e?.message).filter(Boolean).find(Boolean) || "GenAI.mil request failed.";
-  throw new Error(msg);
+  throw summarizeGenAiMilTransportFailures("chat completion", errors);
 }
 
 async function callAnthropic(messages, maxTokens = 256, temperature = 0) {

@@ -1353,7 +1353,53 @@
           </div>
 
           <div id="aiGenAiMilNetworkWarning" class="ai-genai-mil-warning hidden">
-            <strong>Network restriction:</strong> api.genai.mil only accepts requests from approved networks (.mil / CAC). When using the hosted site, start <code>node genai-proxy.js --local-model</code> on this machine so the app can relay GenAI.mil requests through <code>https://127.0.0.1:8788</code>. The first run requires trusting the localhost certificate.
+            <div class="ai-genai-mil-warning-header">
+              <strong>GenAI.mil hosted-site setup</strong>
+              <span class="ai-genai-mil-warning-badge">required on restricted networks</span>
+            </div>
+            <p>
+              <strong>Why this is needed:</strong> <code>api.genai.mil</code> only accepts requests from approved networks.
+              When using the hosted site, run the local relay on this machine so the app can route GenAI.mil traffic
+              through <code>https://127.0.0.1:8788</code>.
+            </p>
+            <div class="ai-genai-mil-warning-actions">
+              <a class="ghost-button small" href="/genai-proxy.js" download="genai-proxy.js">Download Relay Script</a>
+              <a class="ghost-button small" href="/start-genai-proxy.bat" download="start-genai-proxy.bat">Download Windows Launcher</a>
+              <a class="ghost-button small" href="/start-genai-proxy.command" download="start-genai-proxy.command">Download Mac Launcher</a>
+            </div>
+            <div class="ai-genai-mil-steps">
+              <div class="ai-genai-mil-step">
+                <span class="ai-genai-mil-step-num">1</span>
+                <div>
+                  <strong>Download both files</strong>
+                  <p>Save <code>genai-proxy.js</code> and the launcher for your OS to the same folder.</p>
+                </div>
+              </div>
+              <div class="ai-genai-mil-step">
+                <span class="ai-genai-mil-step-num">2</span>
+                <div>
+                  <strong>Start it on this machine</strong>
+                  <p>Windows: double-click <code>start-genai-proxy.bat</code></p>
+                  <p>Mac: double-click <code>start-genai-proxy.command</code> (or right-click and choose Open the first time)</p>
+                  <p>If macOS blocks it from Terminal, run <code>chmod +x start-genai-proxy.command</code> once, then open it again.</p>
+                  <p>Manual command: <code>node genai-proxy.js --local-model</code></p>
+                </div>
+              </div>
+              <div class="ai-genai-mil-step">
+                <span class="ai-genai-mil-step-num">3</span>
+                <div>
+                  <strong>Trust the localhost certificate once</strong>
+                  <p>The first run will print the one-time certificate trust step for this workstation.</p>
+                </div>
+              </div>
+              <div class="ai-genai-mil-step">
+                <span class="ai-genai-mil-step-num">4</span>
+                <div>
+                  <strong>Return here and retry</strong>
+                  <p>Click <strong>Refresh Models</strong>, then <strong>Test Connection</strong>.</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div id="aiLocalModelSection" class="ai-local-model-section hidden">
