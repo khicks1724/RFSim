@@ -1120,6 +1120,11 @@ const dom = {
   shapeStyleEditVerticesBtn: document.querySelector("#shapeStyleEditVerticesBtn"),
   shapeStyleDoneBtn: document.querySelector("#shapeStyleDoneBtn"),
   shapeLabelToggle: document.querySelector("#shapeLabelToggle"),
+  pointMetaControls: document.querySelector("#pointMetaControls"),
+  pointNameInput: document.querySelector("#pointNameInput"),
+  pointPositionInput: document.querySelector("#pointPositionInput"),
+  pointPositionLabel: document.querySelector("#pointPositionLabel"),
+  pointRelocateBtn: document.querySelector("#pointRelocateBtn"),
   pointStyleControls: document.querySelector("#pointStyleControls"),
   shapeOnlyControls: document.querySelector("#shapeOnlyControls"),
   circleShapeControls: document.querySelector("#circleShapeControls"),
@@ -3522,6 +3527,16 @@ function wireEvents() {
     applyItemLabel(item);
     saveMapState();
   });
+  dom.pointRelocateBtn?.addEventListener("click", () => {
+    const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+    if (!item) return;
+    if (state.relocatingImportedItemId === item.id) {
+      finishImportedPointRelocation(null);
+    } else {
+      closeShapeStylePanel({ stopEditing: false, clearEditing: false });
+      startImportedPointRelocation(item.id);
+    }
+  });
   dom.shapeStyleCloseBtn?.addEventListener("click", () => closeShapeStylePanel());
   dom.pointSizeInput?.addEventListener("input", onPointStyleChanged);
   dom.circleCenterInput?.addEventListener("change", onCircleGeometryChanged);
@@ -3578,8 +3593,6 @@ function wireEvents() {
   dom.map.addEventListener("dragover", onMapFileDragOver);
   dom.map.addEventListener("dragleave", onMapFileDragLeave);
   dom.map.addEventListener("drop", onMapFileDrop);
-  dom.map.addEventListener("click", onPointPopupClick);
-  dom.map.addEventListener("keydown", onPointPopupKeyDown);
   dom.measurementUnitsSelect.addEventListener("change", onSettingsChanged);
   dom.themeSelect.addEventListener("change", onSettingsChanged);
   dom.coordinateSystemSelect.addEventListener("change", onSettingsChanged);
@@ -4260,7 +4273,7 @@ function applySettings() {
   dom.buildingMaterialPreset.value = state.settings.buildingMaterialPreset;
   updateCenterCrosshairVisibility();
   document.body.classList.toggle("theme-light", state.settings.theme === "light");
-  dom.coordsLabel.textContent = coordinateSystemStatusLabel(state.settings.coordinateSystem);
+  if (dom.coordsLabel) dom.coordsLabel.textContent = coordinateSystemStatusLabel(state.settings.coordinateSystem);
   updateWeatherUnitLabels();
   syncWeatherInputsFromState();
   updateCoordinateDisplays();
@@ -4309,11 +4322,14 @@ function coordinateSystemStatusLabel(system) {
 
 function updateCoordinateDisplays() {
   if (!state.gps.location) {
-    dom.mgrsValue.textContent = state.settings.coordinateSystem === "mgrs" ? "----------" : "--";
+    dom.mgrsValue?.classList.add("hidden");
+    if (dom.gpsStatusValue) dom.gpsStatusValue.parentElement?.classList.remove("hidden");
     return;
   }
-
   dom.mgrsValue.textContent = formatCoordinate(state.gps.location.lat, state.gps.location.lon, state.settings.coordinateSystem);
+  dom.mgrsValue?.classList.remove("hidden");
+  // Hide the status/chevron row when a fix is active — coordinate takes its place
+  if (dom.gpsStatusValue) dom.gpsStatusValue.parentElement?.classList.add("hidden");
 }
 
 function updateMapOverlayMetrics() {
@@ -13643,78 +13659,11 @@ function removeAsset(assetId, options = {}) {
 }
 
 function renderImportedItemPopup(item) {
-  if (item?.geometryType === "Point") {
-    return renderImportedPointPopup(item);
-  }
   const detailLines = buildImportedItemDetailLines(item);
   return `
     <strong>${escapeHtml(item.name)}</strong><br>
     ${escapeHtml(item.subtitle)}
     ${detailLines.length ? `<br>${detailLines.map((line) => escapeHtml(line)).join("<br>")}` : ""}
-  `;
-}
-
-function renderImportedPointPopup(item) {
-  const latLng = item?.layer?.getLatLng?.();
-  const markerStyle = normalizeDrawnPointMarkerStyle(item.markerStyle);
-  const relocating = state.relocatingImportedItemId === item.id;
-  const coordinateSystem = state.settings.coordinateSystem;
-  const coordinateLabel = coordinateSystem === "mgrs" ? "Grid" : coordinateSystem === "dms" ? "Position (DMS)" : "Position (Lat/Lon)";
-  const coordinatePlaceholder = coordinateSystem === "mgrs"
-    ? "11SNU5423234567"
-    : coordinateSystem === "dms"
-      ? '38°53\'23"N 77°02\'10"W'
-      : "34.123456, -116.123456";
-  const iconButtons = POINT_ICONS.map((icon) => `
-    <button
-      type="button"
-      class="point-popup-icon-btn${markerStyle.icon === icon ? " active" : ""}"
-      data-point-popup-action="select-icon"
-      data-icon="${escapeHtml(icon)}"
-      title="${escapeHtml(icon)}"
-      aria-label="${escapeHtml(icon)}"
-    >${buildDrawnPointSvg(icon, markerStyle.color, 18, markerStyle.outlineColor, markerStyle.outlineWidth)}</button>
-  `).join("");
-  return `
-    <div class="point-edit-popup" data-item-id="${escapeHtml(item.id)}">
-      <div class="point-edit-popup-title">Edit Point</div>
-      <label class="point-edit-popup-row">
-        <span>Name</span>
-        <input type="text" data-point-field="name" value="${escapeHtml(item.name ?? "")}">
-      </label>
-      <label class="point-edit-popup-row">
-        <span>${coordinateLabel}</span>
-        <input type="text" data-point-field="position" value="${Number.isFinite(latLng?.lat) && Number.isFinite(latLng?.lng) ? escapeHtml(formatCoordinate(latLng.lat, latLng.lng, coordinateSystem)) : ""}" placeholder="${escapeHtml(coordinatePlaceholder)}">
-      </label>
-      <div class="point-edit-popup-grid point-edit-popup-grid-compact">
-        <label class="point-edit-popup-row">
-          <span>Color</span>
-          <input type="color" data-point-field="color" value="${escapeHtml(markerStyle.color)}">
-        </label>
-        <label class="point-edit-popup-row">
-          <span>Size</span>
-          <input type="number" data-point-field="size" min="8" max="40" step="2" value="${markerStyle.size}">
-        </label>
-      </div>
-      <div class="point-edit-popup-grid point-edit-popup-grid-compact">
-        <label class="point-edit-popup-row">
-          <span>Outline</span>
-          <input type="color" data-point-field="outlineColor" value="${escapeHtml(markerStyle.outlineColor)}">
-        </label>
-        <label class="point-edit-popup-row">
-          <span>Outline Width</span>
-          <input type="number" data-point-field="outlineWidth" min="0" max="8" step="1" value="${markerStyle.outlineWidth}">
-        </label>
-      </div>
-      <div class="point-edit-popup-row">
-        <span>Icon</span>
-        <div class="point-edit-popup-icons">${iconButtons}</div>
-      </div>
-      <div class="point-edit-popup-actions">
-        <button type="button" class="ghost-button small" data-point-popup-action="relocate">${relocating ? "Cancel Relocate" : "Relocate"}</button>
-        <button type="button" class="primary-button small" data-point-popup-action="save">Apply</button>
-      </div>
-    </div>
   `;
 }
 
@@ -13757,122 +13706,8 @@ function getImportedItemById(itemId) {
   return state.importedItems.find((entry) => entry.id === itemId) ?? null;
 }
 
-function getPointPopupRoot(target) {
-  return target?.closest?.(".point-edit-popup") ?? null;
-}
-
-function getPointPopupItem(target) {
-  const root = getPointPopupRoot(target);
-  if (!root) {
-    return null;
-  }
-  return getImportedItemById(root.dataset.itemId);
-}
-
-function refreshImportedItemPopup(item, { keepOpen = true } = {}) {
-  if (!item?.layer?.setPopupContent) {
-    return;
-  }
-  item.layer.setPopupContent(renderImportedItemPopup(item));
-  if (keepOpen) {
-    item.layer.openPopup?.();
-  }
-}
-
-function applyPointPopupEdits(itemId, root) {
-  const item = getImportedItemById(itemId);
-  if (!item || item.geometryType !== "Point" || !root) {
-    return;
-  }
-
-  const name = root.querySelector('[data-point-field="name"]')?.value?.trim() ?? "";
-  const positionInput = root.querySelector('[data-point-field="position"]')?.value?.trim() ?? "";
-  const color = root.querySelector('[data-point-field="color"]')?.value ?? "#ffffff";
-  const rawSize = Number.parseFloat(root.querySelector('[data-point-field="size"]')?.value ?? "");
-  const outlineColor = root.querySelector('[data-point-field="outlineColor"]')?.value ?? "#0b1220";
-  const rawOutlineWidth = Number.parseFloat(root.querySelector('[data-point-field="outlineWidth"]')?.value ?? "");
-  const activeIcon = root.querySelector('.point-popup-icon-btn.active')?.dataset.icon ?? item.markerStyle?.icon ?? "dot";
-  const parsedPosition = parseCoordinateEditorInput(positionInput, state.settings.coordinateSystem);
-  const lat = parsedPosition?.lat;
-  const lng = parsedPosition?.lng;
-
-  if (!parsedPosition || !Number.isFinite(lat) || !Number.isFinite(lng)) {
-    setStatus(`Enter a valid ${coordinateSystemStatusLabel(state.settings.coordinateSystem)} coordinate.`, true);
-    return;
-  }
-
-  item.name = name || item.name || "Point";
-  item.markerStyle = normalizeDrawnPointMarkerStyle({
-    icon: activeIcon,
-    color,
-    size: Number.isFinite(rawSize) ? rawSize : undefined,
-    outlineColor,
-    outlineWidth: Number.isFinite(rawOutlineWidth) ? rawOutlineWidth : undefined,
-  });
-  item.lastModified = nowIso();
-
-  const nextLatLng = L.latLng(lat, lng);
-  item.layer.setLatLng(nextLatLng);
-  const icon = buildImportedPointIcon(item.markerStyle);
-  if (icon) {
-    item.layer.setIcon(icon);
-  }
-
-  applyItemLabel(item);
-  refreshImportedItemPopup(item);
-  renderMapContents();
-  syncCesiumEntities();
-  saveMapState();
-  setStatus(`Updated ${item.name}.`);
-}
-
-function onPointPopupClick(event) {
-  const actionEl = event.target.closest("[data-point-popup-action]");
-  if (!actionEl) {
-    return;
-  }
-
-  const item = getPointPopupItem(actionEl);
-  if (!item) {
-    return;
-  }
-
-  const root = getPointPopupRoot(actionEl);
-  const action = actionEl.dataset.pointPopupAction;
-  if (action === "select-icon") {
-    event.preventDefault();
-    root?.querySelectorAll(".point-popup-icon-btn").forEach((btn) => btn.classList.remove("active"));
-    actionEl.classList.add("active");
-    return;
-  }
-
-  if (action === "relocate") {
-    event.preventDefault();
-    if (state.relocatingImportedItemId === item.id) {
-      finishImportedPointRelocation(null);
-      refreshImportedItemPopup(item);
-    } else {
-      startImportedPointRelocation(item.id);
-    }
-    return;
-  }
-
-  if (action === "save") {
-    event.preventDefault();
-    applyPointPopupEdits(item.id, root);
-  }
-}
-
-function onPointPopupKeyDown(event) {
-  if (event.key !== "Enter") {
-    return;
-  }
-  const root = getPointPopupRoot(event.target);
-  if (!root) {
-    return;
-  }
-  event.preventDefault();
-  applyPointPopupEdits(root.dataset.itemId, root);
+function refreshImportedItemPopup(item) {
+  item?.layer?.setPopupContent?.(renderImportedItemPopup(item));
 }
 
 function measureLatLngPath(latLngs, closeRing = false) {
@@ -14411,11 +14246,16 @@ function openShapeStylePanel(item, anchorEl) {
   const isPoint = item.geometryType === "Point";
   const isCircle = Boolean(item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM)));
 
+  // Update panel title
+  if (dom.shapeStyleTitle) dom.shapeStyleTitle.textContent = isPoint ? "Edit Point" : "Edit Shape";
+
   // Toggle point vs shape controls
+  dom.pointMetaControls?.classList.toggle("hidden", !isPoint);
   dom.pointStyleControls?.classList.toggle("hidden", !isPoint);
   dom.shapeOnlyControls?.classList.toggle("hidden", isPoint);
   dom.circleShapeControls?.classList.toggle("hidden", !isCircle || isPoint);
   dom.shapeStyleEditVerticesBtn.style.display = (isPoint || isCircle) ? "none" : "";
+  if (dom.pointRelocateBtn) dom.pointRelocateBtn.classList.toggle("hidden", !isPoint);
 
   if (isPoint) {
     const ms = normalizeDrawnPointMarkerStyle(item.markerStyle);
@@ -14429,6 +14269,21 @@ function openShapeStylePanel(item, anchorEl) {
     dom.pointIconPicker?.querySelectorAll(".point-icon-btn").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.icon === ms.icon);
     });
+    // Populate name + position
+    if (dom.pointNameInput) dom.pointNameInput.value = item.name ?? "";
+    const coordinateSystem = state.settings.coordinateSystem;
+    if (dom.pointPositionLabel) {
+      dom.pointPositionLabel.textContent = coordinateSystem === "mgrs" ? "Grid" : coordinateSystem === "dms" ? "Position (DMS)" : "Position (Lat/Lon)";
+    }
+    if (dom.pointPositionInput) {
+      const latLng = item.layer?.getLatLng?.();
+      dom.pointPositionInput.value = (latLng && Number.isFinite(latLng.lat))
+        ? formatCoordinate(latLng.lat, latLng.lng, coordinateSystem)
+        : "";
+      dom.pointPositionInput.placeholder = coordinateSystem === "mgrs"
+        ? "11SNU5423234567"
+        : coordinateSystem === "dms" ? '38°53\'23"N 77°02\'10"W' : "34.123456, -116.123456";
+    }
   } else {
     const s = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType, { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color });
     dom.shapeColorInput.value = s.color;
@@ -14484,9 +14339,34 @@ function syncShapeVertexEditUi(item) {
   }
 }
 
+function applyPointPanelMetaEdits(item) {
+  if (!item || item.geometryType !== "Point") return;
+  // Apply name
+  const newName = dom.pointNameInput?.value?.trim();
+  if (newName) item.name = newName;
+  // Apply position
+  const posVal = dom.pointPositionInput?.value?.trim();
+  if (posVal) {
+    const parsed = parseCoordinateEditorInput(posVal, state.settings.coordinateSystem);
+    if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lng)) {
+      item.layer.setLatLng([parsed.lat, parsed.lng]);
+    }
+  }
+  item.lastModified = nowIso();
+  const icon = buildImportedPointIcon(item.markerStyle);
+  if (icon) item.layer.setIcon(icon);
+  applyItemLabel(item);
+  item.layer.setPopupContent?.(renderImportedItemPopup(item));
+  renderMapContents();
+  syncCesiumEntities();
+  saveMapState();
+}
+
 function closeShapeStylePanel({ stopEditing = true, clearEditing = true } = {}) {
-  dom.shapeStyleModal?.classList.add("hidden");
   const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  // Commit point name/position edits before closing
+  applyPointPanelMetaEdits(item);
+  dom.shapeStyleModal?.classList.add("hidden");
   if (item && stopEditing) {
     stopShapeVertexEdit(item);
   }

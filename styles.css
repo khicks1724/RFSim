@@ -629,7 +629,14 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 }
 
 .gps-status-button {
-  min-width: 0;
+  min-width: 150px;
+}
+
+.gps-coord-value {
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
 }
 
 .status-chip-action-row {
@@ -702,9 +709,6 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.status-chip-mgrs {
-  min-width: 130px;
-}
 
 .status-chip span {
   font-size: 0.68rem;
@@ -5221,15 +5225,24 @@ body.emitter-modal-open {
   transform: translate(-50%, -50%);
 }
 
-/* Settings panel label-default row — matches existing check-row style */
+/* Show Label checkbox row in the shape style panel */
 .shape-label-toggle-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 0 2px;
+  gap: 8px;
+  padding: 8px 16px;
   border-top: 1px solid var(--border);
-  margin-top: 6px;
   font-size: 0.82rem;
   color: var(--text-secondary, #a0aec0);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.shape-label-toggle-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent, #3b82f6);
+  cursor: pointer;
+  flex-shrink: 0;
 }
 

@@ -324,6 +324,7 @@
               <strong id="gpsStatusValue">Disconnected</strong>
               <span class="status-chip-chevron">&#9662;</span>
             </div>
+            <strong id="mgrsValue" class="gps-coord-value hidden">----------</strong>
           </button>
           <div id="gpsMenu" class="settings-menu gps-menu hidden">
             <div class="menu-title-row">
@@ -345,10 +346,6 @@
               Browser mode uses the Geolocation API. USB mode reads NMEA over Web Serial when supported. Direct gpsd access requires a local bridge service outside the browser sandbox.
             </p>
           </div>
-        </div>
-        <div class="status-chip status-chip-mgrs">
-          <span id="coordsLabel">MGRS</span>
-          <strong id="mgrsValue">----------</strong>
         </div>
         <button id="aiChatToggleBtn" class="status-chip status-chip-button ai-chat-toggle-btn" type="button" aria-label="Toggle AI chat panel">
           <span>AI Chat</span>
@@ -693,6 +690,18 @@
 
     <div class="shape-style-body">
 
+      <!-- Point-only: name + position -->
+      <div id="pointMetaControls" class="hidden">
+        <label class="shape-param-label">
+          <span>Name</span>
+          <input id="pointNameInput" type="text" placeholder="Point name">
+        </label>
+        <label class="shape-param-label">
+          <span id="pointPositionLabel">Grid</span>
+          <input id="pointPositionInput" type="text" placeholder="11SNU5423234567">
+        </label>
+      </div>
+
       <!-- Color — shared by point + shape -->
       <label class="shape-param-label">
         <span>Color</span>
@@ -766,13 +775,14 @@
       </div>
     </div>
 
-    <label class="shape-param-label shape-label-toggle-row">
-      <span>Show Label</span>
+    <label class="shape-label-toggle-row">
       <input id="shapeLabelToggle" type="checkbox">
+      <span>Show Label</span>
     </label>
 
     <div class="shape-style-footer button-row">
       <button id="shapeStyleEditVerticesBtn" type="button" class="ghost-button small">Edit Vertices</button>
+      <button id="pointRelocateBtn" type="button" class="ghost-button small hidden">Relocate</button>
       <button id="shapeStyleDoneBtn" type="button" class="primary-button small">Done</button>
     </div>
 
