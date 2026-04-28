@@ -115,6 +115,32 @@ function ansiColor(text, r, g, b) {
   return `\x1b[38;2;${r};${g};${b}m${text}${ANSI_RESET}`;
 }
 
+function renderRfSimTitle() {
+  if (!process.stdout.isTTY) return;
+
+  const lines = [
+    "██████╗ ███████╗    ███████╗██╗███╗   ███╗",
+    "██╔══██╗██╔════╝    ██╔════╝██║████╗ ████║",
+    "██████╔╝█████╗      ███████╗██║██╔████╔██║",
+    "██╔══██╗██╔══╝      ╚════██║██║██║╚██╔╝██║",
+    "██║  ██║██║         ███████║██║██║ ╚═╝ ██║",
+  ];
+  const colors = [
+    [0, 200, 255],
+    [0, 220, 210],
+    [40, 230, 120],
+    [255, 190, 40],
+    [255, 110, 0],
+  ];
+
+  console.log("");
+  lines.forEach((line, index) => {
+    const [r, g, b] = colors[index];
+    console.log(ansiColor(line, r, g, b));
+  });
+  console.log("");
+}
+
 function renderRfSimSpectrogram() {
   if (!process.stdout.isTTY) return;
 
@@ -444,6 +470,7 @@ function createRouter(enableLocalModel) {
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
 // HTTP server — GenAI.mil proxy
+renderRfSimTitle();
 renderRfSimSpectrogram();
 const httpServer = http.createServer(createRouter(false));
 startServer(httpServer, HTTP_PORT, "127.0.0.1", () => {
