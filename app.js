@@ -12770,9 +12770,20 @@ function renderMapContents() {
 }
 
 function onMapContentDragStart(event) {
-  event.dataTransfer.setData("text/plain", event.currentTarget.dataset.contentId);
+  const draggedId = event.currentTarget.dataset.contentId;
+  // If this item is part of a multi-selection, drag all selected items together
+  const isMulti = state.mcSelectMode && state.mcSelectedIds.size > 1 && state.mcSelectedIds.has(draggedId);
+  const payload = isMulti
+    ? JSON.stringify({ multi: true, ids: [...state.mcSelectedIds] })
+    : draggedId;
+  event.dataTransfer.setData("text/plain", payload);
   event.dataTransfer.effectAllowed = "move";
   event.currentTarget.classList.add("is-dragging");
+  if (isMulti) {
+    dom.mapContentsList.querySelectorAll(".map-content-item").forEach((row) => {
+      if (state.mcSelectedIds.has(row.dataset.contentId)) row.classList.add("is-dragging");
+    });
+  }
 }
 
 function onMapContentDragOver(event) {
@@ -12786,32 +12797,55 @@ function onMapContentDragLeave(event) {
 
 function onMapContentDrop(event) {
   event.preventDefault();
-  const draggedId = event.dataTransfer.getData("text/plain");
+  const raw = event.dataTransfer.getData("text/plain");
   const targetId = event.currentTarget.dataset.contentId;
   event.currentTarget.classList.remove("is-drop-target");
 
-  if (!draggedId || draggedId === targetId) {
-    return;
-  }
+  if (!raw) return;
 
-  const draggedIsFolder = draggedId.startsWith("folder:");
-  const targetIsFolder = targetId.startsWith("folder:");
-  if (draggedIsFolder) {
-    const nextParentFolderId = targetIsFolder ? targetId : getMapContentFolderId(targetId);
-    if (wouldCreateFolderCycle(draggedId, nextParentFolderId)) {
-      setStatus("Cannot move a folder into itself or one of its descendants.", true);
-      return;
+  // Detect multi-drag payload
+  let draggedIds;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.multi && Array.isArray(parsed.ids)) {
+      draggedIds = parsed.ids;
+    } else {
+      draggedIds = [raw];
     }
-    setFolderParentId(draggedId, nextParentFolderId);
-  } else if (targetIsFolder) {
-    setMapContentFolderId(draggedId, targetId);
-  } else {
-    setMapContentFolderId(draggedId, getMapContentFolderId(targetId));
+  } catch (_) {
+    draggedIds = [raw];
   }
 
-  const nextOrder = state.mapContentOrder.filter((id) => id !== draggedId);
+  const targetIsFolder = targetId.startsWith("folder:");
+  const targetFolderForNonFolder = targetIsFolder ? targetId : getMapContentFolderId(targetId);
+
+  // Determine where in the order to insert (before or after targetId)
+  let nextOrder = [...state.mapContentOrder];
+  // Remove all dragged items from order first
+  nextOrder = nextOrder.filter((id) => !draggedIds.includes(id));
   const targetIndex = nextOrder.indexOf(targetId);
-  nextOrder.splice(targetIndex, 0, draggedId);
+  const insertAt = targetIndex >= 0 ? targetIndex : nextOrder.length;
+
+  draggedIds.forEach((draggedId, i) => {
+    if (draggedId === targetId) return;
+
+    const draggedIsFolder = draggedId.startsWith("folder:");
+    if (draggedIsFolder) {
+      const nextParentFolderId = targetIsFolder ? targetId : getMapContentFolderId(targetId);
+      if (wouldCreateFolderCycle(draggedId, nextParentFolderId)) {
+        setStatus("Cannot move a folder into itself or one of its descendants.", true);
+        return;
+      }
+      setFolderParentId(draggedId, nextParentFolderId);
+    } else if (targetIsFolder) {
+      setMapContentFolderId(draggedId, targetId);
+    } else {
+      setMapContentFolderId(draggedId, targetFolderForNonFolder);
+    }
+
+    nextOrder.splice(insertAt + i, 0, draggedId);
+  });
+
   state.mapContentOrder = nextOrder;
   renderMapContents();
   saveMapState();
@@ -15843,7 +15877,7 @@ function _syncCesiumEntitiesImmediate() {
         outlineColor: C.Color.WHITE,
         outlineWidth: 1.5,
         heightReference: heightRef,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
       },
       label: {
         text: asset.name,
@@ -15851,7 +15885,7 @@ function _syncCesiumEntitiesImmediate() {
         font: "14px Bahnschrift",
         pixelOffset: new C.Cartesian2(0, -18),
         heightReference: heightRef,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
         style: C.LabelStyle.FILL_AND_OUTLINE,
         outlineWidth: 2,
         outlineColor: C.Color.BLACK,
@@ -15870,7 +15904,7 @@ function _syncCesiumEntitiesImmediate() {
         outlineColor: C.Color.WHITE,
         outlineWidth: 2,
         heightReference: C.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
       },
       label: {
         text: "User",
@@ -15878,7 +15912,7 @@ function _syncCesiumEntitiesImmediate() {
         fillColor: C.Color.WHITE,
         pixelOffset: new C.Cartesian2(0, -18),
         heightReference: C.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
         style: C.LabelStyle.FILL_AND_OUTLINE,
         outlineWidth: 2,
         outlineColor: C.Color.BLACK,
@@ -16051,7 +16085,7 @@ function _syncCesiumEntitiesImmediate() {
             outlineColor: C.Color.BLACK.withAlpha(0.6),
             outlineWidth: 1.5,
             heightReference: C.HeightReference.CLAMP_TO_GROUND,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            disableDepthTestDistance: 0,
           });
           if (showLabel && name) {
             entity.label = new C.LabelGraphics({
@@ -16065,7 +16099,7 @@ function _syncCesiumEntitiesImmediate() {
               horizontalOrigin: C.HorizontalOrigin.LEFT,
               verticalOrigin: C.VerticalOrigin.CENTER,
               heightReference: C.HeightReference.CLAMP_TO_GROUND,
-              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              disableDepthTestDistance: 0,
               showBackground: true,
               backgroundColor: C.Color.fromCssColorString("#0d1117").withAlpha(0.75),
               backgroundPadding: new C.Cartesian2(5, 3),
@@ -16154,7 +16188,7 @@ function _syncCesiumEntitiesImmediate() {
         outlineColor: C.Color.WHITE,
         outlineWidth: 2,
         heightReference: txRef,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
       },
       label: {
         text: `Tx ${index + 1}`,
@@ -16162,7 +16196,7 @@ function _syncCesiumEntitiesImmediate() {
         fillColor: C.Color.WHITE,
         pixelOffset: new C.Cartesian2(0, -18),
         heightReference: txRef,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
         style: C.LabelStyle.FILL_AND_OUTLINE,
         outlineWidth: 2,
         outlineColor: C.Color.BLACK,
@@ -16177,7 +16211,7 @@ function _syncCesiumEntitiesImmediate() {
         outlineColor: C.Color.WHITE,
         outlineWidth: 2,
         heightReference: rxRef,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
       },
       label: {
         text: `Rx ${index + 1}`,
@@ -16185,7 +16219,7 @@ function _syncCesiumEntitiesImmediate() {
         fillColor: C.Color.WHITE,
         pixelOffset: new C.Cartesian2(0, -18),
         heightReference: rxRef,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
         style: C.LabelStyle.FILL_AND_OUTLINE,
         outlineWidth: 2,
         outlineColor: C.Color.BLACK,
