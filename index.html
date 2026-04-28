@@ -24,10 +24,7 @@
 <body>
   <div id="authScreen" class="auth-screen hidden" aria-hidden="true">
     <div class="auth-rf-spectrum" aria-hidden="true">
-      <div class="auth-rf-grid"></div>
-      <div class="auth-rf-emissions auth-rf-emissions-a"></div>
-      <div class="auth-rf-emissions auth-rf-emissions-b"></div>
-      <div class="auth-rf-scanline"></div>
+      <canvas id="authWaterfall"></canvas>
     </div>
     <div class="auth-card">
       <h1 id="authScreenTitle">RF Sim</h1>
@@ -2142,5 +2139,150 @@
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
   <script src="./app-config.js"></script>
   <script type="module" src="./app.js?v=20260425-49"></script>
+  <script>
+  (function () {
+    const canvas = document.getElementById('authWaterfall');
+    const ctx = canvas.getContext('2d');
+    const SCROLL_SPEED = 0.35;
+    const NOISE_LEVEL = 0.13;
+    let emitters = [];
+    let scrollAccumulator = 0;
+    let time = 0;
+    let rafId = null;
+
+    function resize() {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      initEmitters();
+      prefillCanvas();
+    }
+
+    function initEmitters() {
+      emitters = [];
+      const count = Math.floor(canvas.width / 180);
+      for (let i = 0; i < count; i++) {
+        emitters.push({
+          x: Math.random() * canvas.width,
+          width: 8 + Math.random() * 40,
+          power: 0.4 + Math.random() * 0.6,
+          drift: (Math.random() - 0.5) * 0.1,
+          variationPhase: Math.random() * 1000,
+          variationSpeed: 0.002 + Math.random() * 0.01,
+        });
+      }
+    }
+
+    function getColor(v) {
+      v = Math.min(1, v);
+      if (v < 0.2) {
+        const t = v / 0.2;
+        return [Math.floor(8 + t * 20), Math.floor(t * 5), Math.floor(20 + t * 40)];
+      }
+      if (v < 0.4) return [70, 0, 110];
+      if (v < 0.6) return [130, 20, 20];
+      if (v < 0.8) return [170, 80, 0];
+      return [220, 180, 50];
+    }
+
+    function smoothNoise(x, t) {
+      return (
+        Math.sin(x * 0.05 + t) +
+        Math.sin(x * 0.013 + t * 0.7) +
+        Math.sin(x * 0.002 + t * 1.3)
+      ) / 3;
+    }
+
+    function generateRow(t) {
+      const row = new Float32Array(canvas.width);
+      for (let x = 0; x < row.length; x++) {
+        const grain = Math.random() * NOISE_LEVEL;
+        const smooth = (smoothNoise(x, t) * 0.5 + 0.5) * 0.06;
+        row[x] = grain + smooth;
+      }
+      emitters.forEach(e => {
+        e.x += e.drift;
+        if (e.x < 0) e.x = canvas.width;
+        if (e.x > canvas.width) e.x = 0;
+        e.variationPhase += e.variationSpeed;
+        const powerMod = Math.sin(e.variationPhase) * 0.5 + 0.5;
+        const center = Math.floor(e.x);
+        const half = Math.floor(e.width / 2);
+        for (let i = -half; i <= half; i++) {
+          const idx = center + i;
+          if (idx >= 0 && idx < row.length) {
+            const shape = Math.exp(-(i * i) / (2 * (half * 0.6) ** 2));
+            const texture = smoothNoise(idx, t) * 0.15;
+            row[idx] += e.power * (0.6 + 0.4 * powerMod) * shape + texture;
+          }
+        }
+      });
+      if (Math.random() < 0.01) {
+        const start = Math.floor(Math.random() * canvas.width);
+        const w = 40 + Math.random() * 120;
+        for (let i = 0; i < w; i++) {
+          const idx = start + i;
+          if (idx < row.length) row[idx] += 0.3 + Math.random() * 0.4;
+        }
+      }
+      return row;
+    }
+
+    function putRow(row, y) {
+      const img = ctx.createImageData(canvas.width, 1);
+      for (let x = 0; x < canvas.width; x++) {
+        const [r, g, b] = getColor(row[x]);
+        const i = x * 4;
+        img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, y);
+    }
+
+    function prefillCanvas() {
+      for (let y = canvas.height - 1; y >= 0; y--) {
+        time += 0.02;
+        putRow(generateRow(time), y);
+      }
+    }
+
+    function draw() {
+      scrollAccumulator += SCROLL_SPEED;
+      time += 0.02;
+      if (scrollAccumulator >= 1) {
+        const steps = Math.floor(scrollAccumulator);
+        scrollAccumulator -= steps;
+        for (let s = 0; s < steps; s++) {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          ctx.putImageData(imageData, 0, 1);
+          putRow(generateRow(time), 0);
+        }
+      }
+      rafId = requestAnimationFrame(draw);
+    }
+
+    const authScreen = document.getElementById('authScreen');
+    let started = false;
+
+    function start() {
+      if (started) return;
+      started = true;
+      resize();
+      draw();
+    }
+
+    // Start when auth screen becomes visible
+    const observer = new MutationObserver(() => {
+      if (!authScreen.classList.contains('hidden')) start();
+    });
+    observer.observe(authScreen, { attributes: true, attributeFilter: ['class'] });
+
+    window.addEventListener('resize', () => {
+      if (started) {
+        cancelAnimationFrame(rafId);
+        resize();
+        draw();
+      }
+    });
+  })();
+  </script>
 </body>
 </html>
