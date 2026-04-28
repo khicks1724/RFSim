@@ -7331,7 +7331,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  add-asset             → lat, lon OR contentId/contentRef/inside/nameRef + placementMode + distanceMeters, emitterType, name, force?, unit?, frequencyMHz, powerW, antennaHeightM, antennaGainDbi, receiverSensitivityDbm, systemLossDb, notes?",
     "  update-asset          → assetId (exact id), lat?, lon?, emitterType?, name?, force?, unit?, frequencyMHz?, powerW?, antennaHeightM?, antennaGainDbi?, receiverSensitivityDbm?, systemLossDb?",
     "  remove-asset          → assetId (exact id)",
-    "  place-marker          → lat, lon, name? — drops a single point marker dot on the map. USE THIS (not draw-shape) whenever the user asks to mark a city, location, landmark, or place a point/pin/marker.",
+    "  place-marker          → lat, lon, name?, color? (#hex), size? (pt, default 24, range 8–64), outlineColor? (#hex), outlineWidth? (px) — drops a styled point marker on the map. USE THIS (not draw-shape) whenever the user asks to mark a city, location, landmark, or place a point/pin/marker.",
     "  draw-shape            → shapeType (circle|rectangle|polyline|polygon), name?, color?, coordinates [{lat,lon}], radiusM? (circle only), fillOpacity?, weight?",
     "  update-shape          → shapeId or name (use exact item name or id), newName?, color?, fillOpacity?, weight?, lineStyle?, radiusM? (resize circle by regenerating from its center), coordinates?",
     "  remove-shape          → shapeId or name",
@@ -7551,15 +7551,15 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  • Each location gets its own place-marker action with lat, lon, and name.",
     "  • DO NOT use draw-shape with shapeType=circle for this — a circle draws a large filled area, not a point.",
     "Example — mark Tokyo and Osaka:",
-    '  {"type":"place-marker","lat":35.6762,"lon":139.6503,"name":"Tokyo"}',
-    '  {"type":"place-marker","lat":34.6937,"lon":135.5023,"name":"Osaka"}',
+    '  {"type":"place-marker","lat":35.6762,"lon":139.6503,"name":"Tokyo","color":"#ff3333","size":30}',
+    '  {"type":"place-marker","lat":34.6937,"lon":135.5023,"name":"Osaka","color":"#ff3333","size":30}',
     "",
     "GENERAL RULES:",
     "- ONLY use action type strings from the list above. 'radio', 'jammer', 'PRC-163' etc. are NOT action types — they are emitterType values inside add-asset.",
     "- ALWAYS use the exact `id` field from the assets array for assetId — never use name as ID.",
     "- For existing assets (in the assets[] list), use their id in run-simulation directly.",
     "- For assets placed THIS batch, use placedIndex.",
-    "- For place-marker: use lat, lon, name. One action per location. Never use draw-shape circle for this.",
+    "- For place-marker: use lat, lon, name, color (#hex), size (pt integer 8–64), outlineColor (#hex), outlineWidth (px). One action per location. Never use draw-shape circle for this.",
     "- For draw-shape circle: put center in coordinates[0], set radiusM.",
     "- Do not reference unavailable tools or external URLs.",
     "- If no action is needed, return an empty actions array.",
@@ -7601,11 +7601,11 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       '{"assistantMessage":"Drew route.","actions":[{"type":"draw-shape","shapeType":"polyline","name":"Route Blue","color":"#00ccff","weight":3,"coordinates":[{"lat":34.12,"lon":-116.55},{"lat":34.15,"lon":-116.52},{"lat":34.18,"lon":-116.50}]}]}',
       "",
       "To place a point/marker on a city or location (use place-marker, NOT draw-shape):",
-      '{"assistantMessage":"Placed markers on Tokyo and Osaka.","actions":[{"type":"place-marker","lat":35.6762,"lon":139.6503,"name":"Tokyo"},{"type":"place-marker","lat":34.6937,"lon":135.5023,"name":"Osaka"}]}',
+      '{"assistantMessage":"Placed markers on Tokyo and Osaka.","actions":[{"type":"place-marker","lat":35.6762,"lon":139.6503,"name":"Tokyo","color":"#ff3333","size":30},{"type":"place-marker","lat":34.6937,"lon":135.5023,"name":"Osaka","color":"#ff3333","size":30}]}',
       "",
       "PLACE-MARKER RULES:",
       "- Use place-marker (not draw-shape) whenever the user asks to mark a city, location, landmark, or place a point/pin/marker.",
-      "- Fields: lat (number), lon (number), name (string). One action per location.",
+      "- Fields: lat (number), lon (number), name (string), color (#hex), size (pt integer 8–64, default 24), outlineColor (#hex), outlineWidth (px). One action per location.",
       "- NEVER use draw-shape with shapeType=circle for this purpose.",
       "",
       "DRAW-SHAPE RULES:",
@@ -7642,7 +7642,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "If no map or simulation changes are needed, reply in plain text.",
       "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
       "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, place-marker, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, sample-terrain, generate-document.",
-      "place-marker: {\"type\":\"place-marker\",\"lat\":N,\"lon\":N,\"name\":\"string\"}. Use this — NOT draw-shape — whenever the user asks to mark a city, location, landmark, or place a point/pin/marker. One action per location. NEVER use draw-shape circle for this.",
+      "place-marker: {\"type\":\"place-marker\",\"lat\":N,\"lon\":N,\"name\":\"string\",\"color\":\"#hex\",\"size\":pt,\"outlineColor\":\"#hex\",\"outlineWidth\":px}. Use this — NOT draw-shape — whenever the user asks to mark a city, location, landmark, or place a point/pin/marker. color sets dot color, size sets dot size in pt (8–64, default 24). One action per location. NEVER use draw-shape circle for this.",
       "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: shapeType=circle, coordinates[0] is center, radiusM is radius. ALWAYS use this when user asks to draw/highlight a circle area, polygon, or line.",
       "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
       "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
@@ -8676,7 +8676,14 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       return "I couldn't place the marker because no valid coordinates were provided.";
     }
-    const markerStyle = { icon: "dot", color: action.color ?? "#ffffff", size: 24, outlineColor: "#0b1220", outlineWidth: 2 };
+    const rawSize = Number(action.size ?? action.sizePt ?? action.pointSize);
+    const markerStyle = {
+      icon: "dot",
+      color: typeof action.color === "string" ? action.color : "#ffffff",
+      size: Number.isFinite(rawSize) && rawSize > 0 ? Math.round(clamp(rawSize, 8, 64)) : 24,
+      outlineColor: typeof action.outlineColor === "string" ? action.outlineColor : "#0b1220",
+      outlineWidth: Number.isFinite(Number(action.outlineWidth)) ? Number(action.outlineWidth) : 2,
+    };
     const index = state.importedItems.filter((i) => i.drawn).length;
     const pointName = action.name ?? `Marker ${index + 1}`;
     addDrawnFeature({
