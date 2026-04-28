@@ -6732,9 +6732,6 @@ function summarizeGenAiMilErrors(errors, fallbackMessage) {
 }
 
 function shouldPreferHostedGenAiMilSiteProxy() {
-  if (state.session.token) {
-    return false;
-  }
   const { protocol, hostname } = window.location;
   if (!/^https?:$/.test(protocol)) {
     return false;
@@ -6816,7 +6813,7 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
       attemptErrors.push(error);
     }
   }
-  if (state.session.token && !models) {
+  if (shouldPreferHostedGenAiMilSiteProxy() && !models) {
     throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil model discovery failed through the hosted site relay.");
   }
   if (!models) {
@@ -6855,7 +6852,7 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
       return;
     }
     state.ai.status = "testing";
-    state.ai.statusMessage = state.session.token
+    state.ai.statusMessage = shouldPreferHostedGenAiMilSiteProxy()
       ? "Loading GenAI.mil models for this key, then validating the selected model through the site relay."
       : "Loading GenAI.mil models for this key, then validating the selected model.";
     syncAiUi();
@@ -7351,7 +7348,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
       attemptErrors.push(error);
     }
   }
-  if (state.session.token) {
+  if (shouldPreferHostedGenAiMilSiteProxy()) {
     throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed through the hosted site relay.");
   }
 
