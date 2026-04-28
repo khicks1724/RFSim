@@ -105,23 +105,33 @@ const aiGenAiMilChatSchema = z.object({
 const GENAI_MIL_BASE_URL = "https://api.genai.mil/v1";
 
 async function relayGenAiMil(response, upstreamUrl, { apiKey, body, method = "POST" }) {
+  const keySnippet = apiKey ? `${apiKey.slice(0, 10)}...` : "(none)";
+  const bodyJson = body ? JSON.stringify(body) : null;
+  console.log(`[GenAI relay] ${method} ${upstreamUrl}`);
+  console.log(`[GenAI relay] key: ${keySnippet}`);
+  if (bodyJson) console.log(`[GenAI relay] body: ${bodyJson.slice(0, 300)}`);
+
   try {
     const upstream = await fetch(upstreamUrl, {
       method,
       headers: {
         "Authorization": `Bearer ${apiKey}`,
-        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(bodyJson ? { "Content-Type": "application/json" } : {}),
       },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+      ...(bodyJson ? { body: bodyJson } : {}),
     });
 
     const text = await upstream.text();
+    console.log(`[GenAI relay] status: ${upstream.status}`);
+    console.log(`[GenAI relay] response: ${text.slice(0, 300)}`);
+
     response.status(upstream.status);
     if (upstream.headers.get("content-type")) {
       response.set("Content-Type", upstream.headers.get("content-type"));
     }
     response.send(text);
   } catch (error) {
+    console.error(`[GenAI relay] fetch error: ${error.message}`);
     response.status(502).json({ error: error.message || "GenAI.mil relay request failed." });
   }
 }
@@ -132,6 +142,29 @@ app.get("/api/health", async (_request, response) => {
     response.json({ ok: true, database: "reachable" });
   } catch (error) {
     response.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Diagnostic: test raw reachability of api.genai.mil (no key needed)
+app.get("/api/ai/genai-mil/ping", async (_request, response) => {
+  try {
+    const res = await fetch("https://api.genai.mil/v1/models", {
+      method: "GET",
+      headers: { "Authorization": "Bearer test_ping_no_key" },
+      signal: AbortSignal.timeout(8000),
+    });
+    const text = await res.text();
+    response.json({
+      reachable: true,
+      status: res.status,
+      contentType: res.headers.get("content-type"),
+      body: text.slice(0, 500),
+    });
+  } catch (error) {
+    response.json({
+      reachable: false,
+      error: error.message,
+    });
   }
 });
 
@@ -548,39 +581,53 @@ app.post("/api/analytics/event", authRequired, async (request, response) => {
 
 app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, response) => {
   try {
+    const analyticsAvailable = await query("select to_regclass('public.analytics_event') as analytics_table");
+    const hasAnalyticsTable = Boolean(analyticsAvailable.rows[0]?.analytics_table);
+
     const [usersRes, eventsRes, aiRes, projectsRes, dailyRes] = await Promise.all([
-      // All registered users with project/visit counts
-      query(`
-        select u.id, u.full_name as username, u.email, u.created_at,
-               count(distinct p.id)::int                               as project_count,
-               count(distinct case when e.event_type='visit' then e.id end)::int as visit_count,
-               max(e.created_at)                                       as last_seen
-        from app_user u
-        left join project p on p.owner_user_id = u.id
-        left join analytics_event e on e.user_id = u.id
-        group by u.id
-        order by last_seen desc nulls last
-      `),
-      // Recent events (last 500)
-      query(`
-        select e.id, e.username, e.event_type, e.provider, e.model,
-               e.input_tokens, e.output_tokens, e.meta, e.created_at
-        from analytics_event e
-        order by e.created_at desc
-        limit 500
-      `),
-      // AI token totals by user + provider
-      query(`
-        select username, provider, model,
-               count(*)::int                        as request_count,
-               coalesce(sum(input_tokens),0)::int   as total_input,
-               coalesce(sum(output_tokens),0)::int  as total_output
-        from analytics_event
-        where event_type = 'ai_request'
-        group by username, provider, model
-        order by total_input + total_output desc
-      `),
-      // Projects per user (name + dates)
+      hasAnalyticsTable
+        ? query(`
+            select u.id, u.full_name as username, u.email, u.created_at,
+                   count(distinct p.id)::int                               as project_count,
+                   count(distinct case when e.event_type='visit' then e.id end)::int as visit_count,
+                   max(e.created_at)                                       as last_seen
+            from app_user u
+            left join project p on p.owner_user_id = u.id
+            left join analytics_event e on e.user_id = u.id
+            group by u.id
+            order by last_seen desc nulls last, u.created_at desc
+          `)
+        : query(`
+            select u.id, u.full_name as username, u.email, u.created_at,
+                   count(distinct p.id)::int as project_count,
+                   0::int                    as visit_count,
+                   null::timestamptz         as last_seen
+            from app_user u
+            left join project p on p.owner_user_id = u.id
+            group by u.id
+            order by u.created_at desc
+          `),
+      hasAnalyticsTable
+        ? query(`
+            select e.id, e.username, e.event_type, e.provider, e.model,
+                   e.input_tokens, e.output_tokens, e.meta, e.created_at
+            from analytics_event e
+            order by e.created_at desc
+            limit 500
+          `)
+        : Promise.resolve({ rows: [] }),
+      hasAnalyticsTable
+        ? query(`
+            select username, provider, model,
+                   count(*)::int                        as request_count,
+                   coalesce(sum(input_tokens),0)::int   as total_input,
+                   coalesce(sum(output_tokens),0)::int  as total_output
+            from analytics_event
+            where event_type = 'ai_request'
+            group by username, provider, model
+            order by total_input + total_output desc
+          `)
+        : Promise.resolve({ rows: [] }),
       query(`
         select u.full_name as username, p.name, p.created_at, p.updated_at,
                (select count(*) from project_snapshot s where s.project_id = p.id)::int as snapshot_count
@@ -588,17 +635,18 @@ app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, re
         join app_user u on u.id = p.owner_user_id
         order by p.updated_at desc
       `),
-      // Daily visit counts (last 60 days)
-      query(`
-        select date_trunc('day', created_at)::date as day,
-               count(distinct user_id)::int         as unique_users,
-               count(*)::int                        as total_visits
-        from analytics_event
-        where event_type = 'visit'
-          and created_at >= now() - interval '60 days'
-        group by 1
-        order by 1
-      `),
+      hasAnalyticsTable
+        ? query(`
+            select date_trunc('day', created_at)::date as day,
+                   count(distinct user_id)::int         as unique_users,
+                   count(*)::int                        as total_visits
+            from analytics_event
+            where event_type = 'visit'
+              and created_at >= now() - interval '60 days'
+            group by 1
+            order by 1
+          `)
+        : Promise.resolve({ rows: [] }),
     ]);
 
     response.json({
@@ -609,10 +657,6 @@ app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, re
       daily:    dailyRes.rows,
     });
   } catch (error) {
-    if (error.code === "42P01") {
-      response.json({ users: [], events: [], aiTokens: [], projects: [], daily: [] });
-      return;
-    }
     response.status(500).json({ error: error.message });
   }
 });

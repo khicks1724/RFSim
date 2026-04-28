@@ -2090,6 +2090,7 @@ async function hydrateSession() {
     state.session.user = payload.user;
     await loadProjectList();
     await loadServerAiProviderSettings();
+    fireAnalyticsEvent({ event_type: "visit" });
   } catch (error) {
     if (/Invalid token|Authentication required|User not found/i.test(error.message)) {
       clearSessionState();
@@ -6732,10 +6733,11 @@ function summarizeGenAiMilErrors(errors, fallbackMessage) {
 }
 
 function shouldPreferHostedGenAiMilSiteProxy() {
-  // Never use the nginx site-proxy path — it's not deployed.
-  // Always use the backend relay (/api/ai/genai-mil/*) when signed in,
-  // or the local proxy on localhost when not signed in.
-  return false;
+  // Use the nginx /genai-mil/v1/ proxy when running on the deployed site (non-localhost).
+  // nginx forwards directly to api.genai.mil — no Node backend hop needed.
+  const { protocol, hostname } = window.location;
+  if (!/^https?:$/.test(protocol)) return false;
+  return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1";
 }
 
 function shouldAllowLocalGenAiMilProxyFallback() {
@@ -6778,10 +6780,18 @@ async function fetchGenAiMilModelsFrom(url, apiKey) {
 }
 
 async function fetchGenAiMilModelsFromBackend(apiKey) {
-  const payload = await apiFetch(GENAI_MIL_BACKEND_MODELS_PATH, {
+  const relayRes = await fetch(`${API_BASE_URL}${GENAI_MIL_BACKEND_MODELS_PATH}`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ apiKey }),
   });
+  const bodyText = await relayRes.text();
+  if (!relayRes.ok) {
+    let msg;
+    try { msg = JSON.parse(bodyText)?.error?.message || JSON.parse(bodyText)?.detail || JSON.parse(bodyText)?.message; } catch {}
+    throw new Error(msg || `GenAI.mil models failed (${relayRes.status}): ${bodyText.slice(0, 200)}`);
+  }
+  const payload = JSON.parse(bodyText);
   const models = parseGenAiMilModelsPayload(payload);
   if (!models.length) {
     throw new Error("GenAI.mil returned no usable models for this key.");
@@ -7321,40 +7331,26 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
     }
   }
 
-  // Always use the backend relay first — works for all users, no session token needed
+  // Use the backend relay — raw fetch so we get the real upstream error text
   try {
-    const parsed = await apiFetch(GENAI_MIL_BACKEND_CHAT_PATH, {
+    const relayRes = await fetch(`${API_BASE_URL}${GENAI_MIL_BACKEND_CHAT_PATH}`, {
       method: "POST",
-      body: JSON.stringify({
-        apiKey: state.ai.apiKey,
-        ...payload,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: state.ai.apiKey, ...payload }),
     });
-    const content = parsed?.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error("GenAI.mil returned an empty completion.");
+    const bodyText = await relayRes.text();
+    if (!relayRes.ok) {
+      // bodyText is the raw GenAI.mil error — show it directly
+      let msg;
+      try { msg = JSON.parse(bodyText)?.error?.message || JSON.parse(bodyText)?.detail || JSON.parse(bodyText)?.message; } catch {}
+      throw new Error(msg || `GenAI.mil request failed (${relayRes.status}): ${bodyText.slice(0, 200)}`);
     }
+    const parsed = JSON.parse(bodyText);
+    const content = parsed?.choices?.[0]?.message?.content;
+    if (!content) throw new Error("GenAI.mil returned an empty completion.");
     return content;
   } catch (error) {
     attemptErrors.push(error);
-    // Local dev fallback only
-    if (shouldAllowLocalGenAiMilProxyFallback()) {
-      try {
-        const response = await callGenAiMilEndpoint(GENAI_MIL_PROXY_ENDPOINT, state.ai.apiKey, payload);
-        const bodyText = await response.text();
-        if (!response.ok) {
-          throw parseGenAiMilApiError(response.status, bodyText, `GenAI.mil request failed (HTTP ${response.status}).`);
-        }
-        const localParsed = JSON.parse(bodyText);
-        const content = localParsed?.choices?.[0]?.message?.content;
-        if (!content) throw new Error("GenAI.mil returned an empty completion.");
-        state.ai.statusMessage = "GenAI.mil connected through the local proxy on 127.0.0.1:8787.";
-        syncAiUi();
-        return content;
-      } catch (proxyError) {
-        attemptErrors.push(proxyError);
-      }
-    }
     throw summarizeGenAiMilErrors(attemptErrors, "GenAI.mil request failed.");
   }
 
