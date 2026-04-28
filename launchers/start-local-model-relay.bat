@@ -40,8 +40,6 @@ echo  Leave this window open while using the hosted site.
 echo  Using Node.js at: %NODE_EXE%
 echo.
 
-call :printArt
-
 "%NODE_EXE%" "%PROXY_SCRIPT%" --local-model
 
 set "EXIT_CODE=%ERRORLEVEL%"
@@ -76,12 +74,3 @@ for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$cmd = Get-Co
     goto :eof
 )
 goto :eof
-
-:printArt
-call :printFlag
-echo.
-exit /b 0
-
-:printFlag
-powershell -NoProfile -Command "$b='Blue'; $r='Red'; $w='White'; Write-Host '* * * * * * *' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $w; Write-Host ' * * * * * * ' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $r; Write-Host '* * * * * * *' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $w; Write-Host ' * * * * * * ' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $r; Write-Host '* * * * * * *' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $w; Write-Host ' * * * * * * ' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w; Write-Host '=================================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w; Write-Host '=================================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w; Write-Host '=================================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w"
-exit /b 0

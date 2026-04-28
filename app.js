@@ -7331,7 +7331,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  add-asset             → lat, lon OR contentId/contentRef/inside/nameRef + placementMode + distanceMeters, emitterType, name, force?, unit?, frequencyMHz, powerW, antennaHeightM, antennaGainDbi, receiverSensitivityDbm, systemLossDb, notes?",
     "  update-asset          → assetId (exact id), lat?, lon?, emitterType?, name?, force?, unit?, frequencyMHz?, powerW?, antennaHeightM?, antennaGainDbi?, receiverSensitivityDbm?, systemLossDb?",
     "  remove-asset          → assetId (exact id)",
-    "  draw-shape            → shapeType (circle|rectangle|polyline|polygon), name?, color?, fillOpacity?, weight?, coordinates [{lat,lon}], radiusM? (circle only)",
+    "  place-marker          → lat, lon, name? — drops a single point marker dot on the map. USE THIS (not draw-shape) whenever the user asks to mark a city, location, landmark, or place a point/pin/marker.",
+    "  draw-shape            → shapeType (circle|rectangle|polyline|polygon), name?, color?, coordinates [{lat,lon}], radiusM? (circle only), fillOpacity?, weight?",
     "  update-shape          → shapeId or name (use exact item name or id), newName?, color?, fillOpacity?, weight?, lineStyle?, radiusM? (resize circle by regenerating from its center), coordinates?",
     "  remove-shape          → shapeId or name",
     "  set-planning-parameters → txAssetId?, rxAssetId?, gridMeters?, minSeparation?, enemyWeight?, separationWeight?, floorM?, ceilingM?",
@@ -7542,11 +7543,23 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  generate-document action: use for ALL of the above. Never just write the document in assistantMessage — always use the action so it renders in a copyable document block.",
     "  For complex requests (e.g. PACE + SOI + relay drawing), emit multiple generate-document actions and map actions together.",
     "",
+    "═══════════════════════════════════════",
+    "PLACING POINT MARKERS ON THE MAP:",
+    "═══════════════════════════════════════",
+    "When the user says 'place a point', 'drop a marker', 'mark cities', 'put a pin', or any similar request to mark geographic locations:",
+    "  • Use the place-marker action type — NOT draw-shape, NOT add-asset.",
+    "  • Each location gets its own place-marker action with lat, lon, and name.",
+    "  • DO NOT use draw-shape with shapeType=circle for this — a circle draws a large filled area, not a point.",
+    "Example — mark Tokyo and Osaka:",
+    '  {"type":"place-marker","lat":35.6762,"lon":139.6503,"name":"Tokyo"}',
+    '  {"type":"place-marker","lat":34.6937,"lon":135.5023,"name":"Osaka"}',
+    "",
     "GENERAL RULES:",
     "- ONLY use action type strings from the list above. 'radio', 'jammer', 'PRC-163' etc. are NOT action types — they are emitterType values inside add-asset.",
     "- ALWAYS use the exact `id` field from the assets array for assetId — never use name as ID.",
     "- For existing assets (in the assets[] list), use their id in run-simulation directly.",
     "- For assets placed THIS batch, use placedIndex.",
+    "- For place-marker: use lat, lon, name. One action per location. Never use draw-shape circle for this.",
     "- For draw-shape circle: put center in coordinates[0], set radiusM.",
     "- Do not reference unavailable tools or external URLs.",
     "- If no action is needed, return an empty actions array.",
@@ -7587,6 +7600,14 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "To draw a polyline:",
       '{"assistantMessage":"Drew route.","actions":[{"type":"draw-shape","shapeType":"polyline","name":"Route Blue","color":"#00ccff","weight":3,"coordinates":[{"lat":34.12,"lon":-116.55},{"lat":34.15,"lon":-116.52},{"lat":34.18,"lon":-116.50}]}]}',
       "",
+      "To place a point/marker on a city or location (use place-marker, NOT draw-shape):",
+      '{"assistantMessage":"Placed markers on Tokyo and Osaka.","actions":[{"type":"place-marker","lat":35.6762,"lon":139.6503,"name":"Tokyo"},{"type":"place-marker","lat":34.6937,"lon":135.5023,"name":"Osaka"}]}',
+      "",
+      "PLACE-MARKER RULES:",
+      "- Use place-marker (not draw-shape) whenever the user asks to mark a city, location, landmark, or place a point/pin/marker.",
+      "- Fields: lat (number), lon (number), name (string). One action per location.",
+      "- NEVER use draw-shape with shapeType=circle for this purpose.",
+      "",
       "DRAW-SHAPE RULES:",
       "- shapeType must be: circle, rectangle, polyline, or polygon.",
       "- circle: coordinates[0] is the center point. radiusM is radius in meters (e.g. 2000 for 2 km).",
@@ -7594,7 +7615,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "- color is a hex color string like #0077ff (blue), #ff4444 (red), #00cc44 (green), #ffaa00 (orange).",
       "- fillOpacity is 0.0 to 1.0 (default 0.2).",
       "- weight is line width in pixels (default 2).",
-      "- ALWAYS use draw-shape when the user asks to draw, mark, or highlight a circle, polygon, or line on the map.",
+      "- ALWAYS use draw-shape when the user asks to draw, mark, or highlight a circle, polygon, line, or point on the map.",
       "",
       "RULES:",
       "- Use contentRef or contentId with placementMode when the user names an existing map area. Omit lat/lon in that case.",
@@ -7620,8 +7641,9 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "Answer briefly and precisely.",
       "If no map or simulation changes are needed, reply in plain text.",
       "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
-      "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, sample-terrain, generate-document.",
-      "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: coordinates[0] is center, radiusM is radius in meters. ALWAYS use this when user asks to draw/mark/highlight a circle, polygon, or line.",
+      "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, place-marker, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, sample-terrain, generate-document.",
+      "place-marker: {\"type\":\"place-marker\",\"lat\":N,\"lon\":N,\"name\":\"string\"}. Use this — NOT draw-shape — whenever the user asks to mark a city, location, landmark, or place a point/pin/marker. One action per location. NEVER use draw-shape circle for this.",
+      "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: shapeType=circle, coordinates[0] is center, radiusM is radius. ALWAYS use this when user asks to draw/highlight a circle area, polygon, or line.",
       "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
       "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
       "Use exact ids from the scenario summary.",
@@ -8648,6 +8670,25 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     return nextEnabled ? "Switched to 3D view." : "Switched to 2D view.";
   }
 
+  if (action.type === "place-marker") {
+    const lat = Number(action.lat);
+    const lon = Number(action.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return "I couldn't place the marker because no valid coordinates were provided.";
+    }
+    const markerStyle = { icon: "dot", color: action.color ?? "#ffffff", size: 24, outlineColor: "#0b1220", outlineWidth: 2 };
+    const index = state.importedItems.filter((i) => i.drawn).length;
+    const pointName = action.name ?? `Marker ${index + 1}`;
+    addDrawnFeature({
+      name: pointName,
+      geometryType: "Point",
+      coordinates: [lat, lon],
+      properties: {},
+      markerStyle,
+    });
+    return `Placed marker "${pointName}" at ${lat.toFixed(5)}, ${lon.toFixed(5)}.`;
+  }
+
   if (action.type === "draw-shape") {
     const rawCoords = Array.isArray(action.coordinates) ? action.coordinates : [];
     if (rawCoords.length === 0) return "I couldn't draw the shape because no coordinates were provided.";
@@ -8662,7 +8703,20 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const shapeType = (action.shapeType ?? "polygon").toLowerCase();
     let geometryType, coords, labelPrefix;
 
-    if (shapeType === "circle") {
+    if (shapeType === "point" || shapeType === "marker") {
+      const pt = toLatLng(rawCoords[0]);
+      const markerStyle = { icon: "dot", color: action.color ?? "#ffffff", size: 24, outlineColor: "#0b1220", outlineWidth: 2 };
+      const index = state.importedItems.filter((i) => i.drawn).length;
+      const pointName = action.name ?? `Point ${index + 1}`;
+      addDrawnFeature({
+        name: pointName,
+        geometryType: "Point",
+        coordinates: [pt.lat, pt.lng],
+        properties: {},
+        markerStyle,
+      });
+      return `Placed point marker "${pointName}" at ${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}.`;
+    } else if (shapeType === "circle") {
       const center = toLatLng(rawCoords[0]);
       const radiusM = Number(action.radiusM) || 1000;
       coords = circleToPolygonLatLngs(center, radiusM).map((p) => [p[0], p[1]]);
@@ -10679,15 +10733,35 @@ function exportAssetsGeoJson() {
   setStatus("GeoJSON exported.");
 }
 
+function getExportProjectSlug() {
+  const activeProject = state.session.projects?.find((p) => p.id === state.session.activeProjectId);
+  const projectName = activeProject?.name || "export";
+  const safe = projectName.replace(/[^a-zA-Z0-9_\- ]/g, "").trim().replace(/\s+/g, "_");
+  const now = new Date();
+  const pad = (n, w = 2) => String(n).padStart(w, "0");
+  const dtg = `${pad(now.getDate())}${pad(now.getMonth() + 1)}${String(now.getFullYear()).slice(2)}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return `${safe}_${dtg}`;
+}
+
 async function exportAssetsKml(asKmz) {
-  if (!state.assets.length) {
-    setStatus("No emitters to export.", true);
+  const selectedIds = state.mcSelectMode && state.mcSelectedIds.size > 0 ? new Set(state.mcSelectedIds) : null;
+
+  const assetsToExport = selectedIds
+    ? state.assets.filter((a) => selectedIds.has(`asset:${a.id}`))
+    : state.assets;
+  const shapesToExport = selectedIds
+    ? state.importedItems.filter((i) => i.layer && selectedIds.has(`imported:${i.id}`))
+    : state.importedItems.filter((i) => i.layer);
+
+  if (!assetsToExport.length && !shapesToExport.length) {
+    setStatus("Nothing to export.", true);
     return;
   }
 
-  const kml = buildKmlDocument();
+  const slug = getExportProjectSlug();
+  const kml = buildKmlDocument(assetsToExport, shapesToExport);
   if (!asKmz) {
-    downloadBlob(new Blob([kml], { type: "application/vnd.google-earth.kml+xml" }), `emitters-${timestampSlug()}.kml`);
+    downloadBlob(new Blob([kml], { type: "application/vnd.google-earth.kml+xml" }), `${slug}.kml`);
     setStatus("KML exported.");
     return;
   }
@@ -10695,7 +10769,7 @@ async function exportAssetsKml(asKmz) {
   const zip = new window.JSZip();
   zip.file("doc.kml", kml);
   const blob = await zip.generateAsync({ type: "blob" });
-  downloadBlob(blob, `emitters-${timestampSlug()}.kmz`);
+  downloadBlob(blob, `${slug}.kmz`);
   setStatus("KMZ exported.");
 }
 
@@ -10704,7 +10778,7 @@ async function exportAssetsZip() {
     setStatus("No emitters to export.", true);
     return;
   }
-  const slug = timestampSlug();
+  const slug = getExportProjectSlug();
   const featureCollection = {
     type: "FeatureCollection",
     features: state.assets.map((asset) => ({
@@ -10714,59 +10788,72 @@ async function exportAssetsZip() {
     })),
   };
   const zip = new window.JSZip();
-  zip.file(`emitters-${slug}.geojson`, JSON.stringify(featureCollection, null, 2));
-  zip.file(`emitters-${slug}.kml`, buildKmlDocument());
+  zip.file(`${slug}.geojson`, JSON.stringify(featureCollection, null, 2));
+  zip.file(`${slug}.kml`, buildKmlDocument());
   const blob = await zip.generateAsync({ type: "blob" });
-  downloadBlob(blob, `emitters-${slug}.zip`);
+  downloadBlob(blob, `${slug}.zip`);
   setStatus("ZIP exported.");
 }
 
-function buildKmlDocument() {
-  const placemarks = state.assets.map((asset) => {
+function buildKmlDocument(assets = state.assets, shapes = state.importedItems.filter((i) => i.layer)) {
+  const assetPlacemarks = assets.map((asset) => {
     const kmlColor = hexToKmlColor(asset.color || FORCE_COLORS[asset.force]);
     const fields = [
-      ["id", asset.id],
-      ["name", asset.name],
-      ["unit", asset.unit],
-      ["type", asset.type],
-      ["force", asset.force],
-      ["frequencyMHz", asset.frequencyMHz],
-      ["powerW", asset.powerW],
-      ["antennaHeightM", asset.antennaHeightM],
-      ["antennaGainDbi", asset.antennaGainDbi],
-      ["receiverSensitivityDbm", asset.receiverSensitivityDbm],
-      ["systemLossDb", asset.systemLossDb],
-      ["icon", asset.icon],
-      ["color", asset.color],
-      ["notes", asset.notes],
-    ]
-      .map(([name, value]) => `<Data name="${escapeXml(String(name))}"><value>${escapeXml(String(value ?? ""))}</value></Data>`)
-      .join("");
-
-    return `
-      <Placemark>
+      ["id", asset.id], ["name", asset.name], ["unit", asset.unit], ["type", asset.type],
+      ["force", asset.force], ["frequencyMHz", asset.frequencyMHz], ["powerW", asset.powerW],
+      ["antennaHeightM", asset.antennaHeightM], ["antennaGainDbi", asset.antennaGainDbi],
+      ["receiverSensitivityDbm", asset.receiverSensitivityDbm], ["systemLossDb", asset.systemLossDb],
+      ["icon", asset.icon], ["color", asset.color], ["notes", asset.notes],
+    ].map(([n, v]) => `<Data name="${escapeXml(String(n))}"><value>${escapeXml(String(v ?? ""))}</value></Data>`).join("");
+    return `<Placemark>
         <name>${escapeXml(asset.name)}</name>
         <description>${escapeXml(asset.notes || "")}</description>
-        <Style>
-          <IconStyle>
-            <color>${kmlColor}</color>
-            <scale>1.1</scale>
-          </IconStyle>
-          <LabelStyle>
-            <scale>0.9</scale>
-          </LabelStyle>
-        </Style>
+        <Style><IconStyle><color>${kmlColor}</color><scale>1.1</scale></IconStyle><LabelStyle><scale>0.9</scale></LabelStyle></Style>
         <ExtendedData>${fields}</ExtendedData>
         <Point><coordinates>${asset.lon},${asset.lat},0</coordinates></Point>
-      </Placemark>
-    `;
-  }).join("");
+      </Placemark>`;
+  });
+
+  const shapePlacemarks = shapes.map((item) => {
+    const color = item.shapeStyle?.color || item.markerStyle?.color || "#ffffff";
+    const kmlColor = hexToKmlColor(color);
+    const fillOpacity = item.shapeStyle?.fillOpacity ?? 0.2;
+    const kmlFillOpacity = Math.round(fillOpacity * 255).toString(16).padStart(2, "0");
+    const weight = item.shapeStyle?.weight ?? 2;
+    let geometryKml = "";
+    try {
+      if (item.geometryType === "Point") {
+        const ll = item.layer.getLatLng();
+        geometryKml = `<Point><coordinates>${ll.lng},${ll.lat},0</coordinates></Point>`;
+      } else if (item.geometryType === "LineString") {
+        const pts = item.layer.getLatLngs().map((ll) => `${ll.lng},${ll.lat},0`).join(" ");
+        geometryKml = `<LineString><tessellate>1</tessellate><coordinates>${pts}</coordinates></LineString>`;
+      } else {
+        const rings = item.layer.getLatLngs();
+        const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+        const pts = outer.map((ll) => `${ll.lng},${ll.lat},0`).join(" ");
+        geometryKml = `<Polygon><outerBoundaryIs><LinearRing><tessellate>1</tessellate><coordinates>${pts}</coordinates></LinearRing></outerBoundaryIs></Polygon>`;
+      }
+    } catch (_) { return ""; }
+    const styleKml = item.geometryType === "Point"
+      ? `<Style><IconStyle><color>${kmlColor}</color><scale>0.8</scale></IconStyle><LabelStyle><scale>0.8</scale></LabelStyle></Style>`
+      : `<Style><LineStyle><color>${kmlColor}</color><width>${weight}</width></LineStyle><PolyStyle><color>${kmlFillOpacity}${hexToKmlColor(color).slice(2)}</color></PolyStyle></Style>`;
+    return `<Placemark>
+        <name>${escapeXml(item.name || "Shape")}</name>
+        ${styleKml}
+        ${geometryKml}
+      </Placemark>`;
+  }).filter(Boolean);
+
+  const activeProject = state.session.projects?.find((p) => p.id === state.session.activeProjectId);
+  const docName = activeProject?.name || "Export";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>Emitter Export</name>
-    ${placemarks}
+    <name>${escapeXml(docName)}</name>
+    ${assetPlacemarks.join("\n    ")}
+    ${shapePlacemarks.join("\n    ")}
   </Document>
 </kml>`;
 }
