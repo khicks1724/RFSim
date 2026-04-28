@@ -5562,6 +5562,121 @@ function renderMarkdown(text) {
   return out.join("");
 }
 
+// Full-fidelity markdown renderer for downloaded documents.
+// Keeps proper heading hierarchy, no chat-specific elements.
+function renderDocumentMarkdown(text) {
+  if (!text) return "";
+
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const inline = (s) => esc(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<strong>$1</strong>")
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
+    .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  const lines = text.split("\n");
+  const out = [];
+  let inList = false;
+  let listType = "ul";
+  let inTable = false;
+  let inPre = false;
+  let preLines = [];
+  let pendingPara = [];
+
+  const flushPara = () => {
+    if (!pendingPara.length) return;
+    out.push(`<p>${pendingPara.join("<br>")}</p>`);
+    pendingPara = [];
+  };
+  const flushList = () => {
+    if (inList) { out.push(`</${listType}>`); inList = false; }
+  };
+  const flushTable = () => {
+    if (inTable) { out.push("</tbody></table>"); inTable = false; }
+  };
+  const flushPre = () => {
+    if (inPre) { out.push(`<pre><code>${esc(preLines.join("\n"))}</code></pre>`); inPre = false; preLines = []; }
+  };
+
+  const isTableRow = (l) => /^\|.+\|/.test(l.trim());
+  const isSepRow   = (l) => /^\|[\s\-:|]+\|/.test(l.trim());
+
+  for (const raw of lines) {
+    const line = raw;
+
+    // Fenced code block toggle
+    if (/^```/.test(line.trim())) {
+      if (inPre) { flushPre(); } else { flushPara(); flushList(); flushTable(); inPre = true; }
+      continue;
+    }
+    if (inPre) { preLines.push(line); continue; }
+
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      flushPara(); flushList(); flushTable();
+      out.push("<hr>");
+      continue;
+    }
+
+    // Headings — preserve full hierarchy
+    const hMatch = line.match(/^(#{1,6})\s+(.+)/);
+    if (hMatch) {
+      flushPara(); flushList(); flushTable();
+      const level = hMatch[1].length;
+      out.push(`<h${level}>${inline(hMatch[2])}</h${level}>`);
+      continue;
+    }
+
+    // Tables
+    if (isTableRow(line)) {
+      flushPara(); flushList();
+      if (isSepRow(line)) continue; // separator row — skip, header already emitted
+      const cells = line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      if (!inTable) {
+        out.push('<table><thead><tr>');
+        cells.forEach((c) => out.push(`<th>${inline(c)}</th>`));
+        out.push("</tr></thead><tbody>");
+        inTable = true;
+      } else {
+        out.push("<tr>");
+        cells.forEach((c) => out.push(`<td>${inline(c)}</td>`));
+        out.push("</tr>");
+      }
+      continue;
+    }
+    if (inTable) { flushTable(); }
+
+    // Bullet list
+    const bullet = line.match(/^[\-\*]\s+(.+)/);
+    if (bullet) {
+      flushPara();
+      if (!inList || listType !== "ul") { flushList(); out.push("<ul>"); inList = true; listType = "ul"; }
+      out.push(`<li>${inline(bullet[1])}</li>`);
+      continue;
+    }
+
+    // Numbered list
+    const numbered = line.match(/^\d+\.\s+(.+)/);
+    if (numbered) {
+      flushPara();
+      if (!inList || listType !== "ol") { flushList(); out.push("<ol>"); inList = true; listType = "ol"; }
+      out.push(`<li>${inline(numbered[1])}</li>`);
+      continue;
+    }
+
+    flushList();
+
+    if (line.trim() === "") { flushPara(); continue; }
+
+    pendingPara.push(inline(line));
+  }
+
+  flushPara(); flushList(); flushTable(); flushPre();
+  return out.join("\n");
+}
+
 function createAiMessageController(role, text = "", images = [], contextItems = []) {
   const msgRecord = { role, text };
   state.ai.messages.push(msgRecord);
@@ -6857,6 +6972,102 @@ function appendAiMessage(role, text, images = [], contextItems = []) {
   controller.setStatus(role === "assistant" ? "Response ready" : "Sent");
 }
 
+function buildDocumentHtml(title, content) {
+  const renderedBody = renderDocumentMarkdown(content);
+  const safeTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${safeTitle}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; background: #fff; max-width: 860px; margin: 0 auto; padding: 48px 56px; }
+  h1 { font-size: 1.6em; border-bottom: 2px solid #222; padding-bottom: 6px; margin-bottom: 20px; }
+  h2 { font-size: 1.3em; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-top: 28px; }
+  h3 { font-size: 1.1em; margin-top: 20px; }
+  h4, h5, h6 { font-size: 1em; margin-top: 16px; }
+  p { margin: 0.6em 0; }
+  strong { font-weight: 700; }
+  em { font-style: italic; }
+  code { font-family: "Courier New", Courier, monospace; background: #f3f3f3; border: 1px solid #ddd; border-radius: 3px; padding: 1px 5px; font-size: 0.92em; }
+  pre { background: #f3f3f3; border: 1px solid #ddd; border-radius: 4px; padding: 14px 18px; font-family: "Courier New", Courier, monospace; font-size: 0.88em; white-space: pre-wrap; word-break: break-word; }
+  pre code { background: none; border: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.93em; }
+  th, td { border: 1px solid #bbb; padding: 7px 12px; text-align: left; vertical-align: top; }
+  th { background: #e8e8e8; font-weight: 700; }
+  tr:nth-child(even) td { background: #f7f7f7; }
+  ul, ol { margin: 0.5em 0 0.5em 1.6em; padding: 0; }
+  li { margin: 0.25em 0; }
+  hr { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
+  blockquote { border-left: 4px solid #aaa; margin: 12px 0; padding: 4px 16px; color: #555; background: #f9f9f9; }
+  @media print { body { padding: 0; max-width: 100%; } @page { margin: 0.75in; } }
+</style>
+</head>
+<body>
+${renderedBody}
+</body>
+</html>`;
+}
+
+function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount) {
+  const docTypeLabels = {
+    pace: "PACE Plan", soi: "SOI", ceoi: "CEOI", aar: "AAR",
+    spectrum: "Spectrum Plan", "route-narrative": "Route Narrative",
+    coa: "COA", "relay-topology": "Relay Topology",
+  };
+  const typeLabel = docTypeLabels[docType] ?? "Document";
+
+  const article = document.createElement("article");
+  article.className = "ai-chat-message ai-chat-message-assistant ai-document-card";
+
+  const header = document.createElement("div");
+  header.className = "ai-chat-message-header";
+  const titleEl = document.createElement("strong");
+  titleEl.textContent = "Assistant";
+  header.appendChild(titleEl);
+  const statusEl = document.createElement("span");
+  statusEl.className = "ai-chat-message-status";
+  statusEl.textContent = "Document ready";
+  header.appendChild(statusEl);
+  article.appendChild(header);
+
+  const card = document.createElement("div");
+  card.className = "ai-doc-card";
+
+  const icon = document.createElement("div");
+  icon.className = "ai-doc-card-icon";
+  icon.textContent = "📄";
+  card.appendChild(icon);
+
+  const info = document.createElement("div");
+  info.className = "ai-doc-card-info";
+  const nameEl = document.createElement("div");
+  nameEl.className = "ai-doc-card-name";
+  nameEl.textContent = title;
+  info.appendChild(nameEl);
+  const metaEl = document.createElement("div");
+  metaEl.className = "ai-doc-card-meta";
+  metaEl.textContent = `${typeLabel} · ${sizeLabel} · ${lineCount} sections`;
+  info.appendChild(metaEl);
+  card.appendChild(info);
+
+  const dlBtn = document.createElement("button");
+  dlBtn.className = "ai-doc-card-dl-btn";
+  dlBtn.type = "button";
+  dlBtn.textContent = "Download";
+  dlBtn.addEventListener("click", () => {
+    const slug = title.replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").toLowerCase() || "document";
+    downloadBlob(new Blob([buildDocumentHtml(title, content)], { type: "text/html" }), `${slug}.html`);
+  });
+  card.appendChild(dlBtn);
+
+  article.appendChild(card);
+  dom.aiChatMessages.append(article);
+  dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
+}
+
 function getAiChatHistoryStorageKey() {
   // Prefer server-account ID for logged-in users — most stable identifier
   const userId = state.session.user?.id;
@@ -6901,15 +7112,27 @@ function loadAiChatHistory() {
 
   for (const msg of stored) {
     if (typeof msg.role !== "string" || typeof msg.text !== "string") continue;
-    // Push directly — appendAiMessage would double-push via createAiMessageController
     state.ai.messages.push({ role: msg.role, text: msg.text });
+
+    // Detect stored document messages and rebuild the download card
+    const docMatch = msg.role === "assistant" && msg.text.match(/^\[Document: (.+?)\]\n([\s\S]*)$/);
+    if (docMatch) {
+      const docTitle = docMatch[1];
+      const docContent = docMatch[2];
+      const lineCount = docContent.split("\n").filter((l) => l.trim()).length;
+      const wordCount = docContent.trim().split(/\s+/).length;
+      const sizeLabel = wordCount > 800 ? "long" : wordCount > 300 ? "medium-length" : "brief";
+      renderAiDocumentCard(docTitle, docContent, "document", sizeLabel, lineCount);
+      continue;
+    }
+
     const article = document.createElement("article");
     article.className = `ai-chat-message ${msg.role === "user" ? "ai-chat-message-user" : "ai-chat-message-assistant"}`;
     const header = document.createElement("div");
     header.className = "ai-chat-message-header";
-    const title = document.createElement("strong");
-    title.textContent = msg.role === "user" ? "You" : "Assistant";
-    header.appendChild(title);
+    const titleEl = document.createElement("strong");
+    titleEl.textContent = msg.role === "user" ? "You" : "Assistant";
+    header.appendChild(titleEl);
     const statusEl = document.createElement("span");
     statusEl.className = "ai-chat-message-status";
     statusEl.textContent = msg.role === "assistant" ? "Response ready" : "Sent";
@@ -7624,7 +7847,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "PLANNING & DOCUMENTATION CAPABILITIES:",
     "═══════════════════════════════════════",
     "You can generate military planning documents using the generate-document action.",
-    "Schema: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string (plain text, formatted with spacing and dividers)\"}",
+    "Schema: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string (markdown — use # headings, **bold**, *italic*, tables, bullet lists, code blocks, horizontal rules freely for maximum readability)\"}",
     "Always generate documents in response to requests for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA advice, or relay topology reasoning.",
     "You may emit generate-document alongside other actions (e.g. draw a route polyline AND generate a route narrative).",
     "",
@@ -7787,7 +8010,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "place-marker: {\"type\":\"place-marker\",\"lat\":N,\"lon\":N,\"name\":\"string\",\"color\":\"#hex\",\"size\":pt,\"outlineColor\":\"#hex\",\"outlineWidth\":px}. Use this — NOT draw-shape — whenever the user asks to mark a city, location, landmark, or place a point/pin/marker. color sets dot color, size sets dot size in pt (8–64, default 24). One action per location. NEVER use draw-shape circle for this.",
       "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: shapeType=circle, coordinates[0] is center, radiusM is radius. ALWAYS use this when user asks to draw/highlight a circle area, polygon, or line.",
       "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
-      "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string\"}. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
+      "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string (markdown)\"}. Content supports # headings, **bold**, tables, lists, code blocks. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
       "update-shape: {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"color\":\"#hex\",\"fillOpacity\":0-1,\"weight\":px,\"lineStyle\":\"solid|dashed|dotted\",\"newName\":\"string\",\"radiusM\":meters}. When user says 'make it/that red' or refers to a linked shape, use the name from explicitAiContextObjects[0].name. NEVER use the contentId as the name.",
       "Use exact ids from the scenario summary.",
       "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
@@ -9071,78 +9294,16 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const content = action.content ?? "";
     if (!content.trim()) return "I couldn't generate the document because the content was empty.";
 
-    // Render a copyable document block into the chat
-    const docId = `ai-doc-${Date.now()}`;
-    const article = document.createElement("article");
-    article.className = "ai-chat-message ai-chat-message-assistant ai-document-block";
+    // Count approximate stats for the summary line
+    const lineCount = content.split("\n").filter((l) => l.trim()).length;
+    const wordCount = content.trim().split(/\s+/).length;
+    const sizeLabel = wordCount > 800 ? "long" : wordCount > 300 ? "medium-length" : "brief";
 
-    const header = document.createElement("div");
-    header.className = "ai-chat-message-header";
-    const titleEl = document.createElement("strong");
-    titleEl.textContent = title;
-    header.appendChild(titleEl);
+    renderAiDocumentCard(title, content, docType, sizeLabel, lineCount);
 
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "ai-doc-copy-btn";
-    copyBtn.type = "button";
-    copyBtn.textContent = "Copy";
-    copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(content).then(() => {
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
-      }).catch(() => {
-        copyBtn.textContent = "Failed";
-        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
-      });
-    });
-    header.appendChild(copyBtn);
-
-    const pdfBtn = document.createElement("button");
-    pdfBtn.className = "ai-doc-pdf-btn";
-    pdfBtn.type = "button";
-    pdfBtn.textContent = "Download PDF";
-    pdfBtn.addEventListener("click", () => {
-      const escaped = content
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-      const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>${title.replace(/</g, "&lt;")}</title>
-<style>
-  body { font-family: "Courier New", Courier, monospace; font-size: 11pt; margin: 1in; color: #000; background: #fff; }
-  h1 { font-size: 14pt; text-align: center; margin-bottom: 0.5em; }
-  pre { white-space: pre-wrap; word-break: break-word; font-size: 10pt; line-height: 1.4; }
-  @page { size: letter; margin: 1in; }
-  @media print { body { margin: 0; } }
-</style></head><body>
-<h1>${title.replace(/</g, "&lt;")}</h1>
-<pre>${escaped}</pre>
-</body></html>`;
-      const blob = new Blob([htmlDoc], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      const iframe = document.createElement("iframe");
-      iframe.style.cssText = "position:fixed;width:0;height:0;border:none;opacity:0;pointer-events:none;";
-      document.body.appendChild(iframe);
-      iframe.onload = () => {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-        setTimeout(() => { document.body.removeChild(iframe); URL.revokeObjectURL(url); }, 2000);
-      };
-      iframe.src = url;
-    });
-    header.appendChild(pdfBtn);
-
-    article.appendChild(header);
-
-    const pre = document.createElement("pre");
-    pre.className = "ai-document-content";
-    pre.id = docId;
-    pre.textContent = content;
-    article.appendChild(pre);
-
-    dom.aiChatMessages.append(article);
-    dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
+    // Store raw markdown content so the download card can be rebuilt on refresh
     state.ai.messages.push({ role: "assistant", text: `[Document: ${title}]\n${content}` });
+    saveAiChatHistory();
 
     return `Generated ${docType}: "${title}".`;
   }
