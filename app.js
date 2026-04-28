@@ -15996,6 +15996,7 @@ function _syncCesiumEntitiesImmediate() {
           const outer = Array.isArray(rings[0]) ? rings[0] : rings;
           geometry = { type: "Polygon", coordinates: [outer.map((p) => [p.lng, p.lat])] };
         }
+        const drawnMs = item.geometryType === "Point" ? normalizeDrawnPointMarkerStyle(item.markerStyle) : null;
         const markerStyle = item.geometryType === "Point" ? normalizeImportedMarkerStyle(item.markerStyle) : null;
         const shapeStyle = item.geometryType !== "Point" ? normalizeImportedShapeStyle(item.geometryType, item.shapeStyle) : null;
         features.push({
@@ -16004,13 +16005,14 @@ function _syncCesiumEntitiesImmediate() {
           properties: {
             name: item.name ?? "",
             _gtype: item.geometryType,
-            _pc: markerStyle?.color ?? "#f7b955",
-            _ps: markerStyle?.size ?? 9,
-            _lc: markerStyle?.labelColor ?? "#ffffff",
+            _pc: drawnMs?.color ?? markerStyle?.color ?? "#f7b955",
+            _ps: drawnMs?.size ?? markerStyle?.size ?? 9,
+            _lc: "#ffffff",
             _sc: shapeStyle?.color ?? "#3388ff",
             _sw: shapeStyle?.weight ?? 2,
             _fc: shapeStyle?.fillColor ?? shapeStyle?.color ?? "#3388ff",
             _fo: shapeStyle?.fillOpacity ?? 0.2,
+            _showLabel: item.showLabel === true ? 1 : 0,
           },
         });
       } catch (_) { /* skip malformed item */ }
@@ -16038,19 +16040,39 @@ function _syncCesiumEntitiesImmediate() {
 
         if (gtype === "Point") {
           const color = C.Color.fromCssColorString(props._pc?.getValue() ?? "#f7b955");
-          const size = props._ps?.getValue() ?? 9;
+          const size = Number(props._ps?.getValue() ?? 9);
+          const showLabel = Boolean(props._showLabel?.getValue());
+          const name = props.name?.getValue() ?? "";
           // GeoJsonDataSource creates a billboard for points — replace with a point graphic
           if (entity.billboard) entity.billboard.show = false;
           entity.point = new C.PointGraphics({
             color,
             pixelSize: size,
-            outlineColor: C.Color.WHITE,
+            outlineColor: C.Color.BLACK.withAlpha(0.6),
             outlineWidth: 1.5,
             heightReference: C.HeightReference.CLAMP_TO_GROUND,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           });
-          // Hide auto-generated label; name clutter is too dense for thousands of points
-          if (entity.label) entity.label.show = false;
+          if (showLabel && name) {
+            entity.label = new C.LabelGraphics({
+              text: name,
+              font: "bold 12px sans-serif",
+              fillColor: C.Color.fromCssColorString("#e8edf3"),
+              outlineColor: C.Color.fromCssColorString("#0d1117"),
+              outlineWidth: 2,
+              style: C.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new C.Cartesian2(size / 2 + 6, 0),
+              horizontalOrigin: C.HorizontalOrigin.LEFT,
+              verticalOrigin: C.VerticalOrigin.CENTER,
+              heightReference: C.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              showBackground: true,
+              backgroundColor: C.Color.fromCssColorString("#0d1117").withAlpha(0.75),
+              backgroundPadding: new C.Cartesian2(5, 3),
+            });
+          } else {
+            if (entity.label) entity.label.show = false;
+          }
 
         } else if (gtype === "LineString") {
           const color = C.Color.fromCssColorString(props._sc?.getValue() ?? "#3388ff");
