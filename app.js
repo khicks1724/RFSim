@@ -1279,6 +1279,8 @@ const state = {
     previewLayer: null,
     closeGuideLayer: null,
     editingItemId: null,
+    editingItemIds: null,
+    preEditSnapshots: null,
   },
   assetMarkers: new Map(),
   assets: [],
@@ -3521,9 +3523,16 @@ function wireEvents() {
   dom.shapeStyleEditVerticesBtn.addEventListener("click", onShapeStyleEditVertices);
   dom.shapeStyleDoneBtn.addEventListener("click", () => closeShapeStylePanel());
   dom.shapeLabelToggle?.addEventListener("change", () => {
+    const val = dom.shapeLabelToggle.checked;
+    const bulkItems = getBulkEditItems();
+    if (bulkItems) {
+      bulkItems.forEach((it) => { it.showLabel = val; applyItemLabel(it); });
+      saveMapState();
+      return;
+    }
     const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
     if (!item) return;
-    item.showLabel = dom.shapeLabelToggle.checked;
+    item.showLabel = val;
     applyItemLabel(item);
     saveMapState();
   });
@@ -3538,6 +3547,9 @@ function wireEvents() {
     }
   });
   dom.shapeStyleCloseBtn?.addEventListener("click", () => closeShapeStylePanel());
+  dom.shapeStyleModal?.querySelector(".shape-style-modal-backdrop")?.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) closeShapeStylePanel();
+  });
   dom.pointSizeInput?.addEventListener("input", onPointStyleChanged);
   dom.circleCenterInput?.addEventListener("change", onCircleGeometryChanged);
   dom.circleRadiusInput?.addEventListener("input", onCircleGeometryChanged);
@@ -12934,6 +12946,25 @@ function focusMapContent(contentId) {
   }
 }
 
+function getBulkEditGeometryClass(ids) {
+  // Returns "Point", "Line", or "Polygon" if all ids are imported items of a compatible class,
+  // null otherwise. Lines = LineString; Polygon class = Polygon (includes circles/rectangles).
+  const items = ids
+    .filter((id) => id.startsWith("imported:"))
+    .map((id) => state.importedItems.find((it) => `imported:${it.id}` === id))
+    .filter(Boolean);
+  if (items.length < 2) return null;
+  const classOf = (it) => {
+    if (it.geometryType === "Point") return "Point";
+    if (it.geometryType === "LineString") return "Line";
+    if (it.geometryType === "Polygon") return "Polygon";
+    return null;
+  };
+  const first = classOf(items[0]);
+  if (!first) return null;
+  return items.every((it) => classOf(it) === first) ? first : null;
+}
+
 function openMapContentsMenu(event, contentId) {
   event.preventDefault();
   event.stopPropagation();
@@ -12951,6 +12982,20 @@ function openMapContentsMenu(event, contentId) {
   if (relocateButton) {
     relocateButton.classList.toggle("hidden", !contentId.startsWith("asset:"));
   }
+
+  // Bulk edit button: show when 2+ selected imported items share a geometry class
+  const bulkBtn = dom.mapContentsMenu.querySelector('[data-map-content-action="edit-bulk"]');
+  if (bulkBtn) {
+    const selIds = state.mcSelectMode && state.mcSelectedIds.size >= 2
+      ? [...state.mcSelectedIds]
+      : null;
+    const geoClass = selIds ? getBulkEditGeometryClass(selIds) : null;
+    bulkBtn.classList.toggle("hidden", !geoClass);
+    if (geoClass) {
+      bulkBtn.textContent = `Edit ${state.mcSelectedIds.size} ${geoClass === "Point" ? "Points" : geoClass === "Line" ? "Lines" : "Shapes"}`;
+    }
+  }
+
   dom.mapContentsMenu.style.left = `${event.clientX}px`;
   dom.mapContentsMenu.style.top = `${event.clientY}px`;
   dom.mapContentsMenu.classList.remove("hidden");
@@ -12967,6 +13012,16 @@ function onMapContentsMenuAction(event) {
 
   if (action === "rename") {
     renameMapContent(contentId);
+    return;
+  }
+
+  if (action === "edit-bulk") {
+    const selIds = [...state.mcSelectedIds];
+    const items = selIds
+      .filter((id) => id.startsWith("imported:"))
+      .map((id) => state.importedItems.find((it) => `imported:${it.id}` === id))
+      .filter(Boolean);
+    if (items.length >= 2) openBulkStylePanel(items);
     return;
   }
 
@@ -14275,6 +14330,8 @@ function attachImportedLayerEditUndo(item) {
 
 function openShapeStylePanel(item, anchorEl) {
   state.draw.editingItemId = item.id;
+  state.draw.editingItemIds = null;
+  state.draw.preEditSnapshots = null;
   // Snapshot the item's current state so Done/close can push an undo entry
   state.draw.preEditSnapshot = snapshotImportedItemForEdit(item);
   const isPoint = item.geometryType === "Point";
@@ -14396,7 +14453,84 @@ function applyPointPanelMetaEdits(item) {
   saveMapState();
 }
 
+function getBulkEditItems() {
+  if (!state.draw.editingItemIds?.length) return null;
+  return state.draw.editingItemIds
+    .map((id) => state.importedItems.find((it) => it.id === id))
+    .filter(Boolean);
+}
+
+function openBulkStylePanel(items) {
+  if (!items?.length) return;
+  state.draw.editingItemId = null;
+  state.draw.editingItemIds = items.map((it) => it.id);
+  state.draw.preEditSnapshots = items.map((it) => snapshotImportedItemForEdit(it));
+
+  const geoClass = items[0].geometryType === "Point" ? "Point"
+    : items[0].geometryType === "LineString" ? "Line" : "Polygon";
+  const isPoint = geoClass === "Point";
+
+  if (dom.shapeStyleTitle) dom.shapeStyleTitle.textContent = `Edit ${items.length} ${geoClass === "Point" ? "Points" : geoClass === "Line" ? "Lines" : "Shapes"}`;
+
+  dom.pointMetaControls?.classList.add("hidden");
+  dom.pointStyleControls?.classList.toggle("hidden", !isPoint);
+  dom.shapeOnlyControls?.classList.toggle("hidden", isPoint);
+  dom.circleShapeControls?.classList.add("hidden");
+  dom.shapeStyleEditVerticesBtn.style.display = "none";
+  if (dom.pointRelocateBtn) dom.pointRelocateBtn.classList.add("hidden");
+
+  if (isPoint) {
+    const ms = normalizeDrawnPointMarkerStyle(items[0].markerStyle);
+    dom.shapeColorInput.value = ms.color;
+    if (dom.pointSizeInput) {
+      dom.pointSizeInput.value = ms.size;
+      dom.pointSizeValue.textContent = ms.size;
+      updateRangeTrack(dom.pointSizeInput);
+    }
+    buildPointIconPickerSvgs();
+    dom.pointIconPicker?.querySelectorAll(".point-icon-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.icon === ms.icon);
+    });
+  } else {
+    const s = items[0].shapeStyle ?? normalizeImportedShapeStyle(items[0].geometryType, { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color });
+    dom.shapeColorInput.value = s.color;
+    dom.shapeLineStyleSelect.value = s.lineStyle ?? "solid";
+    dom.shapeOpacityInput.value = s.fillOpacity;
+    dom.shapeWeightInput.value = s.weight;
+    dom.shapeOpacityValue.textContent = `${Math.round(s.fillOpacity * 100)}`;
+    dom.shapeWeightValue.textContent = s.weight;
+    updateRangeTrack(dom.shapeOpacityInput);
+    updateRangeTrack(dom.shapeWeightInput);
+    // Hide opacity for lines
+    const opacityRow = dom.shapeOpacityInput?.closest("label.shape-param-label");
+    if (opacityRow) opacityRow.style.display = geoClass === "Line" ? "none" : "";
+  }
+
+  if (dom.shapeLabelToggle) {
+    dom.shapeLabelToggle.checked = items.every((it) => it.showLabel);
+  }
+
+  dom.shapeStyleModal?.classList.remove("hidden");
+}
+
 function closeShapeStylePanel({ stopEditing = true, clearEditing = true } = {}) {
+  // Bulk edit close
+  const bulkItems = getBulkEditItems();
+  if (bulkItems) {
+    dom.shapeStyleModal?.classList.add("hidden");
+    if (state.draw.preEditSnapshots) {
+      const befores = state.draw.preEditSnapshots;
+      const afters = bulkItems.map((it) => snapshotImportedItemForEdit(it));
+      pushEditUndoEntry(`Edited ${bulkItems.length} items`, befores, () => afters);
+    }
+    state.draw.editingItemIds = null;
+    state.draw.preEditSnapshots = null;
+    // Restore opacity row visibility
+    const opacityRow = dom.shapeOpacityInput?.closest("label.shape-param-label");
+    if (opacityRow) opacityRow.style.display = "";
+    return;
+  }
+
   const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
   // Commit point name/position edits before closing
   applyPointPanelMetaEdits(item);
@@ -14417,18 +14551,34 @@ function closeShapeStylePanel({ stopEditing = true, clearEditing = true } = {}) 
 }
 
 function onShapeStyleChanged() {
-  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
-  if (!item) return;
-  if (item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM))) {
-    onCircleGeometryChanged();
-    return;
-  }
   const color = dom.shapeColorInput.value;
   const lineStyle = dom.shapeLineStyleSelect.value;
   const fillOpacity = parseFloat(dom.shapeOpacityInput.value);
   const weight = parseInt(dom.shapeWeightInput.value, 10);
   dom.shapeOpacityValue.textContent = `${Math.round(fillOpacity * 100)}`;
   dom.shapeWeightValue.textContent = weight;
+
+  const bulkItems = getBulkEditItems();
+  if (bulkItems) {
+    bulkItems.forEach((it) => {
+      if (it.geometryType === "Point") return;
+      const previous = it.shapeStyle ?? normalizeImportedShapeStyle(it.geometryType);
+      const fillColor = previous.color === color ? (previous.fillColor ?? color) : color;
+      it.shapeStyle = { color, fillColor, lineStyle, fillOpacity, weight };
+      applyShapeStyleToLayer(it);
+      it.layer?.setPopupContent?.(renderImportedItemPopup(it));
+    });
+    saveMapState();
+    syncCesiumEntities();
+    return;
+  }
+
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (!item) return;
+  if (item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM))) {
+    onCircleGeometryChanged();
+    return;
+  }
   const previous = item.shapeStyle ?? normalizeImportedShapeStyle(item.geometryType);
   const fillColor = previous.color === color ? (previous.fillColor ?? color) : color;
   item.shapeStyle = { color, fillColor, lineStyle, fillOpacity, weight };
@@ -14533,14 +14683,30 @@ function finishCircleRelocation(latlng) {
 }
 
 function onPointStyleChanged() {
-  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
-  if (!item || item.geometryType !== "Point") return;
   const color = dom.shapeColorInput.value;
   const size = parseInt(dom.pointSizeInput?.value ?? 24, 10);
   const activeIconBtn = dom.pointIconPicker?.querySelector(".point-icon-btn.active");
-  const icon = activeIconBtn?.dataset.icon ?? item.markerStyle?.icon ?? "dot";
   if (dom.pointSizeValue) dom.pointSizeValue.textContent = size;
   updateRangeTrack(dom.pointSizeInput);
+
+  const bulkItems = getBulkEditItems();
+  if (bulkItems) {
+    const icon = activeIconBtn?.dataset.icon ?? "dot";
+    bulkItems.forEach((it) => {
+      if (it.geometryType !== "Point") return;
+      it.markerStyle = { icon, color, size };
+      const newIcon = buildImportedPointIcon(it.markerStyle);
+      if (newIcon) it.layer?.setIcon(newIcon);
+      it.layer?.setPopupContent?.(renderImportedItemPopup(it));
+    });
+    saveMapState();
+    syncCesiumEntities();
+    return;
+  }
+
+  const item = state.importedItems.find((i) => i.id === state.draw.editingItemId);
+  if (!item || item.geometryType !== "Point") return;
+  const icon = activeIconBtn?.dataset.icon ?? item.markerStyle?.icon ?? "dot";
   item.markerStyle = { icon, color, size };
   const newIcon = buildImportedPointIcon(item.markerStyle);
   if (newIcon) item.layer.setIcon(newIcon);
