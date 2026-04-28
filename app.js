@@ -6684,6 +6684,9 @@ function isGenAiMilKey(key) {
 
 function parseGenAiMilApiError(status, bodyText, fallbackMessage) {
   if (bodyText.startsWith("<!doctype") || bodyText.startsWith("<!DOCTYPE") || bodyText.startsWith("<html")) {
+    if (/Unauthorized Access - GenAI\.mil/i.test(bodyText)) {
+      return new Error(`GenAI.mil rejected the hosted site connection (HTTP ${status}). The rfsim.us server is not on an approved GenAI.mil network path, so user API keys cannot be used from this deployment until that server access is approved.`);
+    }
     if (status === 401 || status === 403) {
       return new Error(`GenAI.mil authentication failed (HTTP ${status}). Check your STARK API key and network access.`);
     }
@@ -6821,7 +6824,7 @@ async function ensureGenAiMilModelsLoaded({ forceRefresh = false, returnModels =
   }
 
   // Direct browser → api.genai.mil (works if they support CORS for this origin)
-  if (!models) {
+  if (!models && !shouldUseBackendRelayFirstForGenAiMil()) {
     try {
       models = await fetchGenAiMilModelsFrom(GENAI_MIL_MODELS_ENDPOINT, state.ai.apiKey);
     } catch (error) {
@@ -7365,10 +7368,12 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
   }
 
   // Direct browser → api.genai.mil
-  try {
-    return await tryGenAiMilEndpoint(GENAI_MIL_ENDPOINT);
-  } catch (error) {
-    attemptErrors.push(error);
+  if (!shouldUseBackendRelayFirstForGenAiMil()) {
+    try {
+      return await tryGenAiMilEndpoint(GENAI_MIL_ENDPOINT);
+    } catch (error) {
+      attemptErrors.push(error);
+    }
   }
 
   // Backend relay
