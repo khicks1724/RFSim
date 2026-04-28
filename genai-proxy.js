@@ -39,6 +39,7 @@ const GENAI_MODELS_URL = `${GENAI_BASE_URL}/models`;
 const CERTS_DIR  = path.join(__dirname, "certs");
 const CERT_FILE  = path.join(CERTS_DIR, "proxy.crt");
 const KEY_FILE   = path.join(CERTS_DIR, "proxy.key");
+const ANSI_RESET = "\x1b[0m";
 
 const LOCAL_MODEL_MODE = process.argv.includes("--local-model");
 
@@ -108,6 +109,77 @@ function startServer(server, port, host, onListening, { mode = "required" } = {}
     process.exit(1);
   });
   server.listen(port, host, onListening);
+}
+
+function ansiColor(text, r, g, b) {
+  return `\x1b[38;2;${r};${g};${b}m${text}${ANSI_RESET}`;
+}
+
+function renderRfSimSpectrogram() {
+  if (!process.stdout.isTTY) return;
+
+  const art = [
+    "                         ...,,,////::---====---::////,,,...                         ",
+    "                      ...,,,///::---==++****++==---::///,,,...                      ",
+    "                   ...,,///::--==++**##%%%%%%##**++==--::///,,...                   ",
+    "                ...,,///::--=++*##%%@@@@@@@@@@%%##*++=--::///,,...                  ",
+    "              ...,,///::--=+*##%%@@@%%%%%%%%@@@%%##*+=--::///,,...                  ",
+    "            ...,,///::--==+*##%%@@%%########%%@@%%##*+==--::///,,...                ",
+    "          ...,,///::--==++*##%%@@%%###****###%%@@%%##*++==--::///,,...              ",
+    "        ...,,///::--==++**##%%@@%%##**++++**##%%@@%%##**++==--::///,,...            ",
+    "       ...,,///::--==++**##%%@@%%##*++=----=++*##%%@@%%##**++==--::///,,...         ",
+    "      ...,,///::--==++**##%%@@%%##*+=--::::--=+*##%%@@%%##**++==--::///,,...        ",
+    "       ...,,///::--==++**##%%@@%%##*++=----=++*##%%@@%%##**++==--::///,,...         ",
+    "        ...,,///::--==++**##%%@@%%##**++++++**##%%@@%%##**++==--::///,,...          ",
+    "          ...,,///::--==++*##%%@@@%%###****###%%@@@%%##*++==--::///,,...            ",
+    "            ...,,///::--==+*##%%@@@@%%%%%%%%%%@@@@%%##*+==--::///,,...              ",
+    "              ...,,///::---=+*##%%@@@@@@@@@@@@@@%%##*+=---::///,,...                ",
+    "                 ...,,///::---==++**##########**++==---::///,,...                   "
+  ];
+
+  const palette = {
+    " ": null,
+    ".": [110, 0, 180],
+    ",": [155, 0, 215],
+    "/": [80, 0, 255],
+    ":": [0, 80, 255],
+    "-": [0, 190, 255],
+    "=": [0, 235, 210],
+    "+": [35, 230, 110],
+    "*": [245, 210, 45],
+    "#": [255, 135, 10],
+    "%": [255, 82, 0],
+    "@": [255, 240, 200],
+  };
+
+  console.log("");
+  for (const line of art) {
+    let rendered = "";
+    for (const ch of line) {
+      const rgb = palette[ch];
+      rendered += rgb ? ansiColor(ch, rgb[0], rgb[1], rgb[2]) : ch;
+    }
+    console.log(rendered);
+  }
+  console.log("");
+}
+
+function printTrustReminder() {
+  console.log("    Trust reminder:");
+  if (process.platform === "win32") {
+    console.log("    If the browser shows NET::ERR_CERT_AUTHORITY_INVALID, run this once in PowerShell:");
+    console.log(`    Import-Certificate -FilePath "${CERT_FILE}" -CertStoreLocation Cert:\\CurrentUser\\Root`);
+    console.log("    Then fully close and reopen Chrome / Edge.\n");
+    return;
+  }
+
+  if (process.platform === "darwin") {
+    console.log("    If the browser shows a certificate warning, run:");
+    console.log(`    sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "${CERT_FILE}"\n`);
+    return;
+  }
+
+  console.log(`    If the browser shows a certificate warning, import: ${CERT_FILE}\n`);
 }
 
 // ─── CORS headers ────────────────────────────────────────────────────────────
@@ -192,7 +264,7 @@ function printTrustInstructions() {
     console.log(`
   Run this once in PowerShell (as Administrator):
 
-    Import-Certificate -FilePath "${CERT_FILE}" -CertStoreLocation Cert:\\LocalMachine\\Root
+    Import-Certificate -FilePath "${CERT_FILE}" -CertStoreLocation Cert:\\CurrentUser\\Root
 
   Then restart Chrome / Edge.
 `);
@@ -372,6 +444,7 @@ function createRouter(enableLocalModel) {
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
 // HTTP server — GenAI.mil proxy
+renderRfSimSpectrogram();
 const httpServer = http.createServer(createRouter(false));
 startServer(httpServer, HTTP_PORT, "127.0.0.1", () => {
   console.log(`\n🌐  GenAI.mil proxy   →  http://127.0.0.1:${HTTP_PORT}/v1/chat/completions`);
@@ -400,6 +473,7 @@ if (LOCAL_MODEL_MODE) {
       } else {
         console.log(`    Certificate: ${CERT_FILE} (run with a fresh --local-model flag to regenerate if expired)\n`);
       }
+      printTrustReminder();
     }
   });
 }

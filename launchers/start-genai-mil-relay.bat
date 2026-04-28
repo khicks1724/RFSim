@@ -7,7 +7,6 @@ set "SCRIPT_DIR=%~dp0"
 set "BASE_DIR=%SCRIPT_DIR%"
 if not exist "%BASE_DIR%genai-proxy.js" if exist "%SCRIPT_DIR%..\genai-proxy.js" set "BASE_DIR=%SCRIPT_DIR%..\"
 set "PROXY_SCRIPT=%BASE_DIR%genai-proxy.js"
-set "ART_SCRIPT=%BASE_DIR%rf-sim-terminal-art.ps1"
 set "NODE_EXE="
 
 call :printArt
@@ -79,7 +78,10 @@ for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$cmd = Get-Co
 goto :eof
 
 :printArt
-if exist "%ART_SCRIPT%" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%ART_SCRIPT%"
-)
+call :printFlag
+echo.
+exit /b 0
+
+:printFlag
+powershell -NoProfile -Command "$blue='Blue'; $red='Red'; $white='White'; $starRows=@('*  *  *  *  *  *  *  *  *','  *  *  *  *  *  *  *  * ','*  *  *  *  *  *  *  *  *','  *  *  *  *  *  *  *  * ','*  *  *  *  *  *  *  *  *','  *  *  *  *  *  *  *  * '); for($i=0;$i -lt $starRows.Count;$i++){ Write-Host $starRows[$i] -ForegroundColor $blue -NoNewline; Write-Host '==============================' -ForegroundColor $(if($i % 2 -eq 0){$white}else{$red}) }; Write-Host ('=' * 47) -ForegroundColor $blue; Write-Host ('=' * 47) -ForegroundColor $red; Write-Host ('=' * 47) -ForegroundColor $white; Write-Host ('=' * 47) -ForegroundColor $red; Write-Host ('=' * 47) -ForegroundColor $white; Write-Host ('=' * 47) -ForegroundColor $red"
 exit /b 0
