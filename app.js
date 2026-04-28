@@ -1037,6 +1037,7 @@ const dom = {
   aiRefreshModelsBtn: document.querySelector("#aiRefreshModelsBtn"),
   aiProviderSummary: document.querySelector("#aiProviderSummary"),
   aiLocalModelSection: document.querySelector("#aiLocalModelSection"),
+  aiGenAiMilNetworkWarning: document.querySelector("#aiGenAiMilNetworkWarning"),
   aiLocalModelUrlInput: document.querySelector("#aiLocalModelUrlInput"),
   aiLocalModelDetectBtn: document.querySelector("#aiLocalModelDetectBtn"),
   aiLocalModelPicker: document.querySelector("#aiLocalModelPicker"),
@@ -5175,6 +5176,10 @@ function syncAiUi() {
     dom.aiApiKeyInput.placeholder = providerMeta?.keyPlaceholder ?? "Paste API key";
   }
 
+  // GenAI.mil network warning (deployed site only)
+  if (dom.aiGenAiMilNetworkWarning) {
+    dom.aiGenAiMilNetworkWarning.classList.toggle("hidden", !(state.ai.provider === "genai-mil" && !isLocalhost()));
+  }
   // Local model section visibility + field sync
   if (dom.aiLocalModelSection) {
     dom.aiLocalModelSection.classList.toggle("hidden", !isLocalModel);

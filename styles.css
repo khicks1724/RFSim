@@ -1815,6 +1815,24 @@ body:not(.ai-panel-open) .ai-panel {
 }
 
 /* ── Local model settings panel ─────────────────────────────────────────────── */
+.ai-genai-mil-warning {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid #b45309;
+  border-radius: 6px;
+  background: rgba(180, 83, 9, 0.12);
+  color: #fbbf24;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ai-genai-mil-warning code {
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 11px;
+}
+.ai-genai-mil-warning.hidden { display: none; }
+
 .ai-local-model-section {
   margin-top: 12px;
   border: 1px solid var(--border);
