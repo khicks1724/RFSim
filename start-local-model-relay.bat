@@ -6,6 +6,8 @@ color 0A
 set "SCRIPT_DIR=%~dp0"
 set "PROXY_SCRIPT=%SCRIPT_DIR%genai-proxy.js"
 
+call :printFlag
+
 echo.
 echo  ==========================================
 echo   RF Planner Local Model Relay
@@ -42,3 +44,7 @@ echo.
 echo  Relay stopped with exit code %EXIT_CODE%.
 pause
 exit /b %EXIT_CODE%
+
+:printFlag
+powershell -NoProfile -Command "$blue = @(''* * * * * * * * * * * * * * * * * * * *'','' * * * * * * * * * * * * * * * * * * * '',''* * * * * * * * * * * * * * * * * * * *'','' * * * * * * * * * * * * * * * * * * * '',''* * * * * * * * * * * * * * * * * * * *'','' * * * * * * * * * * * * * * * * * * * '',''========================================''); $red = @(''========================================'',''========================================'',''========================================'',''========================================''); $white = @(''========================================'',''========================================'',''========================================''); foreach($line in $blue){ Write-Host $line -ForegroundColor Blue }; for($i = 0; $i -lt $red.Count; $i++){ Write-Host $red[$i] -ForegroundColor Red; if($i -lt $white.Count){ Write-Host $white[$i] -ForegroundColor White } }"
+exit /b 0

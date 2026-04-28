@@ -1391,7 +1391,8 @@
                 <div class="ai-genai-mil-step-copy">
                   <strong>Create and trust the localhost certificate once</strong>
                   <p>The first run usually creates <code>certs/proxy.crt</code> automatically and then prints the one-time trust command for this workstation.</p>
-                  <p>If the window says OpenSSL is missing on Windows, install Git for Windows, open PowerShell in this same download folder, then run <code>&amp; "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:2048 -keyout ".\certs\proxy.key" -out ".\certs\proxy.crt" -days 3650 -nodes -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"</code></p>
+                  <p>If the window says OpenSSL is missing on Windows, install Git for Windows, open File Explorer in the folder that contains <code>genai-proxy.js</code>, type <code>powershell</code> in the address bar, then run <code>New-Item -ItemType Directory -Force ".\certs" | Out-Null</code></p>
+                  <p>Then run <code>&amp; "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:2048 -keyout ".\certs\proxy.key" -out ".\certs\proxy.crt" -days 3650 -nodes -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"</code></p>
                   <p>After that, run <code>node genai-proxy.js --local-model</code> again from the same folder.</p>
                 </div>
               </div>
@@ -1448,7 +1449,8 @@
                   <span class="ai-genai-mil-step-num">3</span>
                   <div class="ai-genai-mil-step-copy">
                     <strong>Create and trust the localhost certificate once</strong>
-                    <p>If the relay says OpenSSL is missing on Windows, install Git for Windows, open PowerShell in the same folder as <code>genai-proxy.js</code>, then run <code>&amp; "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:2048 -keyout ".\certs\proxy.key" -out ".\certs\proxy.crt" -days 3650 -nodes -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"</code></p>
+                    <p>If the relay says OpenSSL is missing on Windows, install Git for Windows, open File Explorer in the folder that contains <code>genai-proxy.js</code>, type <code>powershell</code> in the address bar, then run <code>New-Item -ItemType Directory -Force ".\certs" | Out-Null</code></p>
+                    <p>Then run <code>&amp; "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:2048 -keyout ".\certs\proxy.key" -out ".\certs\proxy.crt" -days 3650 -nodes -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"</code></p>
                     <p>Then run <code>node genai-proxy.js --local-model</code> again and follow the trust command it prints.</p>
                   </div>
                 </div>

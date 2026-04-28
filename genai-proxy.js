@@ -66,15 +66,48 @@ function printManualCertInstructions() {
     console.error("  1. Install Git for Windows so OpenSSL is available.");
     console.error("  2. Open PowerShell in the folder that contains genai-proxy.js.");
     console.error('     Tip: in File Explorer, open that folder, type "powershell" in the address bar, and press Enter.');
-    console.error("  3. Run:");
-    console.error(`\n    & \"C:\\Program Files\\Git\\usr\\bin\\openssl.exe\" req -x509 -newkey rsa:2048 -keyout \"${KEY_FILE}\" -out \"${CERT_FILE}\" -days 3650 -nodes -subj \"/CN=localhost\" -addext \"subjectAltName=IP:127.0.0.1,DNS:localhost\"\n`);
+    console.error("  3. Run these commands:");
+    console.error(`\n    New-Item -ItemType Directory -Force \"${CERTS_DIR}\" | Out-Null`);
+    console.error(`    & \"C:\\Program Files\\Git\\usr\\bin\\openssl.exe\" req -x509 -newkey rsa:2048 -keyout \"${KEY_FILE}\" -out \"${CERT_FILE}\" -days 3650 -nodes -subj \"/CN=localhost\" -addext \"subjectAltName=IP:127.0.0.1,DNS:localhost\"\n`);
     console.error("  4. Then run: node genai-proxy.js --local-model");
   } else {
-    console.error("  Open Terminal in the folder that contains genai-proxy.js and run:");
-    console.error(`\n    mkdir -p \"${CERTS_DIR}\" && openssl req -x509 -newkey rsa:2048 -keyout \"${KEY_FILE}\" -out \"${CERT_FILE}\" -days 3650 -nodes -subj \"/CN=localhost\" -addext \"subjectAltName=IP:127.0.0.1,DNS:localhost\"\n`);
+    console.error("  Open Terminal in the folder that contains genai-proxy.js.");
+    console.error("  Then run:");
+    console.error(`\n    mkdir -p \"${CERTS_DIR}\"`);
+    console.error(`    openssl req -x509 -newkey rsa:2048 -keyout \"${KEY_FILE}\" -out \"${CERT_FILE}\" -days 3650 -nodes -subj \"/CN=localhost\" -addext \"subjectAltName=IP:127.0.0.1,DNS:localhost\"\n`);
     console.error("  Then run: node genai-proxy.js --local-model");
   }
   console.error("  Alternatively set LOCAL_MODEL_URL to an http:// address and access the app over http://.");
+}
+
+function explainPortInUse(port, mode) {
+  if (port === HTTP_PORT && mode === "optional-http") {
+    console.warn(`\nPort ${HTTP_PORT} is already in use on 127.0.0.1.`);
+    console.warn("Another RF Planner relay may already be running.");
+    console.warn(`Continuing without the HTTP GenAI.mil relay because the secure relay on https://127.0.0.1:${HTTPS_PORT} is the path used by the hosted site.\n`);
+    return;
+  }
+
+  console.error(`\nCould not start the relay because 127.0.0.1:${port} is already in use.`);
+  if (port === HTTP_PORT) {
+    console.error("Close the other process using that port, or use the existing RF Planner relay window if it is already running.");
+  } else if (port === HTTPS_PORT) {
+    console.error("A secure RF Planner relay may already be running. Reuse that window, or close it before starting a new one.");
+  }
+  process.exit(1);
+}
+
+function startServer(server, port, host, onListening, { mode = "required" } = {}) {
+  server.once("error", (error) => {
+    if (error?.code === "EADDRINUSE") {
+      explainPortInUse(port, mode);
+      return;
+    }
+    console.error(`\nRelay failed to start on ${host}:${port}.`);
+    console.error(error?.stack || error?.message || String(error));
+    process.exit(1);
+  });
+  server.listen(port, host, onListening);
 }
 
 // ─── CORS headers ────────────────────────────────────────────────────────────
@@ -340,10 +373,10 @@ function createRouter(enableLocalModel) {
 
 // HTTP server — GenAI.mil proxy
 const httpServer = http.createServer(createRouter(false));
-httpServer.listen(HTTP_PORT, "127.0.0.1", () => {
+startServer(httpServer, HTTP_PORT, "127.0.0.1", () => {
   console.log(`\n🌐  GenAI.mil proxy   →  http://127.0.0.1:${HTTP_PORT}/v1/chat/completions`);
   console.log(`🔎  Model discovery   →  http://127.0.0.1:${HTTP_PORT}/v1/models`);
-});
+}, { mode: LOCAL_MODEL_MODE ? "optional-http" : "required" });
 
 if (LOCAL_MODEL_MODE) {
   ensureCert();
@@ -354,7 +387,7 @@ if (LOCAL_MODEL_MODE) {
   };
 
   const httpsServer = https.createServer(tlsOptions, createRouter(true));
-  httpsServer.listen(HTTPS_PORT, "127.0.0.1", () => {
+  startServer(httpsServer, HTTPS_PORT, "127.0.0.1", () => {
     console.log(`🤖  Local model proxy →  https://127.0.0.1:${HTTPS_PORT}/v1/local/chat/completions`);
     console.log(`🔍  Model health      →  https://127.0.0.1:${HTTPS_PORT}/v1/local/health`);
     console.log(`\n    Forwarding to: ${LOCAL_MODEL_ENDPOINT}`);
