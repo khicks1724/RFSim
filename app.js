@@ -6983,41 +6983,65 @@ function buildDocumentHtml(title, content) {
 <title>${safeTitle}</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
-  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; background: #fff; max-width: 860px; margin: 0 auto; padding: 48px 56px; }
-  h1 { font-size: 1.6em; border-bottom: 2px solid #222; padding-bottom: 6px; margin-bottom: 20px; }
-  h2 { font-size: 1.3em; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-top: 28px; }
-  h3 { font-size: 1.1em; margin-top: 20px; }
-  h4, h5, h6 { font-size: 1em; margin-top: 16px; }
-  p { margin: 0.6em 0; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.65; color: #1a1a1a; background: #fff; max-width: 860px; margin: 0 auto; padding: 48px 56px; }
+  h1 { font-size: 1.7em; border-bottom: 2px solid #1a1a1a; padding-bottom: 8px; margin: 0 0 24px; }
+  h2 { font-size: 1.3em; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin: 32px 0 10px; color: #1a1a1a; }
+  h3 { font-size: 1.1em; margin: 22px 0 6px; color: #333; }
+  h4 { font-size: 1em; margin: 16px 0 4px; color: #333; font-weight: 700; }
+  h5, h6 { font-size: 0.95em; margin: 12px 0 4px; }
+  p { margin: 0.55em 0; }
   strong { font-weight: 700; }
   em { font-style: italic; }
-  code { font-family: "Courier New", Courier, monospace; background: #f3f3f3; border: 1px solid #ddd; border-radius: 3px; padding: 1px 5px; font-size: 0.92em; }
-  pre { background: #f3f3f3; border: 1px solid #ddd; border-radius: 4px; padding: 14px 18px; font-family: "Courier New", Courier, monospace; font-size: 0.88em; white-space: pre-wrap; word-break: break-word; }
+  code { font-family: "Courier New", Courier, monospace; background: #f0f0f0; border: 1px solid #ddd; border-radius: 3px; padding: 1px 5px; font-size: 0.9em; }
+  pre { background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 14px 18px; font-family: "Courier New", Courier, monospace; font-size: 0.87em; white-space: pre-wrap; word-break: break-word; margin: 10px 0; }
   pre code { background: none; border: none; padding: 0; }
-  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.93em; }
-  th, td { border: 1px solid #bbb; padding: 7px 12px; text-align: left; vertical-align: top; }
-  th { background: #e8e8e8; font-weight: 700; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.92em; page-break-inside: avoid; }
+  th, td { border: 1px solid #aaa; padding: 7px 12px; text-align: left; vertical-align: top; }
+  th { background: #e2e2e2; font-weight: 700; color: #111; }
   tr:nth-child(even) td { background: #f7f7f7; }
-  ul, ol { margin: 0.5em 0 0.5em 1.6em; padding: 0; }
-  li { margin: 0.25em 0; }
-  hr { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
-  blockquote { border-left: 4px solid #aaa; margin: 12px 0; padding: 4px 16px; color: #555; background: #f9f9f9; }
-  @media print { body { padding: 0; max-width: 100%; } @page { margin: 0.75in; } }
+  ul, ol { margin: 6px 0 6px 1.8em; padding: 0; }
+  li { margin: 3px 0; }
+  hr { border: none; border-top: 1px solid #ccc; margin: 24px 0; }
+  blockquote { border-left: 4px solid #999; margin: 14px 0; padding: 6px 16px; color: #444; background: #f9f9f9; }
+  /* Print / PDF styles */
+  @media print {
+    body { padding: 0; max-width: 100%; font-size: 10.5pt; }
+    h1 { font-size: 1.5em; }
+    h2 { font-size: 1.2em; page-break-after: avoid; }
+    h3 { page-break-after: avoid; }
+    table { page-break-inside: avoid; }
+    pre { page-break-inside: avoid; }
+    .no-print { display: none; }
+  }
+  @page { size: letter; margin: 0.8in 0.9in; }
+  /* Print bar shown in browser — hidden when printing */
+  #print-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #1a1a1a; color: #fff; padding: 10px 20px; display: flex; align-items: center; gap: 16px; font-family: "Segoe UI", Arial, sans-serif; font-size: 0.88em; z-index: 9999; }
+  #print-bar button { background: #4a90d9; border: none; border-radius: 4px; color: #fff; padding: 6px 18px; font-size: 0.88em; font-weight: 700; cursor: pointer; }
+  #print-bar button:hover { background: #357abd; }
+  #print-bar .dismiss { background: none; border: 1px solid rgba(255,255,255,0.3); font-weight: 400; }
+  #print-bar .dismiss:hover { background: rgba(255,255,255,0.1); }
 </style>
 </head>
 <body>
 ${renderedBody}
+<div id="print-bar" class="no-print">
+  <span>To save as PDF: click <strong>Save as PDF</strong> and choose PDF as the destination.</span>
+  <button onclick="window.print()">Save as PDF</button>
+  <button class="dismiss" onclick="document.getElementById('print-bar').remove()">Dismiss</button>
+</div>
 </body>
 </html>`;
 }
 
-function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount) {
+function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount, format = "pdf") {
   const docTypeLabels = {
     pace: "PACE Plan", soi: "SOI", ceoi: "CEOI", aar: "AAR",
     spectrum: "Spectrum Plan", "route-narrative": "Route Narrative",
     coa: "COA", "relay-topology": "Relay Topology",
+    analysis: "Analysis Report", visual: "Interactive Visual",
   };
   const typeLabel = docTypeLabels[docType] ?? "Document";
+  const isHtml = format === "html";
 
   const article = document.createElement("article");
   article.className = "ai-chat-message ai-chat-message-assistant ai-document-card";
@@ -7038,7 +7062,7 @@ function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount) {
 
   const icon = document.createElement("div");
   icon.className = "ai-doc-card-icon";
-  icon.textContent = "📄";
+  icon.textContent = isHtml ? "📊" : "📄";
   card.appendChild(icon);
 
   const info = document.createElement("div");
@@ -7049,17 +7073,22 @@ function renderAiDocumentCard(title, content, docType, sizeLabel, lineCount) {
   info.appendChild(nameEl);
   const metaEl = document.createElement("div");
   metaEl.className = "ai-doc-card-meta";
-  metaEl.textContent = `${typeLabel} · ${sizeLabel} · ${lineCount} sections`;
+  metaEl.textContent = `${typeLabel} · ${isHtml ? "HTML" : "PDF"} · ${sizeLabel}`;
   info.appendChild(metaEl);
   card.appendChild(info);
 
   const dlBtn = document.createElement("button");
   dlBtn.className = "ai-doc-card-dl-btn";
   dlBtn.type = "button";
-  dlBtn.textContent = "Download";
+  dlBtn.textContent = isHtml ? "Download HTML" : "Download";
   dlBtn.addEventListener("click", () => {
     const slug = title.replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "").toLowerCase() || "document";
-    downloadBlob(new Blob([buildDocumentHtml(title, content)], { type: "text/html" }), `${slug}.html`);
+    if (isHtml) {
+      downloadBlob(new Blob([content], { type: "text/html" }), `${slug}.html`);
+    } else {
+      // Downloads as .html — open in browser and click "Save as PDF" from the print bar
+      downloadBlob(new Blob([buildDocumentHtml(title, content)], { type: "text/html" }), `${slug}.html`);
+    }
   });
   card.appendChild(dlBtn);
 
@@ -7115,14 +7144,22 @@ function loadAiChatHistory() {
     state.ai.messages.push({ role: msg.role, text: msg.text });
 
     // Detect stored document messages and rebuild the download card
-    const docMatch = msg.role === "assistant" && msg.text.match(/^\[Document: (.+?)\]\n([\s\S]*)$/);
+    // Supports both new "[Document:pdf: Title]" and legacy "[Document: Title]" formats
+    const docMatch = msg.role === "assistant" && msg.text.match(/^\[Document(?::(pdf|html))?: (.+?)\]\n([\s\S]*)$/);
     if (docMatch) {
-      const docTitle = docMatch[1];
-      const docContent = docMatch[2];
+      const docFormat = docMatch[1] ?? "pdf";
+      const docTitle = docMatch[2];
+      const docContent = docMatch[3];
       const lineCount = docContent.split("\n").filter((l) => l.trim()).length;
       const wordCount = docContent.trim().split(/\s+/).length;
       const sizeLabel = wordCount > 800 ? "long" : wordCount > 300 ? "medium-length" : "brief";
-      renderAiDocumentCard(docTitle, docContent, "document", sizeLabel, lineCount);
+      // Infer docType from title keywords for the label
+      const titleLower = docTitle.toLowerCase();
+      const docType = titleLower.includes("ceoi") ? "ceoi" : titleLower.includes("pace") ? "pace"
+        : titleLower.includes("soi") ? "soi" : titleLower.includes("aar") ? "aar"
+        : titleLower.includes("spectrum") ? "spectrum" : titleLower.includes("analysis") ? "analysis"
+        : titleLower.includes("visual") || docFormat === "html" ? "visual" : "document";
+      renderAiDocumentCard(docTitle, docContent, docType, sizeLabel, lineCount, docFormat);
       continue;
     }
 
@@ -7846,9 +7883,24 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "═══════════════════════════════════════",
     "PLANNING & DOCUMENTATION CAPABILITIES:",
     "═══════════════════════════════════════",
-    "You can generate military planning documents using the generate-document action.",
-    "Schema: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string (markdown — use # headings, **bold**, *italic*, tables, bullet lists, code blocks, horizontal rules freely for maximum readability)\"}",
-    "Always generate documents in response to requests for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA advice, or relay topology reasoning.",
+    "You can generate documents and reports using the generate-document action.",
+    "Schema: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology|analysis|visual\",\"format\":\"pdf|html\",\"title\":\"string\",\"content\":\"string\"}",
+    "",
+    "FORMAT RULES:",
+    "  - Default format is 'pdf' for all documents. Only use format='html' when the output is a self-contained interactive visual (charts, diagrams, frequency spectrum plots, link budget visualizers, etc.).",
+    "  - For format='pdf': content must be rich markdown. Use # headings, ## subheadings, **bold**, *italic*, tables, bullet/numbered lists, horizontal rules, and code blocks freely. Be thorough and detailed.",
+    "  - For format='html': content must be a complete standalone HTML document (<html>...<body>...) with embedded CSS and JS for the visual. Do not include markdown — write real HTML.",
+    "  - Never truncate or summarize a report. Fill every section with real data, specific values, analysis, and recommendations.",
+    "",
+    "ANALYSIS REPORTS (docType='analysis'):",
+    "  When asked for an analysis, assessment, study, or any investigative report, produce a thorough professional document.",
+    "  Required sections for RF/EW analysis: Executive Summary, Terrain & Environment, Frequency Environment, Asset Assessment, Link Analysis, Threat Assessment (if applicable), Findings, Recommendations, Conclusion.",
+    "  Pull specific values from the scenario: asset names, frequencies, coordinates, LOS results, coverage radii, terrain elevation data.",
+    "  Use the terrainLosMatrix to cite specific link statuses. Reference named assets, shapes, and viewsheds by name.",
+    "  Quantify everything: distances in km, frequencies in MHz/GHz, power in dBm/W, link margins in dB, altitudes in meters/feet.",
+    "  Be detailed — a user asking for analysis expects a multi-section professional report, not a paragraph summary.",
+    "",
+    "Always generate documents in response to requests for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA advice, relay topology, or any analysis/assessment.",
     "You may emit generate-document alongside other actions (e.g. draw a route polyline AND generate a route narrative).",
     "",
     "PACE PLAN DOCTRINE:",
@@ -7905,8 +7957,10 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  For each relay recommendation, output: proposed grid/coordinates, antenna height required, expected link margins.",
     "  If terrain data is available via LOS matrix, cite the specific obstruction location (obstructionFrac, obstructionLat/Lon) when explaining why a relay is needed.",
     "",
-    "  generate-document action: use for ALL of the above. Never just write the document in assistantMessage — always use the action so it renders in a copyable document block.",
+    "  generate-document action: use for ALL of the above. Never write a document or report in assistantMessage — always use the action.",
     "  For complex requests (e.g. PACE + SOI + relay drawing), emit multiple generate-document actions and map actions together.",
+    "  Analysis/assessment requests always get docType='analysis', format='pdf', and a full multi-section report.",
+    "  Visual/chart requests get docType='visual', format='html', with a complete self-contained HTML page.",
     "",
     "═══════════════════════════════════════",
     "PLACING POINT MARKERS ON THE MAP:",
@@ -8010,7 +8064,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "place-marker: {\"type\":\"place-marker\",\"lat\":N,\"lon\":N,\"name\":\"string\",\"color\":\"#hex\",\"size\":pt,\"outlineColor\":\"#hex\",\"outlineWidth\":px}. Use this — NOT draw-shape — whenever the user asks to mark a city, location, landmark, or place a point/pin/marker. color sets dot color, size sets dot size in pt (8–64, default 24). One action per location. NEVER use draw-shape circle for this.",
       "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: shapeType=circle, coordinates[0] is center, radiusM is radius. ALWAYS use this when user asks to draw/highlight a circle area, polygon, or line.",
       "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
-      "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology\",\"title\":\"string\",\"content\":\"string (markdown)\"}. Content supports # headings, **bold**, tables, lists, code blocks. Use for PACE plans, SOI/CEOI tables, AARs, spectrum plans, route narratives, COA comms advice, relay topology reasoning. Always use this action — never write the document in assistantMessage.",
+      "generate-document: {\"type\":\"generate-document\",\"docType\":\"pace|soi|ceoi|aar|spectrum|route-narrative|coa|relay-topology|analysis|visual\",\"format\":\"pdf|html\",\"title\":\"string\",\"content\":\"string\"}. Default format='pdf' (markdown content). Use format='html' only for interactive visuals (full HTML doc with embedded CSS/JS). For analysis reports be thorough: multiple sections, specific values, quantified findings. Never truncate. Always use this action — never write docs in assistantMessage.",
       "update-shape: {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"color\":\"#hex\",\"fillOpacity\":0-1,\"weight\":px,\"lineStyle\":\"solid|dashed|dotted\",\"newName\":\"string\",\"radiusM\":meters}. When user says 'make it/that red' or refers to a linked shape, use the name from explicitAiContextObjects[0].name. NEVER use the contentId as the name.",
       "Use exact ids from the scenario summary.",
       "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
@@ -9292,20 +9346,20 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const docType = action.docType ?? "document";
     const title = action.title ?? docType.toUpperCase();
     const content = action.content ?? "";
+    const format = action.format === "html" ? "html" : "pdf";
     if (!content.trim()) return "I couldn't generate the document because the content was empty.";
 
-    // Count approximate stats for the summary line
-    const lineCount = content.split("\n").filter((l) => l.trim()).length;
     const wordCount = content.trim().split(/\s+/).length;
     const sizeLabel = wordCount > 800 ? "long" : wordCount > 300 ? "medium-length" : "brief";
+    const lineCount = content.split("\n").filter((l) => l.trim()).length;
 
-    renderAiDocumentCard(title, content, docType, sizeLabel, lineCount);
+    renderAiDocumentCard(title, content, docType, sizeLabel, lineCount, format);
 
-    // Store raw markdown content so the download card can be rebuilt on refresh
-    state.ai.messages.push({ role: "assistant", text: `[Document: ${title}]\n${content}` });
+    // Prefix encodes format so restore on refresh knows how to rebuild
+    state.ai.messages.push({ role: "assistant", text: `[Document:${format}: ${title}]\n${content}` });
     saveAiChatHistory();
 
-    return `Generated ${docType}: "${title}".`;
+    return `Generated ${docType} (${format}): "${title}".`;
   }
 
   return `I couldn't apply the action type "${action.type}" because it is not supported.`;

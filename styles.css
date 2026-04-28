@@ -1247,6 +1247,7 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-chat-message {
   max-width: min(88%, 540px);
+  min-width: 0;
   padding: 12px 14px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -1254,6 +1255,9 @@ body:not(.ai-panel-open) .ai-panel {
   gap: 8px;
   border-radius: 18px;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .ai-chat-message-header {
@@ -1351,6 +1355,7 @@ body:not(.ai-panel-open) .ai-panel {
 .ai-chat-message-assistant {
   justify-self: start;
   border-bottom-left-radius: 8px;
+  width: min(88%, 540px);
 }
 
 .ai-chat-message-system {
@@ -1504,18 +1509,26 @@ body:not(.ai-panel-open) .ai-panel {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 /* Document card — compact download summary shown instead of inline preview */
+.ai-document-card {
+  /* stretch to full panel width, not just fit-content */
+  width: min(88%, 540px);
+  align-self: start;
+}
 .ai-document-card .ai-chat-message-header { margin-bottom: 8px; }
 .ai-doc-card {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 8px;
   padding: 12px 14px;
+  min-width: 0;
+  overflow: hidden;
 }
-.ai-doc-card-icon { font-size: 1.6rem; line-height: 1; flex-shrink: 0; }
-.ai-doc-card-info { flex: 1; min-width: 0; }
+.ai-doc-card-icon { font-size: 1.5rem; line-height: 1; }
+.ai-doc-card-info { min-width: 0; overflow: hidden; }
 .ai-doc-card-name {
   font-weight: 700;
   font-size: 0.85rem;
@@ -1528,9 +1541,11 @@ body:not(.ai-panel-open) .ai-panel {
   font-size: 0.72rem;
   opacity: 0.6;
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ai-doc-card-dl-btn {
-  flex-shrink: 0;
   background: var(--accent);
   border: none;
   border-radius: 5px;
@@ -1541,6 +1556,8 @@ body:not(.ai-panel-open) .ai-panel {
   cursor: pointer;
   letter-spacing: 0.03em;
   transition: opacity 0.12s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .ai-doc-card-dl-btn:hover { opacity: 0.85; }
 
