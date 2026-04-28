@@ -9,8 +9,6 @@ if not exist "%BASE_DIR%genai-proxy.js" if exist "%SCRIPT_DIR%..\genai-proxy.js"
 set "PROXY_SCRIPT=%BASE_DIR%genai-proxy.js"
 set "NODE_EXE="
 
-call :printArt
-
 echo.
 echo  ==========================================
 echo   RF Planner Local Model Relay
@@ -41,6 +39,8 @@ echo  Starting the secure relay for local models...
 echo  Leave this window open while using the hosted site.
 echo  Using Node.js at: %NODE_EXE%
 echo.
+
+call :printArt
 
 "%NODE_EXE%" "%PROXY_SCRIPT%" --local-model
 
@@ -83,5 +83,5 @@ echo.
 exit /b 0
 
 :printFlag
-powershell -NoProfile -Command "$b='Blue'; $r='Red'; $w='White'; Write-Host '*  *  *  *  *  *  *  *  *' -ForegroundColor $b -NoNewline; Write-Host '======================' -ForegroundColor $w; Write-Host '  *  *  *  *  *  *  *  * ' -ForegroundColor $b -NoNewline; Write-Host '======================' -ForegroundColor $r; Write-Host '*  *  *  *  *  *  *  *  *' -ForegroundColor $b -NoNewline; Write-Host '======================' -ForegroundColor $w; Write-Host '  *  *  *  *  *  *  *  * ' -ForegroundColor $b -NoNewline; Write-Host '======================' -ForegroundColor $r; Write-Host '*  *  *  *  *  *  *  *  *' -ForegroundColor $b -NoNewline; Write-Host '======================' -ForegroundColor $w; Write-Host '  *  *  *  *  *  *  *  * ' -ForegroundColor $b -NoNewline; Write-Host '======================' -ForegroundColor $r; Write-Host '===============================================' -ForegroundColor $w; Write-Host '===============================================' -ForegroundColor $r; Write-Host '===============================================' -ForegroundColor $w; Write-Host '===============================================' -ForegroundColor $r; Write-Host '===============================================' -ForegroundColor $w; Write-Host '===============================================' -ForegroundColor $r; Write-Host '===============================================' -ForegroundColor $w"
+powershell -NoProfile -Command "$b='Blue'; $r='Red'; $w='White'; Write-Host '* * * * * * *' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $w; Write-Host ' * * * * * * ' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $r; Write-Host '* * * * * * *' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $w; Write-Host ' * * * * * * ' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $r; Write-Host '* * * * * * *' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $w; Write-Host ' * * * * * * ' -ForegroundColor $b -NoNewline; Write-Host '==================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w; Write-Host '=================================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w; Write-Host '=================================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w; Write-Host '=================================' -ForegroundColor $r; Write-Host '=================================' -ForegroundColor $w"
 exit /b 0
