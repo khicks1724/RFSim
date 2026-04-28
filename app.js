@@ -17880,37 +17880,37 @@ const _analytics = {
   filterText: "",
 };
 
-function openAnalyticsModal() {
+function openAnalyticsModalLegacy() {
   if (!isAnalyticsAdmin()) {
     closeAnalyticsModal();
     return;
   }
   dom.analyticsModal?.classList.remove("hidden");
-  fetchAndRenderAnalytics();
+  fetchAndRenderAnalyticsLegacy();
 }
 
-function closeAnalyticsModal() {
+function closeAnalyticsModalLegacy() {
   dom.analyticsModal?.classList.add("hidden");
 }
 
-async function fetchAndRenderAnalytics() {
+async function fetchAndRenderAnalyticsLegacy() {
   try {
     _analytics.error = "";
     _analytics.data = await apiFetch("/admin/analytics");
-    renderAnalyticsKpis();
-    renderAnalyticsActiveTab();
-    drawAnalyticsCharts();
+    renderAnalyticsKpisLegacy();
+    renderAnalyticsActiveTabLegacy();
+    drawAnalyticsChartsLegacy();
   } catch (err) {
     _analytics.data = { users: [], events: [], aiTokens: [], projects: [], daily: [] };
     _analytics.error = err?.message || "Analytics request failed.";
-    renderAnalyticsKpis();
-    renderAnalyticsActiveTab();
-    drawAnalyticsCharts();
+    renderAnalyticsKpisLegacy();
+    renderAnalyticsActiveTabLegacy();
+    drawAnalyticsChartsLegacy();
     console.error("Analytics fetch failed:", err);
   }
 }
 
-function renderAnalyticsKpis() {
+function renderAnalyticsKpisLegacy() {
   const d = _analytics.data;
   if (!d) return;
   const totalVisits = d.users.reduce((s, u) => s + (u.visit_count || 0), 0);
@@ -17925,7 +17925,7 @@ function renderAnalyticsKpis() {
     : totalTokens;
 }
 
-function renderAnalyticsActiveTab() {
+function renderAnalyticsActiveTabLegacy() {
   const tab = _analytics.activeTab;
   const filter = _analytics.filterText.toLowerCase();
 
@@ -17939,7 +17939,7 @@ function renderAnalyticsActiveTab() {
       _raw: u,
     }));
     if (filter) rows = rows.filter((r) => r.username.toLowerCase().includes(filter));
-    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
     fillTable("analyticsUsersTable", rows, ["username", "created_at", "visit_count", "project_count", "last_seen"]);
   } else if (tab === "ai") {
     let rows = (_analytics.data?.aiTokens ?? []).map((r) => ({
@@ -17956,7 +17956,7 @@ function renderAnalyticsActiveTab() {
       r.provider.toLowerCase().includes(filter) ||
       r.model.toLowerCase().includes(filter)
     );
-    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
     fillTable("analyticsAiTable", rows, ["username", "provider", "model", "request_count", "total_input", "total_output", "total"]);
   } else if (tab === "projects") {
     let rows = (_analytics.data?.projects ?? []).map((p) => ({
@@ -17969,7 +17969,7 @@ function renderAnalyticsActiveTab() {
     if (filter) rows = rows.filter((r) =>
       r.username.toLowerCase().includes(filter) || r.name.toLowerCase().includes(filter)
     );
-    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
     fillTable("analyticsProjectsTable", rows, ["username", "name", "created_at", "updated_at", "snapshot_count"]);
   } else if (tab === "events") {
     let rows = (_analytics.data?.events ?? []).map((e) => ({
@@ -17985,12 +17985,12 @@ function renderAnalyticsActiveTab() {
       r.username.toLowerCase().includes(filter) ||
       r.event_type.toLowerCase().includes(filter)
     );
-    rows = sortRows(rows, _analytics.sortCol, _analytics.sortDir);
+    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
     fillTable("analyticsEventsTable", rows, ["created_at", "username", "event_type", "provider", "model", "input_tokens", "output_tokens"]);
   }
 }
 
-function setAnalyticsTab(tab) {
+function setAnalyticsTabLegacy(tab) {
   _analytics.activeTab = tab;
   _analytics.sortCol = null;
   _analytics.sortDir = "desc";
@@ -18000,11 +18000,11 @@ function setAnalyticsTab(tab) {
   document.querySelectorAll(".analytics-tab-panel").forEach((panel) => {
     panel.classList.toggle("hidden", panel.id !== `analyticsTab${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
   });
-  updateSortSelect(tab);
-  renderAnalyticsActiveTab();
+  updateSortSelectLegacy(tab);
+  renderAnalyticsActiveTabLegacy();
 }
 
-function updateSortSelect(tab) {
+function updateSortSelectLegacy(tab) {
   const sel = dom.analyticsSortSelect;
   if (!sel) return;
   const options = {
@@ -18017,12 +18017,12 @@ function updateSortSelect(tab) {
   sel.value = "";
 }
 
-function drawAnalyticsCharts() {
-  drawVisitSparkline();
-  drawTokenBarChart();
+function drawAnalyticsChartsLegacy() {
+  drawVisitSparklineLegacy();
+  drawTokenBarChartLegacy();
 }
 
-function drawVisitSparkline() {
+function drawVisitSparklineLegacy() {
   const canvas = document.getElementById("analyticsVisitChart");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -18046,7 +18046,7 @@ function drawVisitSparkline() {
   });
 }
 
-function drawTokenBarChart() {
+function drawTokenBarChartLegacy() {
   const canvas = document.getElementById("analyticsTokenChart");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -18078,36 +18078,36 @@ function drawTokenBarChart() {
   });
 }
 
-function initAnalytics() {
+function initAnalyticsLegacy() {
   dom.workspaceAnalyticsBtn?.addEventListener("click", () => {
     if (!isAnalyticsAdmin()) {
       return;
     }
     closeWorkspaceMenu();
-    openAnalyticsModal();
+    openAnalyticsModalLegacy();
   });
 
-  dom.analyticsModalCloseBtn?.addEventListener("click", closeAnalyticsModal);
+  dom.analyticsModalCloseBtn?.addEventListener("click", closeAnalyticsModalLegacy);
 
   dom.analyticsModal?.addEventListener("click", (e) => {
-    if (e.target === dom.analyticsModal) closeAnalyticsModal();
+    if (e.target === dom.analyticsModal) closeAnalyticsModalLegacy();
   });
 
-  dom.analyticsRefreshBtn?.addEventListener("click", fetchAndRenderAnalytics);
+  dom.analyticsRefreshBtn?.addEventListener("click", fetchAndRenderAnalyticsLegacy);
 
   dom.analyticsSearchInput?.addEventListener("input", () => {
     _analytics.filterText = dom.analyticsSearchInput.value;
-    renderAnalyticsActiveTab();
+    renderAnalyticsActiveTabLegacy();
   });
 
   dom.analyticsSortSelect?.addEventListener("change", () => {
     _analytics.sortCol = dom.analyticsSortSelect.value || null;
     _analytics.sortDir = "desc";
-    renderAnalyticsActiveTab();
+    renderAnalyticsActiveTabLegacy();
   });
 
   document.querySelectorAll(".analytics-tab").forEach((btn) => {
-    btn.addEventListener("click", () => setAnalyticsTab(btn.dataset.tab));
+    btn.addEventListener("click", () => setAnalyticsTabLegacy(btn.dataset.tab));
   });
 
   document.querySelectorAll(".analytics-table thead th[data-col]").forEach((th) => {
@@ -18125,11 +18125,11 @@ function initAnalytics() {
         h.classList.remove("sort-asc", "sort-desc");
       });
       th.classList.add(_analytics.sortDir === "asc" ? "sort-asc" : "sort-desc");
-      renderAnalyticsActiveTab();
+      renderAnalyticsActiveTabLegacy();
     });
   });
 
-  updateSortSelect("users");
+  updateSortSelectLegacy("users");
 }
 
 function getAnalyticsSessionId() {
@@ -18254,7 +18254,7 @@ function getSortableAnalyticsValue(value) {
   return value ?? "";
 }
 
-function sortRows(rows, col, dir) {
+function sortRowsLegacy(rows, col, dir) {
   if (!col) return rows;
   return [...rows].sort((a, b) => {
     const av = getSortableAnalyticsValue(a[col]);
