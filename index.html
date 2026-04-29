@@ -36,7 +36,7 @@
     href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
   >
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260424-01">
-  <link rel="stylesheet" href="./styles.css?v=20260429-30">
+  <link rel="stylesheet" href="./styles.css?v=20260429-32">
 </head>
 <body>
   <div id="authScreen" class="auth-screen hidden" aria-hidden="true">
@@ -825,8 +825,11 @@
         <!-- AI Panel — right sidebar alongside canvas -->
         <div id="planAiPanel" class="plan-ai-panel">
           <div class="plan-ai-header">
-            <strong>AI Agent</strong>
-            <span class="eyebrow">TO &amp; Organization Assistant</span>
+            <div class="plan-ai-header-text">
+              <strong>AI Agent</strong>
+              <span class="eyebrow">TO &amp; Organization Assistant</span>
+            </div>
+            <button class="plan-ai-collapse-btn" id="planAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
           </div>
           <div id="planAiMessages" class="ai-chat-messages plan-ai-messages">
             <article class="ai-chat-message ai-chat-message-system">
@@ -844,6 +847,7 @@
             </div>
           </form>
         </div>
+        <button class="view-ai-open-btn" id="planAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
         </div><!-- /to-main -->
       </div>
     </div>
@@ -888,8 +892,11 @@
           <!-- Topology AI panel -->
           <div id="topoAiPanel" class="plan-ai-panel topo-ai-panel">
             <div class="plan-ai-header">
-              <strong>AI Agent</strong>
-              <span class="eyebrow">Link Quality Analyst</span>
+              <div class="plan-ai-header-text">
+                <strong>AI Agent</strong>
+                <span class="eyebrow">Link Quality Analyst</span>
+              </div>
+              <button class="plan-ai-collapse-btn" id="topoAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
             </div>
             <div id="topoAiMessages" class="ai-chat-messages plan-ai-messages">
               <article class="ai-chat-message ai-chat-message-system">
@@ -907,6 +914,7 @@
               </div>
             </form>
           </div>
+          <button class="view-ai-open-btn" id="topoAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
         </div>
       </div>
     </div>
@@ -979,8 +987,11 @@
             <!-- Analyze AI panel -->
             <div id="analyzeAiPanel" class="plan-ai-panel analyze-ai-panel">
               <div class="plan-ai-header">
-                <strong>AI Agent</strong>
-                <span class="eyebrow">RF Analysis Assistant</span>
+                <div class="plan-ai-header-text">
+                  <strong>AI Agent</strong>
+                  <span class="eyebrow">RF Analysis Assistant</span>
+                </div>
+                <button class="plan-ai-collapse-btn" id="analyzeAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
               </div>
               <div id="analyzeAiMessages" class="ai-chat-messages plan-ai-messages">
                 <article class="ai-chat-message ai-chat-message-system">
@@ -998,6 +1009,7 @@
                 </div>
               </form>
             </div>
+            <button class="view-ai-open-btn" id="analyzeAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
           </div>
         </div>
       </div>
@@ -1225,6 +1237,12 @@
 
           <!-- Identity fields -->
           <div class="emitter-section-label" style="margin-top:16px">Identity</div>
+          <!-- TO Link badge — shown when linked -->
+          <div id="emToLinkBadge" class="em-to-link-badge hidden">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span id="emToLinkLabel">Linked to: —</span>
+            <button id="emToUnlinkBtn" class="em-to-unlink-btn" type="button" title="Remove link">&#10005;</button>
+          </div>
           <div class="emitter-field-group">
             <label>
               <span>Emitter Name</span>
@@ -1234,6 +1252,12 @@
               <span>Unit / Callsign</span>
               <input id="emUnit" type="text" placeholder="e.g. 1-68 AR, K 1">
             </label>
+            <div class="em-to-link-row">
+              <button id="emLinkToToBtn" class="ghost-button small em-link-to-btn" type="button">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                Link to TO
+              </button>
+            </div>
             <label>
               <span>Force Affiliation</span>
               <select id="emForce">
@@ -2476,7 +2500,7 @@
   <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
   <script src="./app-config.js"></script>
-  <script type="module" src="./app.js?v=20260429-77"></script>
+  <script type="module" src="./app.js?v=20260429-86"></script>
   <script>
   (function () {
     const canvas = document.getElementById('authWaterfall');
@@ -2624,5 +2648,33 @@
     });
   })();
   </script>
+
+  <!-- TO UNIT PICKER MODAL ══════════════════════════════════════ -->
+  <div id="toPickerModal" class="to-picker-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="toPickerTitle">
+    <div class="to-picker-modal">
+      <div class="to-picker-header">
+        <div class="to-picker-title-group">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <h3 id="toPickerTitle">Link to Table of Organization</h3>
+        </div>
+        <button id="toPickerCloseBtn" class="icon-button ghost-button" type="button" aria-label="Close">&#10005;</button>
+      </div>
+      <div class="to-picker-instructions">
+        Click a unit below to link this emitter to it. The emitter will inherit the unit's name, callsign, and affiliation.
+      </div>
+      <!-- Mini TO canvas -->
+      <div id="toPickerCanvas" class="to-picker-canvas">
+        <div id="toPickerWorld" class="to-world"></div>
+        <svg id="toPickerEdgeSvg" class="to-edge-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="toPickerEmpty" class="to-picker-empty hidden">
+          No units in the Table of Organization yet.<br>
+          <span class="fine-print">Build your TO in the PLAN view first.</span>
+        </div>
+      </div>
+      <div class="to-picker-footer">
+        <button id="toPickerCancelBtn" class="ghost-button small" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

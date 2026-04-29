@@ -2765,6 +2765,13 @@ const emitterModal = {
     setAssetPlacementMode(false);
     this.switchTab("rf");
     const isEditing = prefill && prefill.lat !== undefined;
+    // Track which asset is being edited for TO linking
+    _currentEmitterEditId = isEditing ? (prefill?.id ?? null) : null;
+    clearPendingToLink();
+    // Show existing TO link badge if editing
+    const existingToId = isEditing ? prefill?.toUnitId : null;
+    const existingToUnit = existingToId ? _toState.units.find(u => u.id === existingToId) : null;
+    updateEmitterToLinkBadge(existingToUnit ?? null);
     this.populateColocateOptions(prefill?.id ?? null);
     if (isEditing) {
       this.resetToDefaults();
@@ -2807,6 +2814,9 @@ const emitterModal = {
     const placeBtn = document.querySelector("#emitterPlaceBtn");
     if (placeBtn) placeBtn.textContent = "Place on Map";
     state.editingAssetId = null;
+    _currentEmitterEditId = null;
+    clearPendingToLink();
+    updateEmitterToLinkBadge(null);
   },
 
   switchTab(name) {
@@ -3120,6 +3130,12 @@ const emitterModal = {
       const asset = state.assets.find((a) => a.id === state.editingAssetId);
       if (asset) {
         Object.assign(asset, data);
+        // Commit TO link if pending
+        if (window._pendingToUnitId !== undefined) {
+          if (window._pendingToUnitId === null) delete asset.toUnitId;
+          else asset.toUnitId = window._pendingToUnitId;
+          clearPendingToLink();
+        }
         if (resolvedLocation) {
           asset.lat = resolvedLocation.lat;
           asset.lon = resolvedLocation.lng;
@@ -3190,6 +3206,7 @@ const emitterModal = {
 
 function initEmitterModal() {
   emitterModal.init();
+  initToPickerModal();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -5063,6 +5080,35 @@ function initViewModeToggle() {
     });
     dom.viewModeToggle.setAttribute("data-active", "map");
   }
+  initViewAiPanelCollapse();
+}
+
+function initViewAiPanelCollapse() {
+  // Wire collapse/expand for each secondary view AI panel
+  const panels = [
+    { panelId: "planAiPanel",    collapseId: "planAiCollapseBtn",    openId: "planAiOpenBtn"    },
+    { panelId: "topoAiPanel",    collapseId: "topoAiCollapseBtn",    openId: "topoAiOpenBtn"    },
+    { panelId: "analyzeAiPanel", collapseId: "analyzeAiCollapseBtn", openId: "analyzeAiOpenBtn" },
+  ];
+  for (const { panelId, collapseId, openId } of panels) {
+    const panel      = document.getElementById(panelId);
+    const collapseBtn = document.getElementById(collapseId);
+    const openBtn    = document.getElementById(openId);
+    if (!panel) continue;
+
+    const collapse = () => {
+      panel.classList.add("view-ai-collapsed");
+      if (collapseBtn) collapseBtn.innerHTML = "&#9664;"; // chevron left = closed
+      if (openBtn) openBtn.textContent = "AI";
+    };
+    const expand = () => {
+      panel.classList.remove("view-ai-collapsed");
+      if (collapseBtn) collapseBtn.innerHTML = "&#9654;"; // chevron right = open (collapse direction)
+    };
+
+    collapseBtn?.addEventListener("click", collapse);
+    openBtn?.addEventListener("click", expand);
+  }
 }
 
 function endPanelResize() {
@@ -6927,17 +6973,21 @@ function buildCompactAiScenarioSummary(contextIds = []) {
       viewsheds: state.viewsheds.length,
       terrains: state.terrains.length,
     },
-    assets: state.assets.slice(0, 40).map((asset) => ({
-      id: asset.id,
-      contentId: `asset:${asset.id}`,
-      name: asset.name,
-      unit: asset.unit ?? "",
-      force: asset.force ?? "",
-      lat: roundAiNumber(asset.lat),
-      lon: roundAiNumber(asset.lon),
-      frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
-      powerW: roundAiNumber(asset.powerW, 3),
-    })),
+    assets: state.assets.slice(0, 40).map((asset) => {
+      const toUnit = asset.toUnitId ? _toState.units.find(u => u.id === asset.toUnitId) : null;
+      return {
+        id: asset.id,
+        contentId: `asset:${asset.id}`,
+        name: asset.name,
+        unit: asset.unit ?? "",
+        force: asset.force ?? "",
+        lat: roundAiNumber(asset.lat),
+        lon: roundAiNumber(asset.lon),
+        frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
+        powerW: roundAiNumber(asset.powerW, 3),
+        toUnit: toUnit ? { label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
+      };
+    }),
     // importedItems: two tiers to keep token count bounded.
     // Tier 1: explicitly linked context items — full geometry + properties.
     // Tier 2: everything else — lean name/type/folder index (no geometry/properties), capped at 400.
@@ -8406,6 +8456,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   let systemText = [
     "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
     "You have deep knowledge of military and civilian radio systems, link budget analysis, antenna theory, terrain effects on propagation, and spectrum management.",
+    "Each asset in the scenario may have a 'toUnit' field linking it to a unit in the Table of Organization (TO). When answering questions about why specific units can or cannot communicate, cross-reference their linked emitter's frequencyMHz, waveform, power, elevation, and distance. The TO also contains parent-child hierarchy via toLinks. Use this to answer questions like 'why can't Kilo 1st Platoon talk to Kilo 3rd Platoon' by finding their linked emitters and diagnosing the RF path.",
     "For map-item location questions ('where is X', 'what grid is X', 'find X'), always answer in a complete sentence: '<name> is located at <coordinate>.' — never return just a raw coordinate with no context.",
     "Keep responses terse by default. Do not preface answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
     "For a single location answer, one sentence is enough. For ambiguous lookups, list at most 3 short candidates each on its own line with name and coordinate.",
@@ -10930,7 +10981,10 @@ function addAsset(latlng) {
     lat: latlng.lat,
     lon: latlng.lng,
     groundElevationM: sampleTerrainElevation(latlng.lat, latlng.lng),
+    // Carry forward TO link if user picked one in the emitter modal
+    ...(window._pendingToUnitId != null ? { toUnitId: window._pendingToUnitId } : {}),
   });
+  clearPendingToLink();
 
   const marker = L.marker(latlng, {
     icon: createEmitterIcon(asset),
@@ -20081,6 +20135,260 @@ function esc(s) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   TO ↔ EMITTER LINK SYSTEM
+   _toEmitterLinks: Map<emitterId, toUnitId>
+   Stored on state.assets items as .toUnitId
+═══════════════════════════════════════════════════════════════ */
+
+// The emitter currently being edited (set when modal opens)
+let _currentEmitterEditId = null;
+
+function initToPickerModal() {
+  const linkBtn   = document.getElementById("emLinkToToBtn");
+  const closeBtn  = document.getElementById("toPickerCloseBtn");
+  const cancelBtn = document.getElementById("toPickerCancelBtn");
+  const unlinkBtn = document.getElementById("emToUnlinkBtn");
+
+  linkBtn?.addEventListener("click", openToPicker);
+  closeBtn?.addEventListener("click", closeToPicker);
+  cancelBtn?.addEventListener("click", closeToPicker);
+  unlinkBtn?.addEventListener("click", () => {
+    unlinkEmitterFromTo();
+    updateEmitterToLinkBadge(null);
+  });
+
+  // Close on backdrop click
+  document.getElementById("toPickerModal")?.addEventListener("click", (e) => {
+    if (e.target === document.getElementById("toPickerModal")) closeToPicker();
+  });
+}
+
+function openToPicker() {
+  const modal = document.getElementById("toPickerModal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  renderToPickerCanvas();
+}
+
+function closeToPicker() {
+  document.getElementById("toPickerModal")?.classList.add("hidden");
+}
+
+function renderToPickerCanvas() {
+  const world  = document.getElementById("toPickerWorld");
+  const edgeSvg = document.getElementById("toPickerEdgeSvg");
+  const empty  = document.getElementById("toPickerEmpty");
+  if (!world || !edgeSvg) return;
+
+  world.innerHTML = "";
+  edgeSvg.innerHTML = "";
+
+  if (!_toState.units.length) {
+    empty?.classList.remove("hidden");
+    return;
+  }
+  empty?.classList.add("hidden");
+
+  // Run auto-layout to position units sensibly for the picker
+  const snapshot = _toState.units.map(u => ({ ...u }));
+  const linkSnap = [..._toState.links];
+
+  // Compute positions using same layout algorithm but write to temp objects
+  const tempUnits = JSON.parse(JSON.stringify(_toState.units));
+  const H_GAP = 120, V_GAP = 130;
+
+  function subtreeWidth(id) {
+    const children = linkSnap.filter(l => l.parentId === id).map(l => l.childId);
+    if (!children.length) return H_GAP;
+    return Math.max(H_GAP, children.reduce((s, cid) => s + subtreeWidth(cid), 0));
+  }
+  function layout(id, x, y) {
+    const u = tempUnits.find(u => u.id === id);
+    if (!u) return;
+    u.x = x; u.y = y;
+    const children = linkSnap.filter(l => l.parentId === id).map(l => l.childId);
+    const totalW = children.reduce((s, cid) => s + subtreeWidth(cid), 0);
+    let cx = x - totalW / 2;
+    for (const cid of children) { const w = subtreeWidth(cid); layout(cid, cx + w/2, y + V_GAP); cx += w; }
+  }
+  const childSet = new Set(linkSnap.map(l => l.childId));
+  const roots = tempUnits.filter(u => !childSet.has(u.id));
+  if (roots.length) {
+    let sx = 160;
+    for (const r of roots) { const w = subtreeWidth(r.id); layout(r.id, sx + w/2, 80); sx += w + H_GAP; }
+  } else {
+    // No links — just spread units across
+    tempUnits.forEach((u, i) => { u.x = 80 + (i % 5) * H_GAP; u.y = 80 + Math.floor(i / 5) * V_GAP; });
+  }
+
+  // Get currently linked toUnitId for this emitter
+  const currentToId = getCurrentEmitterToId();
+
+  // Render units (read-only — click to select)
+  for (const unit of tempUnits) {
+    const el = document.createElement("div");
+    el.className = "to-unit";
+    el.dataset.id = unit.id;
+    el.style.left = unit.x + "px";
+    el.style.top  = unit.y + "px";
+    if (unit.id === currentToId) el.classList.add("to-picker-selected");
+
+    // Show linked-emitter indicator for units already claimed by another emitter
+    const otherLink = getEmitterLinkedToUnit(unit.id);
+    if (otherLink && otherLink !== _currentEmitterEditId) el.classList.add("has-emitter-link");
+
+    el.innerHTML = `
+      <span class="to-unit-icon">${ms2525Svg(unit)}</span>
+      <span class="to-unit-label">${esc(unit.label)}</span>
+      <span class="to-unit-size-badge">${esc(unit.size || "")}</span>
+    `;
+    el.addEventListener("click", () => selectToUnitForEmitter(unit, el));
+    world.appendChild(el);
+  }
+
+  // Draw edges
+  renderPickerEdges(tempUnits, linkSnap, edgeSvg);
+
+  // Center the view
+  fitPickerView(tempUnits);
+}
+
+function renderPickerEdges(units, links, svg) {
+  svg.innerHTML = "";
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+  marker.setAttribute("id", "pickerArrow");
+  marker.setAttribute("markerWidth", "7"); marker.setAttribute("markerHeight", "7");
+  marker.setAttribute("refX", "3.5");      marker.setAttribute("refY", "6");
+  marker.setAttribute("orient", "auto");
+  marker.innerHTML = `<path d="M0,0 L7,0 L3.5,7 z" fill="#565d67"/>`;
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  const UNIT_H = 56;
+  for (const lnk of links) {
+    const p = units.find(u => u.id === lnk.parentId);
+    const c = units.find(u => u.id === lnk.childId);
+    if (!p || !c) continue;
+    const x1 = p.x, y1 = p.y + UNIT_H / 2;
+    const x2 = c.x, y2 = c.y - UNIT_H / 2;
+    const midY = (y1 + y2) / 2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`);
+    path.setAttribute("stroke", "#565d67");
+    path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke-linejoin", "miter");
+    path.setAttribute("marker-end", "url(#pickerArrow)");
+    svg.appendChild(path);
+  }
+}
+
+function fitPickerView(units) {
+  const canvas = document.getElementById("toPickerCanvas");
+  const world  = document.getElementById("toPickerWorld");
+  const svg    = document.getElementById("toPickerEdgeSvg");
+  if (!canvas || !world || !units.length) return;
+  const xs = units.map(u => u.x), ys = units.map(u => u.y);
+  const minX = Math.min(...xs) - 80, maxX = Math.max(...xs) + 80;
+  const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 80;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const scaleX = W / (maxX - minX), scaleY = H / (maxY - minY);
+  const zoom = Math.max(0.3, Math.min(1.6, Math.min(scaleX, scaleY) * 0.88));
+  const panX = W/2 - ((minX + maxX)/2) * zoom;
+  const panY = H/2 - ((minY + maxY)/2) * zoom;
+  const t = `translate(${panX}px,${panY}px) scale(${zoom})`;
+  world.style.transform = t;
+  svg.style.transform = t;
+}
+
+function selectToUnitForEmitter(unit, el) {
+  // Deselect previous
+  document.querySelectorAll("#toPickerWorld .to-picker-selected").forEach(e => e.classList.remove("to-picker-selected"));
+  el.classList.add("to-picker-selected");
+
+  // Update identity fields in the emitter modal
+  const affiliationMap = { friendly: "friendly", hostile: "enemy", neutral: "host-nation", unknown: "other" };
+  const nameInput = document.getElementById("emName");
+  const unitInput = document.getElementById("emUnit");
+  const forceSelect = document.getElementById("emForce");
+
+  if (nameInput && !nameInput.value) nameInput.value = unit.label;
+  if (unitInput) unitInput.value = unit.designator || unit.label;
+  if (forceSelect) forceSelect.value = affiliationMap[unit.affiliation] || "friendly";
+
+  // Store the link on the pending emitter state
+  linkEmitterToToUnit(unit.id);
+  updateEmitterToLinkBadge(unit);
+
+  closeToPicker();
+}
+
+function linkEmitterToToUnit(unitId) {
+  // Store on temporary pending state — committed when "Place on Map" is clicked
+  window._pendingToUnitId = unitId;
+}
+
+function unlinkEmitterFromTo() {
+  window._pendingToUnitId = null;
+  if (_currentEmitterEditId) {
+    const asset = (state.assets || []).find(a => a.id === _currentEmitterEditId);
+    if (asset) delete asset.toUnitId;
+  }
+  // Refresh topology/analyze if visible
+  refreshLinkedViews();
+}
+
+function getCurrentEmitterToId() {
+  if (window._pendingToUnitId !== undefined) return window._pendingToUnitId;
+  if (_currentEmitterEditId) {
+    const asset = (state.assets || []).find(a => a.id === _currentEmitterEditId);
+    return asset?.toUnitId ?? null;
+  }
+  return null;
+}
+
+function getEmitterLinkedToUnit(unitId) {
+  return (state.assets || []).find(a => a.toUnitId === unitId)?.id ?? null;
+}
+
+function updateEmitterToLinkBadge(unit) {
+  const badge = document.getElementById("emToLinkBadge");
+  const label = document.getElementById("emToLinkLabel");
+  if (!badge) return;
+  if (!unit) {
+    badge.classList.add("hidden");
+    if (label) label.textContent = "Linked to: —";
+    return;
+  }
+  badge.classList.remove("hidden");
+  if (label) label.textContent = `Linked to: ${unit.label}${unit.size ? ` (${unit.size})` : ""}`;
+}
+
+function commitEmitterToLink(emitterId) {
+  if (window._pendingToUnitId === undefined || window._pendingToUnitId === null) return;
+  const asset = (state.assets || []).find(a => a.id === emitterId);
+  if (asset) {
+    asset.toUnitId = window._pendingToUnitId;
+    // Refresh TO canvas to show linked badge on the unit
+    refreshLinkedViews();
+  }
+  window._pendingToUnitId = undefined;
+}
+
+function clearPendingToLink() {
+  window._pendingToUnitId = undefined;
+}
+
+function refreshLinkedViews() {
+  // If topology or analyze view is active, re-render
+  if (state.ui?.currentView === "topology") renderTopologyView();
+  if (state.ui?.currentView === "analyze")  renderAnalyzeView();
+  // Refresh TO canvas if PLAN is open to update emitter-link indicators
+  if (state.ui?.currentView === "plan" && _toState._initialized) renderToView();
+}
+
+/* ═══════════════════════════════════════════════════════════════
    PLAN VIEW — Military Table of Organization Builder
 ═══════════════════════════════════════════════════════════════ */
 const _toState = {
@@ -20797,10 +21105,16 @@ function buildTopoAiContext() {
   return JSON.stringify({
     view: "topology",
     emitterCount: emitters.length,
-    emitters: emitters.slice(0, 30).map(e => ({
-      id: e.id, name: e.name, freq: e.freq || e.frequency, waveform: e.waveform,
-      netId: e.netId || e.net_id, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
-    })),
+    emitters: emitters.slice(0, 30).map(e => {
+      const toUnit = e.toUnitId ? _toState.units.find(u => u.id === e.toUnitId) : null;
+      return {
+        id: e.id, name: e.name, freq: e.freq || e.frequency, waveform: e.waveform,
+        netId: e.netId || e.net_id, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
+        toUnit: toUnit ? { id: toUnit.id, label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
+      };
+    }),
+    toUnits: _toState.units.map(u => ({ id: u.id, label: u.label, size: u.size, affiliation: u.affiliation, type: u.type })),
+    toLinks: _toState.links,
   });
 }
 
@@ -20969,11 +21283,17 @@ function buildAnalyzeAiContext() {
   return JSON.stringify({
     view: "analyze",
     emitterCount: emitters.length,
-    emitters: emitters.slice(0, 40).map(e => ({
-      id: e.id, name: e.name, freq: e.freq || e.frequency, bandwidth: e.bandwidth,
-      waveform: e.waveform, antenna: e.antenna || e.antennaType,
-      power: e.power || e.txPower, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
-    })),
+    emitters: emitters.slice(0, 40).map(e => {
+      const toUnit = e.toUnitId ? _toState.units.find(u => u.id === e.toUnitId) : null;
+      return {
+        id: e.id, name: e.name, freq: e.freq || e.frequency, bandwidth: e.bandwidth,
+        waveform: e.waveform, antenna: e.antenna || e.antennaType,
+        power: e.power || e.txPower, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
+        toUnit: toUnit ? { label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
+      };
+    }),
+    toUnits: _toState.units.map(u => ({ id: u.id, label: u.label, size: u.size, affiliation: u.affiliation, type: u.type })),
+    toLinks: _toState.links,
   });
 }
 
