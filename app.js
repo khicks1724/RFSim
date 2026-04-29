@@ -5107,20 +5107,27 @@ function initViewAiPanelCollapse() {
     const collapseBtn = document.getElementById(collapseId);
     const openBtn    = document.getElementById(openId);
     if (!panel) continue;
+    const divider = panel.previousElementSibling?.classList.contains("view-ai-divider")
+      ? panel.previousElementSibling : null;
 
     const collapse = () => {
       panel.classList.add("view-ai-collapsed");
-      if (collapseBtn) collapseBtn.innerHTML = "&#9664;"; // chevron left = closed
+      if (divider) divider.style.opacity = "0";
+      if (divider) divider.style.pointerEvents = "none";
+      if (collapseBtn) collapseBtn.innerHTML = "&#9664;";
       if (openBtn) openBtn.textContent = "AI";
     };
     const expand = () => {
       panel.classList.remove("view-ai-collapsed");
-      if (collapseBtn) collapseBtn.innerHTML = "&#9654;"; // chevron right = open (collapse direction)
+      if (divider) divider.style.opacity = "";
+      if (divider) divider.style.pointerEvents = "";
+      if (collapseBtn) collapseBtn.innerHTML = "&#9654;";
     };
 
     collapseBtn?.addEventListener("click", collapse);
     openBtn?.addEventListener("click", expand);
   }
+  initViewAiDividers();
 }
 
 function endPanelResize() {
@@ -5490,6 +5497,7 @@ function renderAiEmptyState() {
 }
 
 function syncAiUi() {
+  document.dispatchEvent(new Event("ai-status-changed"));
   if (!dom.aiProviderSelect || !dom.aiApiKeyInput) {
     return;
   }
@@ -20792,7 +20800,7 @@ function ms2525Svg(unit) {
     ? `<line x1="4" y1="8" x2="52" y2="48" stroke="${col.frame}" stroke-width="1.5"/>
        <line x1="52" y1="8" x2="4" y2="48" stroke="${col.frame}" stroke-width="1.5"/>`
     : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" width="56" height="56" class="ms2525-icon">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -10 56 70" width="56" height="66" class="ms2525-icon">
     ${frameShape}
     ${hostile_marks}
     <text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
@@ -21762,13 +21770,15 @@ function wireViewAiForm(formId, inputId, sendId, clearId, messagesId, contextFn)
   if (!form || !input || !msgs) return;
   _viewAiWired.add(formId);
 
-  // Enable input when AI is configured
+  // Enable input when AI is configured and ready
   const checkAi = () => {
-    const hasProvider = !!(state.ui?.aiProvider || localStorage.getItem("ai_api_key") || localStorage.getItem("ai_provider_url"));
-    input.disabled = !hasProvider;
-    if (sendBtn) sendBtn.disabled = !hasProvider;
+    const ready = state.ai?.status === "ready" || state.ai?.status === "pending";
+    input.disabled = !ready;
+    if (sendBtn) sendBtn.disabled = !ready;
   };
   checkAi();
+  // Re-check when AI status changes
+  document.addEventListener("ai-status-changed", checkAi);
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -21776,17 +21786,30 @@ function wireViewAiForm(formId, inputId, sendId, clearId, messagesId, contextFn)
     if (!text) return;
     appendViewAiMessage(msgs, "user", text);
     input.value = "";
-    appendViewAiMessage(msgs, "assistant", "Thinking…", "pending");
-    const context = contextFn ? contextFn() : "{}";
+    input.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+
+    const pendingEl = appendViewAiMessage(msgs, "assistant", "", "pending");
+    const bodyEl = pendingEl.querySelector(".ai-chat-message-body");
+    let accumulated = "";
+
     try {
-      const reply = await callViewAi(text, context);
-      const pending = msgs.querySelector(".ai-chat-message.pending");
-      if (pending) pending.remove();
-      appendViewAiMessage(msgs, "assistant", reply);
+      const context = contextFn ? contextFn() : "{}";
+      const result = await callViewAi(text, context, (chunk) => {
+        accumulated = chunk;
+        bodyEl.innerHTML = renderMarkdown(accumulated);
+        msgs.scrollTop = msgs.scrollHeight;
+      });
+      pendingEl.classList.remove("pending");
+      if (!accumulated && result) {
+        bodyEl.innerHTML = renderMarkdown(result);
+        msgs.scrollTop = msgs.scrollHeight;
+      }
     } catch (err) {
-      const pending = msgs.querySelector(".ai-chat-message.pending");
-      if (pending) pending.remove();
-      appendViewAiMessage(msgs, "assistant", `Error: ${err.message}`);
+      pendingEl.classList.remove("pending");
+      bodyEl.innerHTML = `<em>Error: ${err.message}</em>`;
+    } finally {
+      checkAi();
     }
   });
 
@@ -21802,65 +21825,59 @@ function appendViewAiMessage(container, role, text, extraClass) {
   label.textContent = role === "user" ? "You" : "Assistant";
   const body = document.createElement("div");
   body.className = "ai-chat-message-body";
-  body.innerHTML = renderMarkdown(text);
+  if (text) body.innerHTML = renderMarkdown(text);
   el.appendChild(label);
   el.appendChild(body);
   container.appendChild(el);
   container.scrollTop = container.scrollHeight;
+  return el;
 }
 
-async function callViewAi(userMessage, contextJson) {
-  // Reuse the same provider logic as the main AI chat
-  const providerUrl = state.ui?.aiProviderUrl || localStorage.getItem("ai_provider_url") || "";
-  const apiKey      = state.ui?.aiApiKey      || localStorage.getItem("ai_api_key")      || "";
-  const model       = state.ui?.aiModel       || localStorage.getItem("ai_model")        || "claude-sonnet-4-6";
+async function callViewAi(userMessage, contextJson, onToken) {
+  const systemText = [
+    "You are an expert military RF communications and operations planning assistant embedded in RF Planner.",
+    "The user is working in a specialized view. Here is the current scenario context (JSON):",
+    contextJson,
+    "Be concise, technical, and actionable. Format responses with markdown where helpful.",
+    "USER REQUEST:",
+    userMessage,
+  ].join("\n\n");
 
-  const systemPrompt = `You are an expert military RF communications and operations planning assistant embedded in RF Planner.
-The user is working in a specialized view. Here is the current scenario context (JSON):
-${contextJson}
-Be concise, technical, and actionable. Format responses with markdown where helpful.`;
+  const messages = [{ role: "user", content: systemText }];
 
-  if (providerUrl.includes("anthropic") || providerUrl.includes("claude") || model.includes("claude")) {
-    const payload = {
-      model,
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    };
-    const resp = await fetch(providerUrl || "https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(payload),
+  const providerResponse = state.ai.provider === "anthropic"
+    ? await callAnthropic(messages, 2048, 0.2, onToken)
+    : state.ai.provider === "local-model"
+      ? await callLocalModel(messages, 4096, 0.2, onToken)
+      : await callGenAiMil(messages, 4096, 0.2, onToken);
+
+  return providerResponse.text;
+}
+
+/* ── View AI panel drag-to-resize ── */
+function initViewAiDividers() {
+  document.querySelectorAll(".view-ai-divider").forEach(divider => {
+    divider.addEventListener("mousedown", (e) => {
+      const panelId = divider.dataset.target;
+      const panel = document.getElementById(panelId);
+      if (!panel || panel.classList.contains("view-ai-collapsed")) return;
+      e.preventDefault();
+      document.body.classList.add("is-resizing");
+
+      const onMove = (ev) => {
+        const rect = panel.parentElement.getBoundingClientRect();
+        const newWidth = clamp(rect.right - ev.clientX, 240, 640);
+        panel.style.width = newWidth + "px";
+      };
+      const onUp = () => {
+        document.body.classList.remove("is-resizing");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
     });
-    if (!resp.ok) throw new Error(`AI error ${resp.status}`);
-    const data = await resp.json();
-    return data.content?.[0]?.text || "(no response)";
-  }
-
-  // Generic OpenAI-compatible endpoint
-  const payload = {
-    model,
-    max_tokens: 1024,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user",   content: userMessage },
-    ],
-  };
-  const resp = await fetch(providerUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    },
-    body: JSON.stringify(payload),
   });
-  if (!resp.ok) throw new Error(`AI error ${resp.status}`);
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || data.content?.[0]?.text || "(no response)";
 }
 
 /* Helper — haversine km (may already exist; guard against redeclaration) */

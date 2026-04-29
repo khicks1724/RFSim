@@ -1,435 +1,442 @@
-# RF Planner
+# RF Sim
 
-Browser-based RF planning and visualization for building scenarios, placing emitters, running coverage analysis, and reviewing terrain-aware results in 2D and 3D.
+RF Sim is a browser-based RF planning and analysis web app for building tactical communications and EW scenarios, placing emitters on a live map, running terrain-aware coverage analysis, organizing unit structures, and generating planning products with AI assistance.
 
-## What It Does
+The primary way to use the app is the hosted site:
 
-- Build RF scenarios on a Leaflet map with a synchronized Cesium 3D view
-- Place radios, jammers, relays, and receivers with configurable heights and propagation properties
-- Import `GeoJSON`, `KML`, `KMZ`, and ATAK data package `ZIP` overlays as editable map content
-- Organize everything in **Map Contents** with folders, search, rename, hide, reorder, and bulk delete
-- Draw circles, rectangles, polylines, and polygons directly on the map
-- Run coverage simulations with configurable propagation models and view the results as an overlay
-- Control how coverage is rendered — transparent, gradient, or shadowed no-LOS areas
-- Run terrain-aware Tx/Rx site planning inside a drawn region
-- Use the **AI assistant** for PACE planning, SOI/CEOI drafting, spectrum documents, COA support, and live scenario queries
-- Save and switch between named projects with per-project autosave
+**https://www.rfsim.us**
 
-## Architecture
+This repository contains the web client, local helper services, and the optional backend/API used for authenticated projects, snapshots, analytics, and shared deployments.
 
-The app is primarily **client-side**.
+## What The App Does
 
-| File | Purpose |
-|---|---|
-| `app.js` | UI, map state, imports, Cesium/Leaflet sync, persistence, AI integration |
-| `simulation-worker.js` | Coverage, inspection, and planning — runs off the main thread |
-| `index.html` + `styles.css` | Application shell and UI |
-| `localStorage` | Settings, map state, profiles, AI config, Cesium token, per-project KMZ geometry |
+RF Sim currently includes four major workspace views:
 
-Coverage math runs **in the browser worker on the user's machine**, not on the server. The server handles auth and project storage only.
+- `PLAN` for building a table of organization, creating unit hierarchies, and switching between the existing AIGEN symbology and MIL-STD-2525-style symbols
+- `MAP` for placing radios, jammers, relays, receivers, overlays, routes, DTED terrain, and other scenario content on a 2D map with linked 3D Cesium viewing
+- `TOPOLOGY` for visualizing network link relationships and connection quality between placed emitters
+- `ANALYZE` for reviewing RF analytics, terrain impacts, conflicts, frequency distribution, and emitter summaries
 
-## Quick Start
+Additional capabilities in the current app:
 
-### Browser-only (no backend)
+- 2D Leaflet map and synchronized 3D Cesium scene
+- Terrain-aware LOS and propagation analysis
+- Building-aware propagation when Cesium terrain/buildings are enabled
+- DTED import and custom terrain source support
+- Import of `GeoJSON`, `KML`, `KMZ`, and ATAK data package `ZIP` files
+- Editable map drawings including circles, rectangles, polylines, and polygons
+- Map Contents panel with folders, visibility toggles, search, rename, reorder, and delete
+- Project saving, duplication, deletion, and snapshots when signed in
+- Guest mode for local/in-browser use without an account
+- AI-assisted planning and document generation
+- Optional offline data caching through the local data server
+- Workspace admin analytics for site operators
 
-Serve the repo with any local web server:
+## Primary Use
 
-```bash
-python -m http.server 8080
-# or
-npx serve .
-```
+For most users, the correct entry point is the hosted deployment:
 
-Open `http://localhost:8080`.
+`https://www.rfsim.us`
 
-### Hosted multi-user
+Use the hosted site if you want:
 
-See [deploy/](deploy/) and [docs/aws-ec2-production.md](docs/aws-ec2-production.md) for the full stack (Node backend + PostgreSQL + nginx on EC2).
+- the normal production experience
+- account sign-in and server-backed projects
+- snapshots and shared persistence
+- admin analytics, if your account has admin access
+- the least setup work
 
-```bash
-docker compose up -d --build
-```
-
-## Core Workflows
-
-### 1 — Place emitters
-
-Click the map to open the emitter placement tool. Configure:
-
-- Radio type (see [Radio Library](#radio-library) below)
-- Tx power, frequency, antenna gain, height
-- Propagation model and terrain/building settings
-
-### 2 — Import overlays
-
-Drop `GeoJSON`, `KML`, `KMZ`, or ATAK `ZIP` files onto the map. Folder hierarchy, styles, and item names are preserved. KMZ geometry is stored **per project** in browser storage so it survives project switches and page reloads without re-importing.
-
-### 3 — Run coverage
-
-Open the **Simulate** panel, select an emitter, configure the propagation options, and run. Results appear as a color-coded RSSI overlay. Use the render controls to set how no-LOS areas appear:
-
-- **Transparent** — blocked areas show nothing (default)
-- **Shadow** — blocked areas show a light gray tint
-- **Gradient** — full RSSI gradient regardless of LOS
-
-### 4 — Review in 3D
-
-Switch to **3D View** at any time to see terrain, city mesh, and coverage layers in context.
-
-### 5 — AI planning
-
-Open **AI Chat** and ask the assistant to help draft:
-
-- PACE plan
-- SOI / CEOI
-- Spectrum management document
-- After-action report
-- Route analysis narrative
-- COA support
-- Relay node placement
-
-The assistant has full read access to the current map state — assets, overlays, shapes, viewsheds, and planning regions.
-
-## Radio Library
-
-Includes the following emitter types:
-
-**Tactical Radios**
-- AN/PRC-163 Falcon IV — multiband wideband
-- AN/PRC-158 — multiband manpack
-- AN/PRC-152A — multiband handheld
-- AN/PRC-117G — manpack SATCOM/UHF
-- AN/PRC-160 HF — HF/NVIS manpack
-- Motorola XTS 2500 — P25 VHF/UHF
-
-**Vehicle / Elevated**
-- AN/VRC-110 — vehicle-mounted
-- WIN-T CPM-200 / PSE-5 — vehicle network node
-- CP Node — network infrastructure
-
-**Mesh / MANET**
-- Silvus StreamCaster 4200 / 4400 — MIMO mesh
-- Wave Relay MPU-5 — MANET
-
-**SATCOM**
-- Starlink / Starshield — LEO SATCOM
-- MUOS terminal — GEO UHF SATCOM
-
-**EW / ISR**
-- AN/MLQ-40 Prophet — EW/SIGINT
-- Generic jammer / generic receiver
-
-## Cesium Setup
-
-A Cesium Ion token unlocks streamed terrain, Google Photorealistic 3D Tiles, and OSM building RF modeling.
-
-For a site-wide default token in a deployed build, set `window.EW_SIM_CONFIG.cesiumIonDefaultToken` in [app-config.js](app-config.js). User-saved local tokens still override the default. Do not commit a sensitive unrestricted token to source control; use a restricted token scoped to your deployed origin.
-
-**Without a token** — the app defaults to:
-- Ellipsoid terrain (flat earth in 3D)
-- Google Satellite basemap
-- Google Photorealistic 3D city mesh (visual only)
-- RF building model off
-
-**With a token** — the app defaults to:
-- Cesium World Terrain
-- Esri World Imagery basemap
-- Esri World Imagery (3D)
-- Google Photorealistic 3D city mesh
-- Cesium Ion OSM Buildings (RF obstruction model)
-- Reinforced Concrete building material
-
-### Getting a token
-
-1. Go to [cesium.com/ion](https://cesium.com/ion) → **Access Tokens** → **Create token**
-2. Name it (e.g. `RFPlanner`), enable `assets:read`, restrict Allowed URLs if deploying publicly
-3. Copy the token and paste it into the app's **Imagery → Cesium Ion Token** field
-
-The app saves the token in browser storage. Clearing site data will remove it.
-
-## Propagation Models
-
-| Model | Description |
-|---|---|
-| Free Space Path Loss | Ideal free-space, no terrain |
-| Terrain | Terrain-aware LOS and diffraction |
-| Terrain and Weather | Adds atmospheric refraction |
-| Buildings and Weather | Adds OSM building obstruction (requires Cesium Ion) |
-| HF / NVIS | Short-range NVIS (2–12 MHz) and long-haul skywave (12–30 MHz) |
-
-Only **Buildings and Weather** streams OSM building data — it is slower than terrain-only modes.
-
-## Workspaces and Projects
-
-Sign in to enable named projects. The active project is shown in the top bar.
-
-- **Autosave** runs automatically after every map change and shows a ring/checkmark/error indicator
-- **KMZ geometry** is stored per project in browser storage — switching projects restores the correct overlays
-- Projects store assets, drawn shapes, and map state on the server; large KMZ files stay in browser storage only
-- **Snapshots** can be created from the workspace menu to preserve a point-in-time state
-
-Guest mode (no sign-in) works fully in browser storage only.
-
-## AI Providers
-
-The AI assistant supports three provider types. Configure them in **Settings → AI Integration**.
-
-### Anthropic (Claude) / GenAI.mil (STARK)
-
-Enter your API key in the settings panel. GenAI.mil keys start with `STARK_`. If GenAI.mil is restricted to approved workstation/network paths, run the included secure localhost relay:
-
-```bash
-node genai-proxy.js --local-model
-```
-
-For GenAI.mil, the app now queries `/v1/models` for the selected key, populates the model dropdown in Settings, and prefers `gemini-3.1-pro` or `gemini-3.1` when those are available. Transport order is now:
-
-1. `https://127.0.0.1:8788/v1/*` secure local relay on the operator workstation
-2. Same-origin backend relay under `/api/ai/genai-mil/*`
-3. Direct `https://api.genai.mil/v1/*` access when running on localhost
-4. Legacy `http://127.0.0.1:8787/v1/*` proxy for non-secure local runs
-
-### Local Model (Ollama / LM Studio / llama.cpp)
-
-Run AI inference entirely on your own hardware — no external API keys or internet access required.
-
-**Prerequisites:**
-- [Node.js](https://nodejs.org) (v18 or later)
-- [Git for Windows](https://git-scm.com/download/win) (includes OpenSSL, required for cert generation on Windows)
-- One of: [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or llama.cpp
-
----
-
-#### Step 1 — Install and start your model server
-
-**Ollama (recommended)**
-
-Download and install from [ollama.com](https://ollama.com). Then in a terminal:
-
-```powershell
-ollama serve
-ollama pull gemma3:4b     # or llama3, mistral, phi3, etc.
-```
-
-Ollama runs on `http://localhost:11434` by default.
-
-**LM Studio**
-
-Download from [lmstudio.ai](https://lmstudio.ai). Load a model, then go to **Local Server** in the left sidebar and click **Start Server**. Runs on `http://localhost:1234` by default.
-
-**llama.cpp**
-
-```powershell
-./server.exe -m your-model.gguf --port 8080
-```
-
----
-
-#### Step 2 — Add Git's OpenSSL to your PATH (Windows only, one time)
-
-The proxy needs OpenSSL to generate a self-signed TLS certificate. Git for Windows ships OpenSSL at `C:\Program Files\Git\usr\bin`.
-
-Open PowerShell and run:
-
-```powershell
-# Temporary (this session only)
-$env:PATH += ";C:\Program Files\Git\usr\bin"
-
-# Permanent (restart terminal after running this)
-[System.Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";C:\Program Files\Git\usr\bin", "User")
-```
-
----
-
-#### Step 3 — Start the proxy and generate the certificate
-
-Navigate to the project folder and run:
-
-```powershell
-cd "C:\Users\<you>\Desktop\Test Coding\EW_Sim"
-node genai-proxy.js --local-model
-```
-
-On first run the proxy generates `certs/proxy.crt` and prints the trust command for your platform. You will see output like:
-
-```
-🔐  Generating self-signed TLS certificate for localhost...
-✅  Certificate written to certs/
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- ONE-TIME SETUP — trust the certificate
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Run this once in PowerShell (as Administrator):
-
-    Import-Certificate -FilePath "...\certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root
-
-  Then restart Chrome / Edge.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🌐  GenAI.mil proxy   →  http://127.0.0.1:8787/v1/chat/completions
-🤖  Local model proxy →  https://127.0.0.1:8788/v1/local/chat/completions
-```
-
----
-
-#### Step 4 — Trust the certificate (one time per machine)
-
-Open PowerShell **as Administrator** (right-click → Run as Administrator) and paste the command printed by the proxy:
-
-```powershell
-Import-Certificate -FilePath "C:\Users\<you>\Desktop\Test Coding\EW_Sim\certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root
-```
-
-You should see output confirming the thumbprint was added to the Root store. Then **fully close and reopen Chrome or Edge**.
-
-| Platform | Trust command |
-|---|---|
-| **Windows** (Admin PowerShell) | `Import-Certificate -FilePath "certs\proxy.crt" -CertStoreLocation Cert:\LocalMachine\Root` |
-| **macOS** | `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/proxy.crt` |
-| **Linux — Chrome** | `chrome://settings/certificates` → Authorities → Import |
-| **Linux — Firefox** | `about:preferences#privacy` → View Certificates → Authorities → Import |
-
-> The certificate is valid for 10 years. You only need to do this once per machine. If you delete the `certs/` folder and regenerate, trust it again.
-
----
-
-#### Step 5 — Configure the app
-
-1. Open **Settings → AI Integration**
-2. Set **Provider** to **Local Model (Ollama / LM Studio)**
-3. Click **Detect** — the app queries the proxy which discovers all loaded models
-4. Select your model from the dropdown (e.g. `gemma3:4b`)
-5. Click **Test Connection** — status should change to **Connected**
-6. Click **Save Key** to persist the config
-
-If the Model Server URL field is blank it defaults to Ollama (`http://localhost:11434/v1/chat/completions`). Change it only if using LM Studio (`http://localhost:1234/v1/chat/completions`) or llama.cpp.
-
----
-
-#### Keep the proxy running
-
-The proxy must be running whenever you use the local model. Start it before opening the app:
-
-```powershell
-cd "C:\Users\<you>\Desktop\Test Coding\EW_Sim"
-node genai-proxy.js --local-model
-```
-
-To use a different model server port, set the `LOCAL_MODEL_URL` environment variable:
-
-```powershell
-$env:LOCAL_MODEL_URL = "http://localhost:1234/v1/chat/completions"
-node genai-proxy.js --local-model
-```
-
-#### Proxy endpoints
-
-| Endpoint | Purpose |
-|---|---|
-| `http://127.0.0.1:8787/v1/chat/completions` | GenAI.mil forwarding (HTTP) |
-| `https://127.0.0.1:8788/v1/local/chat/completions` | Local model forwarding (HTTPS) |
-| `https://127.0.0.1:8788/v1/local/health` | Model discovery / health check |
-
-## Deployment
-
-The full stack runs as Docker containers behind nginx. This is the path for a shared hosted deployment where multiple users sign in and have persistent projects.
-
-### Prerequisites
-
-- A Linux server (EC2, VPS, bare metal) with Docker and Docker Compose installed
-- A domain name pointed at the server's public IP
-- Ports 80 and 443 open in the firewall / security group
-
-### Configuration
-
-Copy the example environment file and fill in your values:
-
-```bash
-cp deploy/.env.example deploy/.env
-```
-
-Key variables in `deploy/.env`:
-
-| Variable | Description |
-|---|---|
-| `POSTGRES_PASSWORD` | Database password (choose a strong one) |
-| `JWT_SECRET` | Random secret for signing auth tokens (32+ chars) |
-| `APP_ORIGIN` | Your public URL, e.g. `https://rfplanner.example.com` |
-| `PORT` | Backend port inside the container (default `3000`) |
-
-### Start the stack
-
-```bash
-docker compose up -d --build
-```
-
-This starts three containers:
-- `rfplanner-db` — PostgreSQL database
-- `rfplanner-backend` — Node.js auth and project API
-- `rfplanner-nginx` — nginx reverse proxy serving the frontend and proxying `/api` to the backend
-
-Database migrations run automatically on startup.
-
-### HTTPS / TLS
-
-The nginx config in [deploy/](deploy/) is set up for Certbot. After the stack is running:
-
-```bash
-# Install Certbot on the host
-sudo apt install certbot python3-certbot-nginx
-
-# Obtain a certificate
-sudo certbot --nginx -d rfplanner.example.com
-```
-
-Certbot will patch the nginx config and set up auto-renewal.
-
-### Updating
-
-```bash
-git pull
-docker compose up -d --build
-```
-
-Migrations run automatically on restart. No manual SQL steps needed.
-
-### Logs
-
-```bash
-docker compose logs -f backend    # API logs
-docker compose logs -f nginx      # nginx access / error logs
-docker compose logs -f db         # Postgres logs
-```
-
-See [docs/aws-ec2-production.md](docs/aws-ec2-production.md) for a step-by-step EC2 setup guide.
+Run the repo locally only if you are developing, testing, using guest/local-only workflows, or operating your own deployment.
 
 ## Repository Layout
 
+```text
+app.js                  Main frontend application logic
+index.html              Application shell
+styles.css              Frontend styling
+app-config.js           Frontend runtime config
+simulation-worker.js    Coverage/planning worker
+frontend-dev-server.js  Local static server with /api proxy
+genai-proxy.js          Local AI relay for GenAI.mil and local model access
+local-data-server.js    Local offline tile/elevation/OSM cache server
+backend/                Node.js + PostgreSQL API for auth/projects/analytics
+deploy/                 Docker Compose + nginx deployment assets
+docs/                   Deployment and operational notes
+launchers/              Windows/macOS helper launchers
+images/                 App imagery and symbology assets
 ```
-app.js                  Main application controller
-simulation-worker.js    Coverage and planning worker (runs off main thread)
-index.html              App shell and UI structure
-styles.css              Styling and layout
-app-config.js           Frontend runtime config (API base URL, feature flags)
-genai-proxy.js          Optional GenAI.mil CORS proxy
-backend/                Auth and project persistence API (Node + PostgreSQL)
-deploy/                 Docker Compose and nginx deployment assets
-docs/                   Deployment and operations notes
-images/                 README images
+
+## How It Runs
+
+The frontend is mostly client-side. The browser handles:
+
+- UI state and interaction
+- map rendering
+- Cesium 3D rendering
+- most scenario editing
+- simulation worker execution
+- local persistence for guest sessions, settings, tokens, and some cached data
+
+The optional backend handles:
+
+- user registration and sign-in
+- project persistence
+- snapshots
+- admin analytics
+- server-side AI config storage and relays
+
+## Requirements
+
+The exact requirements depend on how you want to run the app.
+
+### Hosted use
+
+- A modern desktop browser
+- Chrome or Edge is preferred for the best compatibility
+
+### Frontend-only local use
+
+- Any static web server
+- Node.js is recommended because this repo includes a purpose-built frontend dev server
+
+### Full local stack
+
+- Node.js 18+
+- PostgreSQL
+- Backend dependencies installed from `backend/package.json`
+- A browser with WebGL support
+
+### Optional local helper services
+
+- `genai-proxy.js` for GenAI.mil and local model relays
+- `local-data-server.js` for offline tile/elevation/OSM caching
+- Git for Windows is useful on Windows because the proxy uses OpenSSL from Git to generate local certificates
+
+## Quick Start
+
+### 1. Hosted Site
+
+Open:
+
+```text
+https://www.rfsim.us
 ```
+
+This is the primary supported way to use RF Sim.
+
+### 2. Frontend-Only Local Run
+
+Use this when you want to work locally in guest mode without running the backend.
+
+### Option A: built-in Node frontend server
+
+```powershell
+node frontend-dev-server.js
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080
+```
+
+This is the best local frontend option because it serves the app correctly and can proxy `/api/*` requests to a backend on port `3000` if you later start one.
+
+### Option B: any static server
+
+```powershell
+python -m http.server 8080
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080
+```
+
+If you use a plain static server, backend-only features such as sign-in, saved projects, snapshots, and admin analytics will not work unless you also provide an API endpoint.
+
+### 3. Full Local Development Stack
+
+Use this when you want authenticated projects, snapshots, backend APIs, or to develop the full app locally.
+
+### Backend setup
+
+1. Install backend dependencies.
+
+```powershell
+cd backend
+npm install
+```
+
+2. Copy the backend environment file.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+3. Create a PostgreSQL database named `ew_sim` or update `DATABASE_URL` in `backend/.env` to point at your database.
+
+Default development values in `backend/.env.example`:
+
+```env
+PORT=3000
+NODE_ENV=development
+APP_ORIGIN=http://localhost:8080
+JWT_SECRET=replace-this-before-production
+DATABASE_SSL=false
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/ew_sim
+```
+
+4. Start the backend.
+
+```powershell
+node src/server.js
+```
+
+### Frontend setup
+
+In a second terminal, from the repo root:
+
+```powershell
+node frontend-dev-server.js
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080
+```
+
+### Windows one-click launcher
+
+If you are on Windows, the repo includes:
+
+```text
+launchers/local_run.bat
+```
+
+That launcher starts:
+
+- backend API on `3000`
+- frontend on `8080`
+- AI relay on `8787` and `8788`
+- offline data server on `8789`
+
+Use it only after Node.js is installed and your local PostgreSQL/backend configuration is ready.
+
+## Feature Overview
+
+### PLAN View
+
+PLAN is the table-of-organization builder. It currently supports:
+
+- adding units by affiliation, type, and echelon
+- arranging parent/child relationships
+- auto-layout for hierarchies
+- renaming, duplicating, deleting, and linking units
+- AI assistance scoped to the PLAN scenario
+- `AIGEN` renderer for the existing in-app generated icon style
+- `MILSTD` renderer for MIL-STD-2525-style symbology built from vendored Esri assets
+
+### MAP View
+
+MAP is the main scenario workspace. It supports:
+
+- placing emitters and RF/EW assets
+- configuring frequencies, power, antenna settings, and propagation options
+- drawing shapes and planning regions
+- importing terrain and geospatial overlays
+- browsing content in Map Contents
+- switching between 2D and Cesium 3D
+- terrain sampling and LOS inspection
+- offline download and local cache workflows
+
+### TOPOLOGY View
+
+TOPOLOGY summarizes network relationships derived from placed emitters and scenario state. It is used to inspect:
+
+- link connections
+- link quality
+- parent/child or network structure at a glance
+
+### ANALYZE View
+
+ANALYZE is the RF dashboard. It currently includes:
+
+- coverage summaries
+- frequency distribution charts
+- terrain impact summaries
+- conflict detection
+- waveform/configuration summaries
+- AI-assisted analysis based on current scenario state
+
+## Imports And Data
+
+RF Sim currently supports importing:
+
+- `GeoJSON`
+- `KML`
+- `KMZ`
+- ATAK data package `ZIP`
+- DTED terrain files
+
+Imported content can be organized and managed from Map Contents. Some large imported geometry, especially KMZ-derived content, is intentionally kept in browser storage rather than the server project payload.
+
+## Terrain, 3D, And Propagation
+
+The app can operate with different terrain levels:
+
+- no terrain
+- local DTED
+- Cesium World Terrain
+- custom Cesium terrain URL
+
+Propagation modes in the current app include:
+
+- free-space style calculations
+- terrain-aware propagation
+- terrain plus weather
+- buildings plus weather
+- HF/NVIS workflows
+
+Cesium support enables:
+
+- 3D terrain
+- imagery streaming
+- Google Photorealistic 3D Tiles for visualization
+- OSM building obstruction modeling when enabled
+
+## Cesium Token Setup
+
+A Cesium Ion token is required for the full Cesium streaming feature set.
+
+Without a token, the app still works, but some terrain/building features are reduced or unavailable.
+
+You can provide a token through the app settings/UI. The app also supports a site-wide default token through `app-config.js`.
+
+Use a restricted token for deployed environments. Do not rely on an unrestricted token in public source or public deployments.
+
+## AI Providers
+
+The app currently supports these AI provider modes:
+
+- `GenAI.mil (STARK)`
+- `Anthropic (Claude)`
+- `Local Model (Ollama / LM Studio / llama.cpp-compatible relay)`
+
+AI is used for:
+
+- planning assistance
+- document generation
+- scenario interrogation
+- topology and analysis support
+- RF and EW narrative generation
+
+For hosted-site use with GenAI.mil or local models, the app can use the included local relay:
+
+```powershell
+node genai-proxy.js --local-model
+```
+
+The relay exposes:
+
+- `http://127.0.0.1:8787` for HTTP fallback flows
+- `https://127.0.0.1:8788` for the secure localhost relay
+
+The frontend contains guided setup text for these provider modes in the Settings UI.
+
+## Offline Data Server
+
+The repo includes an optional local cache server:
+
+```powershell
+node local-data-server.js
+```
+
+It serves previously cached:
+
+- raster tiles
+- elevation data
+- OSM building data
+
+The app can detect this service automatically and use it for offline/local workflows. The offline workflow is driven from the app's "Download for Offline Use" UI.
+
+## Accounts, Projects, And Persistence
+
+When the backend is available, signed-in users get:
+
+- persistent projects
+- project duplication
+- project deletion
+- snapshots
+- server-backed AI configuration
+
+Guest mode is also supported. In guest mode:
+
+- the app remains usable
+- state is local/browser-scoped
+- server-backed projects are unavailable
+- backend analytics and account features are unavailable
+
+## Admin Analytics
+
+The current backend includes admin-only site analytics, including:
+
+- user counts
+- login and visit activity
+- project counts
+- snapshot counts
+- AI request and token usage
+- provider/model usage
+- recent events and project activity
+
+This is intended for hosted deployments and requires backend auth plus admin permissions.
+
+## Deployment
+
+For shared multi-user deployment, use the assets under:
+
+- `deploy/`
+- `docs/aws-ec2-production.md`
+
+The deployment path is:
+
+- frontend served behind nginx
+- backend API in Node.js
+- PostgreSQL for persistence
+- optional HTTPS termination and reverse proxying through nginx/Certbot
+
+See the deployment docs for the production stack details.
+
+## Running Checks
+
+There is no single root `package.json` at the repo top level. The most relevant built-in checks are currently:
+
+```powershell
+node --check app.js
+cd backend
+npm run check
+```
+
+## Browser Notes
+
+For the best experience, use a current Chromium-based browser.
+
+Some features depend on browser/platform support:
+
+- Web Serial GPS requires Chrome or Edge with Web Serial support
+- browser geolocation may require HTTPS or localhost
+- Cesium 3D features require WebGL-capable hardware/browser support
+- AI relays and local model access require local helper services when using those modes
+
+## Operational Notes
+
+- RF Sim is a planning and scenario-support tool, not a certified RF engineering package.
+- Terrain, building, and propagation outputs are approximations and should be validated before operational use.
+- Imported geospatial data should be reviewed for correctness before relying on it.
+- External imagery, terrain, AI, and auth services depend on network availability and correct credentials/configuration.
 
 ## Contributing
 
-Contributions are welcome — bug reports, feature ideas, refactors, and operational chores all help. AI-assisted contributions are welcome too.
-
-If you're new here, the short version is: file an issue first, wait for a maintainer thumbs-up, then open a PR. There is no public roadmap yet, so the issue-first step matters.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide — issue templates, PR scope rules, and the policy on AI-generated contributions.
-
-## Notes
-
-- This is a planning and exploration tool, not a certified RF engineering package.
-- OSM building obstruction and material loss values are approximate.
-- Imported overlays should be user-validated before operational use.
-- Web Serial GPS, voice input, and some AI provider features require a modern Chromium-based browser.
-- External imagery, terrain, and AI services depend on network access and valid credentials.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance.
