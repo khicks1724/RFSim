@@ -3407,15 +3407,12 @@ async function bootstrapWorkspaceData() {
 }
 
 async function init() {
-  setBootPending(true);
   initMap();
   initTopBarDropdowns();
   initRangeInputs();
   ensureMapContentsSearchUi();
   initEmitterModal();
-  syncAuthScreenUi();
   loadAiProviderSettings();
-  await hydrateSession();
   loadCesiumIonToken();
   loadSettings();
   loadProfiles();
@@ -3427,7 +3424,8 @@ async function init() {
   applySettings();
   refreshActionButtons();
   updateTerrainSummary();
-  setBootPending(false);
+  syncAuthScreenUi();
+  await hydrateSession();
   syncAuthScreenUi();
   if (hasWorkspaceAccess()) {
     await bootstrapWorkspaceData();
@@ -10864,14 +10862,10 @@ function applyBasemap(key) {
     attribution: config.attribution,
     maxZoom: config.maxZoom,
     crossOrigin: true,
-    // Keep more edge tiles warm so short drags don't expose blank space.
-    keepBuffer: 6,
-    // Stream tiles during desktop pans instead of waiting for movement to stop.
-    updateWhenIdle: false,
-    // Refresh tiles during zoom transitions so imagery catches up immediately.
-    updateWhenZooming: true,
-    // Slightly reduce request churn without deferring visible tile updates.
-    updateInterval: 120,
+    keepBuffer: 4,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
+    updateInterval: 200,
   });
   state.baseLayer.addTo(state.map);
   updateImageryMenuValue(config.label);
