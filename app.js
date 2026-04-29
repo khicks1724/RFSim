@@ -1490,6 +1490,9 @@ if (!INITIAL_GUEST_SESSION) {
   }
 }
 
+let workspaceDataBootstrapped = false;
+let workspaceDataBootstrapPromise = null;
+
 function updateModalBodyState() {
   const emitterBackdrop = dom.emitterModal ?? document.querySelector("#emitterModal");
   const hasOpenModal = Boolean(
@@ -2458,6 +2461,7 @@ async function onWorkspaceLogin(credentials = null) {
   persistSessionStorage();
   await loadProjectList();
   await loadServerAiProviderSettings();
+  await bootstrapWorkspaceData();
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Signed in as ${payload.user.email}.`);
@@ -2483,6 +2487,7 @@ async function onWorkspaceRegister(credentials = null) {
   persistSessionStorage();
   await loadProjectList();
   await loadServerAiProviderSettings();
+  await bootstrapWorkspaceData();
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Account created for ${payload.user.email}.`);
@@ -3339,12 +3344,46 @@ function ensureMapContentsSearchUi() {
   dom.mapContentsSearchClearBtn = document.querySelector("#mapContentsSearchClearBtn");
 }
 
+async function bootstrapWorkspaceData() {
+  if (workspaceDataBootstrapped) {
+    return;
+  }
+  if (workspaceDataBootstrapPromise) {
+    return workspaceDataBootstrapPromise;
+  }
+
+  workspaceDataBootstrapPromise = (async () => {
+    await loadMapState();
+    renderAssets();
+    renderTerrains();
+    renderViewsheds();
+    renderPlanningResults();
+    renderMapContents();
+    refreshActionButtons();
+    updateTerrainSummary();
+    updateWeatherState();
+    applySettings();
+    updateMapOverlayMetrics();
+    requestAnimationFrame(() => renderMapContents());
+    workspaceDataBootstrapped = true;
+  })();
+
+  try {
+    await workspaceDataBootstrapPromise;
+  } finally {
+    workspaceDataBootstrapPromise = null;
+  }
+}
+
 async function init() {
   initMap();
   initTopBarDropdowns();
   initRangeInputs();
   ensureMapContentsSearchUi();
   initEmitterModal();
+  if (!state.session.token || isGuestSession()) {
+    syncAuthScreenUi();
+  }
   loadAiProviderSettings();
   await hydrateSession();
   loadCesiumIonToken();
@@ -3354,16 +3393,13 @@ async function init() {
   updateImageryMenuValue();
   wireEvents();
   applyPanelMode();
-  await loadMapState();
-  renderAssets();
-  renderTerrains();
-  renderViewsheds();
-  renderPlanningResults();
-  renderMapContents();
-  refreshActionButtons();
-  updateTerrainSummary();
   updateWeatherState();
   applySettings();
+  refreshActionButtons();
+  updateTerrainSummary();
+  if (hasWorkspaceAccess()) {
+    await bootstrapWorkspaceData();
+  }
   syncGpsUi();
   updateMapOverlayMetrics();
   updateClock();
@@ -3374,8 +3410,6 @@ async function init() {
   loadAiChatHistory();
   window.setInterval(updateClock, 1000);
   setStatus("Ready.");
-  // Deferred render — guarantees map contents tray shows saved items after DOM settles
-  requestAnimationFrame(() => renderMapContents());
 
   state.map.on("click", onMapClick);
   state.map.on("dblclick", onMapDblClick);

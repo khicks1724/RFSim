@@ -37,14 +37,15 @@ const canvas = document.getElementById("waterfall");
 const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
 
 const ROW_TIME_STEP = 0.02;
-const MAX_INTERNAL_WIDTH = 1600;
-const MAX_INTERNAL_HEIGHT = 900;
+const MAX_INTERNAL_WIDTH = 960;
+const MAX_INTERNAL_HEIGHT = 540;
 let width = 0;
 let height = 0;
 let rowImageData = null;
-let prefillRow = -1;
 let rafId = null;
 let lastFrameTime = 0;
+const scrollBuffer = document.createElement("canvas");
+const scrollCtx = scrollBuffer.getContext("2d", { alpha: false, desynchronized: true });
 
 // --- PARAMETERS ---
 const SCROLL_SPEED = 0.35;
@@ -68,11 +69,13 @@ function resize() {
   canvas.style.width = window.innerWidth + "px";
   canvas.style.height = window.innerHeight + "px";
   rowImageData = ctx.createImageData(width, 1);
-  prefillRow = height - 1;
+  scrollBuffer.width = width;
+  scrollBuffer.height = height;
   scrollAccumulator = 0;
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, width, height);
   initEmitters();
+  prefillCanvas();
 }
 
 function initEmitters() {
@@ -159,7 +162,7 @@ function generateRow(time) {
 
   // occasional wideband burst (like interference)
   if (Math.random() < 0.025) {
-    let start = Math.floor(Math.random() * canvas.width);
+    let start = Math.floor(Math.random() * width);
     let width = 40 + Math.random() * 120;
 
     for (let i = 0; i < width; i++) {
@@ -194,23 +197,14 @@ function putRow(row, y) {
 }
 
 function prefillCanvas() {
-  const chunkSize = Math.max(12, Math.round(height / 24));
-  for (let i = 0; i < chunkSize && prefillRow >= 0; i++) {
+  for (let y = height - 1; y >= 0; y--) {
     time += ROW_TIME_STEP;
-    putRow(generateRow(time), prefillRow);
-    prefillRow -= 1;
+    putRow(generateRow(time), y);
   }
-
-  if (prefillRow >= 0) {
-    rafId = requestAnimationFrame(prefillCanvas);
-    return;
-  }
-
-  lastFrameTime = performance.now();
-  rafId = requestAnimationFrame(draw);
 }
 
 function draw(now) {
+  rafId = null;
   const elapsed = Math.min(48, Math.max(8, now - (lastFrameTime || now)));
   lastFrameTime = now;
   scrollAccumulator += SCROLL_SPEED * (elapsed / 16.6667);
@@ -220,7 +214,9 @@ function draw(now) {
     scrollAccumulator -= steps;
     for (let s = 0; s < steps; s++) {
       time += ROW_TIME_STEP;
-      ctx.drawImage(canvas, 0, 0, width, height, 0, 1, width, height);
+      scrollCtx.clearRect(0, 0, width, height);
+      scrollCtx.drawImage(canvas, 0, 0, width, height);
+      ctx.drawImage(scrollBuffer, 0, 0, width, height, 0, 1, width, height);
       putRow(generateRow(time), 0);
     }
   }
@@ -229,13 +225,15 @@ function draw(now) {
 }
 
 resize();
+lastFrameTime = performance.now();
 window.addEventListener("resize", () => {
   if (rafId !== null) cancelAnimationFrame(rafId);
   resize();
-  rafId = requestAnimationFrame(prefillCanvas);
+  lastFrameTime = performance.now();
+  rafId = requestAnimationFrame(draw);
 });
 
-rafId = requestAnimationFrame(prefillCanvas);
+rafId = requestAnimationFrame(draw);
 </script>
 
 </body>

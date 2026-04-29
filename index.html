@@ -2522,8 +2522,8 @@
     const SCROLL_SPEED = 0.35;
     const NOISE_LEVEL = 0.13;
     const ROW_TIME_STEP = 0.02;
-    const MAX_INTERNAL_WIDTH = 1600;
-    const MAX_INTERNAL_HEIGHT = 900;
+    const MAX_INTERNAL_WIDTH = 960;
+    const MAX_INTERNAL_HEIGHT = 540;
     let emitters = [];
     let width = 0;
     let height = 0;
@@ -2532,7 +2532,8 @@
     let rafId = null;
     let lastFrameTime = 0;
     let rowImageData = null;
-    let prefillRow = -1;
+    const scrollBuffer = document.createElement('canvas');
+    const scrollCtx = scrollBuffer.getContext('2d', { alpha: false, desynchronized: true });
     let started = false;
     let visible = document.visibilityState !== 'hidden';
 
@@ -2552,10 +2553,12 @@
       canvas.style.height = window.innerHeight + 'px';
       initEmitters();
       rowImageData = ctx.createImageData(width, 1);
+      scrollBuffer.width = width;
+      scrollBuffer.height = height;
       scrollAccumulator = 0;
-      prefillRow = height - 1;
       ctx.fillStyle = 'rgb(8, 0, 20)';
       ctx.fillRect(0, 0, width, height);
+      prefillCanvas();
     }
 
     function initEmitters() {
@@ -2618,7 +2621,7 @@
         }
       });
       if (Math.random() < 0.01) {
-        const start = Math.floor(Math.random() * canvas.width);
+        const start = Math.floor(Math.random() * width);
         const w = 40 + Math.random() * 120;
         for (let i = 0; i < w; i++) {
           const idx = start + i;
@@ -2644,38 +2647,24 @@
     function stepWaterfall(rows) {
       for (let step = 0; step < rows; step++) {
         time += ROW_TIME_STEP;
-        ctx.drawImage(canvas, 0, 0, width, height, 0, 1, width, height);
+        scrollCtx.clearRect(0, 0, width, height);
+        scrollCtx.drawImage(canvas, 0, 0, width, height);
+        ctx.drawImage(scrollBuffer, 0, 0, width, height, 0, 1, width, height);
         putRow(generateRow(time), 0);
       }
     }
 
     function prefill() {
-      if (!started || !visible) {
-        rafId = null;
-        return;
-      }
-
-      const chunkSize = Math.max(12, Math.round(height / 24));
-      for (let i = 0; i < chunkSize && prefillRow >= 0; i++) {
-        time += ROW_TIME_STEP;
-        putRow(generateRow(time), prefillRow);
-        prefillRow -= 1;
-      }
-
-      if (prefillRow >= 0) {
-        rafId = requestAnimationFrame(prefill);
-        return;
-      }
-
+      rafId = null;
+      if (!started || !visible) return;
+      prefillCanvas();
       lastFrameTime = performance.now();
-      rafId = requestAnimationFrame(draw);
+      queueFrame();
     }
 
     function draw(now) {
-      if (!started || !visible) {
-        rafId = null;
-        return;
-      }
+      rafId = null;
+      if (!started || !visible) return;
 
       const elapsed = Math.min(48, Math.max(8, now - (lastFrameTime || now)));
       lastFrameTime = now;
@@ -2686,14 +2675,21 @@
         stepWaterfall(steps);
       }
 
-      rafId = requestAnimationFrame(draw);
+      queueFrame();
+    }
+
+    function prefillCanvas() {
+      for (let y = height - 1; y >= 0; y--) {
+        time += ROW_TIME_STEP;
+        putRow(generateRow(time), y);
+      }
     }
 
     const authScreen = document.getElementById('authScreen');
 
     function queueFrame() {
       if (!started || !visible || rafId !== null) return;
-      rafId = requestAnimationFrame(prefillRow >= 0 ? prefill : draw);
+      rafId = requestAnimationFrame(draw);
     }
 
     function stop() {
@@ -2713,6 +2709,8 @@
       if (!started) {
         started = true;
         resizeCanvas();
+        rafId = requestAnimationFrame(prefill);
+        return;
       }
       queueFrame();
     }
@@ -2728,7 +2726,7 @@
       if (!started) return;
       stop();
       resizeCanvas();
-      queueFrame();
+      rafId = requestAnimationFrame(prefill);
     });
 
     document.addEventListener('visibilitychange', () => {

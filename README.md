@@ -12,7 +12,7 @@ This repository contains the web client, local helper services, and the optional
 
 RF Sim currently includes four major workspace views:
 
-- `PLAN` for building a table of organization, creating unit hierarchies, and switching between the existing AIGEN symbology and MIL-STD-2525-style symbols
+- `PLAN` for building a table of organization and creating unit hierarchies with MIL-STD2525 icons
 - `MAP` for placing radios, jammers, relays, receivers, overlays, routes, DTED terrain, and other scenario content on a 2D map with linked 3D Cesium viewing
 - `TOPOLOGY` for visualizing network link relationships and connection quality between placed emitters
 - `ANALYZE` for reviewing RF analytics, terrain impacts, conflicts, frequency distribution, and emitter summaries
@@ -30,7 +30,6 @@ Additional capabilities in the current app:
 - Guest mode for local/in-browser use without an account
 - AI-assisted planning and document generation
 - Optional offline data caching through the local data server
-- Workspace admin analytics for site operators
 
 ## Primary Use
 
@@ -378,20 +377,6 @@ Guest mode is also supported. In guest mode:
 - state is local/browser-scoped
 - server-backed projects are unavailable
 - backend analytics and account features are unavailable
-
-## Admin Analytics
-
-The current backend includes admin-only site analytics, including:
-
-- user counts
-- login and visit activity
-- project counts
-- snapshot counts
-- AI request and token usage
-- provider/model usage
-- recent events and project activity
-
-This is intended for hosted deployments and requires backend auth plus admin permissions.
 
 ## Deployment
 
