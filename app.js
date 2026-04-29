@@ -3467,6 +3467,15 @@ function wireEvents() {
     });
   });
   dom.aiChatMessages?.addEventListener("click", (event) => {
+    const coordLink = event.target.closest(".ai-coord-link");
+    if (coordLink) {
+      const lat = Number(coordLink.dataset.lat);
+      const lon = Number(coordLink.dataset.lon);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        state.map.setView([lat, lon], Math.max(state.map.getZoom(), 14), { animate: true });
+      }
+      return;
+    }
     const link = event.target.closest(".ai-map-link");
     if (link) {
       const contentId = link.dataset.contentId;
@@ -5472,7 +5481,15 @@ function renderMarkdown(text) {
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const inlineFormat = (s) => {
-    const withLinks = s.replace(/\[([^\]]+)\]\(((?:asset|imported|viewshed|terrain|planning-region|planning-results):[^\)]+)\)/g, (_, label, contentId) => {
+    // Stash coord tokens before escaping so special chars are preserved
+    const coordTokens = [];
+    let withCoords = s.replace(/\[coord:(-?\d+\.\d+):(-?\d+\.\d+)(?::([A-Z0-9]+))?\]/g, (_, lat, lon, mgrsHint) => {
+      const idx = coordTokens.length;
+      coordTokens.push({ lat: Number(lat), lon: Number(lon), mgrsHint: mgrsHint || null });
+      return `\x00COORD\x00${idx}\x00`;
+    });
+
+    const withLinks = withCoords.replace(/\[([^\]]+)\]\(((?:asset|imported|viewshed|terrain|planning-region|planning-results):[^\)]+)\)/g, (_, label, contentId) => {
       return `\x00LINK\x00${label}\x00${contentId}\x00`;
     });
     let result = esc(withLinks)
@@ -5483,6 +5500,15 @@ function renderMarkdown(text) {
       .replace(/`([^`]+)`/g, "<code>$1</code>");
     result = result.replace(/\x00LINK\x00([^\x00]+)\x00([^\x00]+)\x00/g, (_, label, contentId) => {
       return `<button class="ai-map-link" data-content-id="${contentId}" title="Navigate to ${label}">${label}</button>`;
+    });
+    // Render coord tokens as clickable coordinate pills in the user's chosen format
+    result = result.replace(/\x00COORD\x00(\d+)\x00/g, (_, idx) => {
+      const { lat, lon, mgrsHint } = coordTokens[Number(idx)];
+      const sys = state.settings.coordinateSystem;
+      const display = mgrsHint && sys === "mgrs"
+        ? formatMgrsDisplay(mgrsHint)
+        : formatCoordinate(lat, lon, sys);
+      return `<button class="ai-coord-link" data-lat="${lat}" data-lon="${lon}" title="Pan map to ${display}">${display}</button>`;
     });
     return result;
   };
@@ -9125,9 +9151,57 @@ function buildAiScenarioSummary() {
   }, null, 2);
 }
 
+// ── Coordinate detection and enrichment ──────────────────────────────────────
+// Replaces coordinate patterns in AI text with [coord:lat:lon] tokens so
+// renderMarkdown can turn them into clickable map-navigation buttons.
+
+function enrichAiCoordinates(text) {
+  if (!text) return text;
+  let result = text;
+
+  // Pattern: decimal lat/lon pairs like "34.367°N, 116.083°W" or "34.3670N, 116.0830W"
+  // or plain "34.367, -116.083" or "34.367N 116.083W"
+  result = result.replace(
+    /\b(-?\d{1,3}\.\d{2,8})\s*°?\s*([NS]?)\s*[,\/]\s*(-?\d{1,3}\.\d{2,8})\s*°?\s*([EW]?)\b/g,
+    (match, latRaw, latDir, lonRaw, lonDir) => {
+      let lat = Number(latRaw);
+      let lon = Number(lonRaw);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return match;
+      if (latDir === "S") lat = -Math.abs(lat);
+      if (latDir === "N") lat = Math.abs(lat);
+      if (lonDir === "W") lon = -Math.abs(lon);
+      if (lonDir === "E") lon = Math.abs(lon);
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return match;
+      return `[coord:${lat.toFixed(6)}:${lon.toFixed(6)}]`;
+    }
+  );
+
+  // Pattern: MGRS grids embedded in text e.g. "11SNU5423" or "11S NU 54 23" or "11SNV1234567890"
+  result = result.replace(
+    /\b(\d{1,2}[C-HJ-NP-X][A-HJ-NP-Z]{2}\s*\d{2,10})\b/gi,
+    (match) => {
+      try {
+        const normalized = match.replace(/\s+/g, "");
+        const ll = window.mgrs?.inverse(normalized);
+        if (!ll || !Number.isFinite(ll[1]) || !Number.isFinite(ll[0])) return match;
+        const lat = ll[1], lon = ll[0];
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return match;
+        return `[coord:${lat.toFixed(6)}:${lon.toFixed(6)}:${normalized}]`;
+      } catch {
+        return match;
+      }
+    }
+  );
+
+  return result;
+}
+
 function enrichAiResponseWithLinks(text, placedAssets = []) {
   if (!text) return text;
   let result = text;
+
+  // Enrich coordinates first so they don't get mangled by name-link replacements
+  result = enrichAiCoordinates(result);
 
   // Link newly placed assets by name
   for (const asset of placedAssets) {
@@ -17483,7 +17557,7 @@ function propagationModelLabel(value) {
 
 function toMgrs(lat, lon) {
   try {
-    const raw = window.mgrs.forward([lon, lat], 5);
+    const raw = window.mgrs.forward([lon, lat], 5); // precision 5 = 5 digits per axis = 10-digit MGRS (1m)
     return raw.replace(/\s+/g, "");
   } catch {
     return "----------";
@@ -17592,6 +17666,15 @@ function formatCoordinate(lat, lon, system) {
     return `${formatDms(lat, true)} ${formatDms(lon, false)}`;
   }
   return toMgrs(lat, lon);
+}
+
+function formatMgrsDisplay(mgrsRaw) {
+  // Format a compact MGRS string (e.g. "11SNU5423") into spaced display form
+  const m = String(mgrsRaw).toUpperCase().match(/^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d+)$/i);
+  if (!m) return mgrsRaw;
+  const digits = m[3];
+  const half = Math.floor(digits.length / 2);
+  return `${m[1]} ${m[2]} ${digits.slice(0, half)} ${digits.slice(half)}`;
 }
 
 function displayTemperature(celsius) {
@@ -17735,7 +17818,7 @@ function formatDecimalDegrees(value, isLatitude) {
   const hemisphere = isLatitude
     ? (value >= 0 ? "N" : "S")
     : (value >= 0 ? "E" : "W");
-  return `${Math.abs(value).toFixed(5)} ${hemisphere}`;
+  return `${Math.abs(value).toFixed(6)}° ${hemisphere}`;
 }
 
 function formatDms(value, isLatitude) {
@@ -17746,8 +17829,8 @@ function formatDms(value, isLatitude) {
   const degrees = Math.floor(absolute);
   const minutesFloat = (absolute - degrees) * 60;
   const minutes = Math.floor(minutesFloat);
-  const seconds = ((minutesFloat - minutes) * 60).toFixed(1).padStart(4, "0");
-  return `${degrees}d ${minutes.toString().padStart(2, "0")}m ${seconds}s ${hemisphere}`;
+  const seconds = ((minutesFloat - minutes) * 60).toFixed(2);
+  return `${degrees}° ${minutes.toString().padStart(2, "0")}' ${seconds.padStart(5, "0")} ${hemisphere}`;
 }
 
 function downloadBlob(blob, fileName) {

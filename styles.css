@@ -1432,6 +1432,39 @@ body:not(.ai-panel-open) .ai-panel {
   background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+/* Clickable coordinate pills in AI chat */
+.ai-coord-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 5px;
+  padding: 1px 7px;
+  margin: 0 1px;
+  font-family: monospace;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: #a5b4fc;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.ai-coord-link::before {
+  content: "⌖";
+  font-size: 1em;
+  opacity: 0.7;
+}
+.ai-coord-link:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #c7d2fe;
+}
+.ai-coord-link:active {
+  background: rgba(99, 102, 241, 0.4);
+}
+
 .ai-chat-message.is-streaming {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 10px 22px rgba(0, 0, 0, 0.12);
