@@ -5787,8 +5787,8 @@ body.emitter-modal-open {
   overflow: hidden;
   position: relative;
   background:
-    radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 24px 24px;
-  background-color: var(--bg, #17191d);
+    radial-gradient(circle, rgba(0,0,0,0.12) 1px, transparent 1px) 0 0 / 24px 24px;
+  background-color: #c8cdd6;
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
