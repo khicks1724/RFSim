@@ -6807,13 +6807,15 @@ function isLookupPrompt(rawPrompt) {
   if (!raw) {
     return false;
   }
-  const hasLookupIntent = /\b(where|location|locations|locate|find|coords|coordinates|mgrs)\b/i.test(raw)
-    || /\bgrid\s+location\b/i.test(raw);
+  // Must have explicit simple lookup intent
+  const hasLookupIntent = /\b(where is|where are|what(?:'s| is| are)?\s+the\s+(?:grid\s+location|mgrs|coords?|coordinates|location)|locate|find\s+(?:the\s+)?(?:location|coords?|coordinates|mgrs|grid))\b/i.test(raw)
+    || /\bgrid\s+location\s+of\b/i.test(raw);
   if (!hasLookupIntent) {
     return false;
   }
-  const hasActionIntent = /\b(place|add|create|draw|run|simulate|simulation|propagation|coverage|configure|set|update|remove|inside|within|radius|grid\s+step)\b/i.test(raw);
-  return !hasActionIntent;
+  // Any planning, analysis, or RF context means this needs the AI — never short-circuit
+  const hasComplexIntent = /\b(best|optimal|relay|jammer|radio|rf|signal|coverage|link|plan|planning|recommend|analysis|assess|analysis|simulate|simulation|propagation|place|add|create|draw|run|configure|set|update|remove|inside|within|radius|grid\s+step|ivo|vicinity|near|sensor|isr|threat|ew|electronic|spectrum|frequency|power|antenna|terrain|los|line.of.sight)\b/i.test(raw);
+  return !hasComplexIntent;
 }
 
 function formatLookupCoordinateOnly(record, preferMgrs = false) {
@@ -6906,6 +6908,11 @@ function tryResolveAiMapLookup(prompt) {
     return null;
   }
 
+  // If context items are linked, let the AI handle it — it has full geometry in the scenario summary
+  if (state.ai.contextItemIds.length > 0) {
+    return null;
+  }
+
   const terms = tokenizeLookupPrompt(raw);
   if (!terms.length) {
     return null;
@@ -6916,11 +6923,9 @@ function tryResolveAiMapLookup(prompt) {
     matches: findMapContentLookupMatches(term),
   }));
 
+  // No local matches — fall through to AI rather than returning a dead-end error
   if (!sections.some((section) => section.matches.length)) {
-    return {
-      assistantMessage: `I couldn't find a map-contents match for: ${terms.join(", ")}.`,
-      actions: [],
-    };
+    return null;
   }
 
   const preferMgrs = wantsMgrsLookup(raw);
@@ -8163,22 +8168,25 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  • If terrain data is NOT available from any source, state this and place assets conservatively on estimated high ground based on polygon geometry.",
     "",
     "═══════════════════════════════════════",
-    "LINKED SHAPE (CONTEXT ITEMS):",
+    "LINKED MAP CONTEXT ITEMS — CRITICAL RULES:",
     "═══════════════════════════════════════",
-    "- The user can attach map items as context. These appear in explicitAiContextObjects[] (each has contentId and name) and activeAiContextId.",
+    "- The user links map items as context by clicking the + button or using @mention. These appear in explicitAiContextObjects[] (each has {contentId, name}) and their full geometry is in importedItems[] in the scenario summary.",
+    "- ALWAYS resolve a linked context item's coordinates from importedItems[] before answering. Match by contentId or name. A Point item has geometry.coordinates {lat,lon}. A Polygon has geometry.coordinates[0] as a [{lat,lon}] array — compute its centroid for placement.",
+    "- When the user asks anything about a linked item — 'where is it', 'best relay near it', 'RF coverage at it', 'place a radio here' — look it up in importedItems[], extract the coordinates, and USE them to answer and/or place assets.",
+    "- NEVER say you can't find a linked item. It is always in importedItems[] by its contentId. If geometry is a Point, use geometry.coordinates directly as lat/lon for placement.",
+    "- For RF planning questions referencing a linked item (e.g. 'best relay IVO OP Crampton'): find the item's coordinates, assess terrain/LOS from that point, and recommend + place the relay using check-los and add-asset.",
+    "- IVO / 'in vicinity of' / 'near' / 'at' / 'around' a named place: find that place in importedItems[], get its coordinates, use them as the reference point. Place assets using contentRef=contentId + placementMode='near' or extract the lat/lon and use them directly.",
     "- When the user says 'the linked shape', 'that shape', 'the context shape', 'make it red', or refers to a shape without naming it, they mean the first item in explicitAiContextObjects[]. Use its 'name' field directly as the 'name' value in update-shape/remove-shape. Do NOT use the contentId string.",
-    "- Example: explicitAiContextObjects = [{contentId:'imported:abc',name:'DC Landmarks Polygon 61'}], user says 'make that shape red' → {\"type\":\"update-shape\",\"name\":\"DC Landmarks Polygon 61\",\"color\":\"#ff0000\"}",
-    "- Use the item's exact name as the 'name' field in update-shape (the resolver matches by name or id).",
+    "- Example: explicitAiContextObjects = [{contentId:'imported:abc',name:'OP CRAMPTON'}], user says 'best relay IVO OP Crampton' → find 'OP CRAMPTON' in importedItems[], get geometry.coordinates {lat,lon}, use check-los to find elevated terrain nearby, place relay with add-asset near those coords, run-simulation.",
     "- update-shape supports: color (#hex), fillOpacity (0–1), weight (px), lineStyle (solid|dashed|dotted), newName (rename), radiusM (resize circle by center+radius), coordinates (replace geometry).",
-    "- Example: user says 'make the linked shape green' → {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"color\":\"#00cc44\"}",
-    "- Example: user says 'change the linked circle radius to 3km' → {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"radiusM\":3000}",
-    "- Example: user says 'rename the linked shape to AO Alpha' → {\"type\":\"update-shape\",\"name\":\"<exact shape name>\",\"newName\":\"AO Alpha\"}",
     "",
     "═══════════════════════════════════════",
     "SPATIAL REASONING:",
     "═══════════════════════════════════════",
-    "- Polygon boundaries (AO Boundary, drawn polygons) are in importedItems[].geometry.coordinates[0] as [{lat,lon}].",
-    "- The importedItems[] array in the scenario summary contains ACTUAL coordinates. Read the geometry.coordinates from the named polygon (e.g., 'Range 400') and use those real lat/lon values.",
+    "- The importedItems[] array in the scenario summary contains ACTUAL coordinates for every map item. ALWAYS read geometry from here.",
+    "- Point items: geometry.type='Point', geometry.coordinates={lat,lon}. Use these directly as lat/lon for placement or as reference coordinates.",
+    "- Polygon/boundary items: geometry.type='Polygon', geometry.coordinates[0]=[{lat,lon},...]. Compute centroid for a representative location.",
+    "- LineString items: geometry.type='LineString', geometry.coordinates=[{lat,lon},...]. Use midpoint or relevant endpoint.",
     "- Prefer contentId/contentRef + placementMode when the user references an existing linked polygon or map content. Let the app resolve the final placement point deterministically.",
     "- Map natural language to placementMode: inside/within → inside; within 500m of/near → near + distanceMeters=500; next to/beside → adjacent; above → north-of; below → south-of; left of → west-of; right of → east-of.",
     "- CRITICAL: lat and lon in add-asset MUST be plain JSON numbers (e.g. 34.1234, -116.5678). Never use null, strings, or omit these fields.",
