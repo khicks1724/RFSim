@@ -78,7 +78,7 @@ const BUILDING_MATERIAL_MODELS = {
 // Bump this integer whenever the serialized state shape changes in a way that
 // requires a migration. applySavedMapState() runs migrateStatePayload() first
 // so old saves are always upgraded before being applied.
-const STATE_SCHEMA_VERSION = 2;
+const STATE_SCHEMA_VERSION = 1;
 
 function nowIso() {
   return new Date().toISOString();
@@ -112,15 +112,6 @@ function migrateStatePayload(payload) {
       assets: stampArray(payload.assets),
       importedItems: stampArray(payload.importedItems),
       mapContentFolders: stampArray(payload.mapContentFolders),
-    };
-  }
-
-  // v1 -> v2: add PLAN-view state envelope.
-  if (from < 2) {
-    payload = {
-      ...payload,
-      schemaVersion: 2,
-      planState: payload.planState ?? null,
     };
   }
 
@@ -1490,9 +1481,6 @@ if (!INITIAL_GUEST_SESSION) {
   }
 }
 
-let workspaceDataBootstrapped = false;
-let workspaceDataBootstrapPromise = null;
-
 function updateModalBodyState() {
   const emitterBackdrop = dom.emitterModal ?? document.querySelector("#emitterModal");
   const hasOpenModal = Boolean(
@@ -1518,75 +1506,6 @@ function timeoutAfter(ms, message = "Operation timed out") {
   return new Promise((_, reject) => {
     window.setTimeout(() => reject(new Error(message)), ms);
   });
-}
-
-function createAbortSignalWithTimeout(timeoutMs, externalSignal) {
-  const hasTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
-  if (!hasTimeout && !externalSignal) {
-    return {
-      signal: undefined,
-      didTimeout: () => false,
-      cleanup() {},
-    };
-  }
-
-  const controller = new AbortController();
-  let timeoutId = null;
-  let timedOut = false;
-  const abortFromExternalSignal = () => {
-    controller.abort(externalSignal?.reason ?? new DOMException("Aborted", "AbortError"));
-  };
-
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      abortFromExternalSignal();
-    } else {
-      externalSignal.addEventListener("abort", abortFromExternalSignal, { once: true });
-    }
-  }
-
-  if (hasTimeout) {
-    timeoutId = window.setTimeout(() => {
-      timedOut = true;
-      controller.abort(new Error(`Request timed out after ${timeoutMs} ms`));
-    }, timeoutMs);
-  }
-
-  return {
-    signal: controller.signal,
-    didTimeout: () => timedOut,
-    cleanup() {
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-      if (externalSignal) {
-        externalSignal.removeEventListener("abort", abortFromExternalSignal);
-      }
-    },
-  };
-}
-
-async function fetchWithTimeout(resource, options = {}) {
-  const {
-    timeoutMs = 15000,
-    signal: externalSignal,
-    ...fetchOptions
-  } = options;
-  const timeoutState = createAbortSignalWithTimeout(timeoutMs, externalSignal);
-
-  try {
-    return await fetch(resource, {
-      ...fetchOptions,
-      signal: timeoutState.signal ?? externalSignal,
-    });
-  } catch (error) {
-    if (timeoutState.didTimeout()) {
-      throw new Error(`Request timed out after ${timeoutMs} ms`);
-    }
-    throw error;
-  } finally {
-    timeoutState.cleanup();
-  }
 }
 
 function createDefaultProfiles() {
@@ -1863,16 +1782,14 @@ function simulationUsesBuildingModel(propagationModel) {
 
 
 async function apiFetch(path, options = {}) {
-  const { timeoutMs = 10000, ...requestOptions } = options;
   const headers = new Headers(options.headers ?? {});
   headers.set("Content-Type", headers.get("Content-Type") ?? "application/json");
   if (state.session.token) {
     headers.set("Authorization", `Bearer ${state.session.token}`);
   }
 
-  const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
-    ...requestOptions,
-    timeoutMs,
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
     headers,
   });
 
@@ -2289,29 +2206,6 @@ function setAuthScreenStatus(message = "", isError = false) {
   dom.authScreenStatus.classList.toggle("error", Boolean(isError));
 }
 
-function setBootPending(isPending) {
-  const pending = Boolean(isPending);
-  document.body.classList.toggle("boot-pending", pending);
-
-  [
-    dom.authScreenFullName,
-    dom.authScreenEmail,
-    dom.authScreenPassword,
-    dom.authScreenSubmitBtn,
-    dom.authScreenToggleModeBtn,
-    dom.authScreenGuestBtn,
-  ].forEach((control) => {
-    if (control) control.disabled = pending;
-  });
-
-  if (pending && dom.authScreen) {
-    document.body.classList.add("auth-screen-active");
-    dom.authScreen.classList.remove("hidden");
-    dom.authScreen.setAttribute("aria-hidden", "false");
-    setAuthScreenStatus("Checking session...", false);
-  }
-}
-
 function setAuthScreenMode(mode) {
   state.authScreenMode = mode === "register" ? "register" : "login";
   syncAuthScreenUi();
@@ -2321,13 +2215,11 @@ function syncAuthScreenUi() {
   if (!dom.authScreen) {
     return;
   }
-  const bootPending = document.body.classList.contains("boot-pending");
   const hasAccess = hasWorkspaceAccess();
-  const showAuthScreen = bootPending || !hasAccess;
-  document.body.classList.toggle("auth-screen-active", showAuthScreen);
-  dom.authScreen.classList.toggle("hidden", !showAuthScreen);
-  dom.authScreen.setAttribute("aria-hidden", String(!showAuthScreen));
-  if (bootPending || hasAccess) {
+  document.body.classList.toggle("auth-screen-active", !hasAccess);
+  dom.authScreen.classList.toggle("hidden", hasAccess);
+  dom.authScreen.setAttribute("aria-hidden", String(hasAccess));
+  if (hasAccess) {
     return;
   }
 
@@ -2490,10 +2382,6 @@ async function onWorkspaceLogin(credentials = null) {
   setAuthScreenStatus("", false);
   setStatus(`Signed in as ${payload.user.email}.`);
   fireAnalyticsEvent({ event_type: "visit" });
-  bootstrapWorkspaceData().catch((error) => {
-    console.error("[workspace] bootstrap failed after login:", error);
-    setStatus(`Workspace load warning: ${error.message}`, true);
-  });
 }
 
 async function onWorkspaceRegister(credentials = null) {
@@ -2518,10 +2406,6 @@ async function onWorkspaceRegister(credentials = null) {
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Account created for ${payload.user.email}.`);
-  bootstrapWorkspaceData().catch((error) => {
-    console.error("[workspace] bootstrap failed after register:", error);
-    setStatus(`Workspace load warning: ${error.message}`, true);
-  });
 }
 
 function onWorkspaceSignOut() {
@@ -2881,13 +2765,6 @@ const emitterModal = {
     setAssetPlacementMode(false);
     this.switchTab("rf");
     const isEditing = prefill && prefill.lat !== undefined;
-    // Track which asset is being edited for TO linking
-    _currentEmitterEditId = isEditing ? (prefill?.id ?? null) : null;
-    clearPendingToLink();
-    // Show existing TO link badge if editing
-    const existingToId = isEditing ? prefill?.toUnitId : null;
-    const existingToUnit = existingToId ? _toState.units.find(u => u.id === existingToId) : null;
-    updateEmitterToLinkBadge(existingToUnit ?? null);
     this.populateColocateOptions(prefill?.id ?? null);
     if (isEditing) {
       this.resetToDefaults();
@@ -2930,9 +2807,6 @@ const emitterModal = {
     const placeBtn = document.querySelector("#emitterPlaceBtn");
     if (placeBtn) placeBtn.textContent = "Place on Map";
     state.editingAssetId = null;
-    _currentEmitterEditId = null;
-    clearPendingToLink();
-    updateEmitterToLinkBadge(null);
   },
 
   switchTab(name) {
@@ -3246,12 +3120,6 @@ const emitterModal = {
       const asset = state.assets.find((a) => a.id === state.editingAssetId);
       if (asset) {
         Object.assign(asset, data);
-        // Commit TO link if pending
-        if (window._pendingToUnitId !== undefined) {
-          if (window._pendingToUnitId === null) delete asset.toUnitId;
-          else asset.toUnitId = window._pendingToUnitId;
-          clearPendingToLink();
-        }
         if (resolvedLocation) {
           asset.lat = resolvedLocation.lat;
           asset.lon = resolvedLocation.lng;
@@ -3322,7 +3190,6 @@ const emitterModal = {
 
 function initEmitterModal() {
   emitterModal.init();
-  initToPickerModal();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3375,37 +3242,6 @@ function ensureMapContentsSearchUi() {
   dom.mapContentsSearchClearBtn = document.querySelector("#mapContentsSearchClearBtn");
 }
 
-async function bootstrapWorkspaceData() {
-  if (workspaceDataBootstrapped) {
-    return;
-  }
-  if (workspaceDataBootstrapPromise) {
-    return workspaceDataBootstrapPromise;
-  }
-
-  workspaceDataBootstrapPromise = (async () => {
-    await loadMapState();
-    renderAssets();
-    renderTerrains();
-    renderViewsheds();
-    renderPlanningResults();
-    renderMapContents();
-    refreshActionButtons();
-    updateTerrainSummary();
-    updateWeatherState();
-    applySettings();
-    updateMapOverlayMetrics();
-    requestAnimationFrame(() => renderMapContents());
-    workspaceDataBootstrapped = true;
-  })();
-
-  try {
-    await workspaceDataBootstrapPromise;
-  } finally {
-    workspaceDataBootstrapPromise = null;
-  }
-}
-
 async function init() {
   initMap();
   initTopBarDropdowns();
@@ -3413,6 +3249,7 @@ async function init() {
   ensureMapContentsSearchUi();
   initEmitterModal();
   loadAiProviderSettings();
+  await hydrateSession();
   loadCesiumIonToken();
   loadSettings();
   loadProfiles();
@@ -3420,16 +3257,16 @@ async function init() {
   updateImageryMenuValue();
   wireEvents();
   applyPanelMode();
-  updateWeatherState();
-  applySettings();
+  await loadMapState();
+  renderAssets();
+  renderTerrains();
+  renderViewsheds();
+  renderPlanningResults();
+  renderMapContents();
   refreshActionButtons();
   updateTerrainSummary();
-  syncAuthScreenUi();
-  await hydrateSession();
-  syncAuthScreenUi();
-  if (hasWorkspaceAccess()) {
-    await bootstrapWorkspaceData();
-  }
+  updateWeatherState();
+  applySettings();
   syncGpsUi();
   updateMapOverlayMetrics();
   updateClock();
@@ -3440,6 +3277,8 @@ async function init() {
   loadAiChatHistory();
   window.setInterval(updateClock, 1000);
   setStatus("Ready.");
+  // Deferred render — guarantees map contents tray shows saved items after DOM settles
+  requestAnimationFrame(() => renderMapContents());
 
   state.map.on("click", onMapClick);
   state.map.on("dblclick", onMapDblClick);
@@ -3603,11 +3442,16 @@ function initMap() {
 
   state.map = L.map("map", {
     zoomControl: true,
-    // Vector layers use canvas where explicitly configured; basemap tiles stay
-    // as images so the browser can decode and cache them efficiently.
-    preferCanvas: false,
-    // Fade animations make tile swaps feel sluggish on large imagery layers.
-    fadeAnimation: false,
+    // Render the base layer onto a canvas; prevents tile repaints from
+    // triggering a full SVG reflow on every frame.
+    preferCanvas: false, // tiles stay as <img> — canvas for vector layers only
+    // Keep a 3-tile-wide border of loaded tiles around the viewport so panning
+    // reveals pre-loaded tiles instead of blank grey areas.
+    keepBuffer: 4,
+    // Don't hammer the tile server while the user is actively panning —
+    // wait until movement stops before requesting new tiles.
+    updateWhenIdle: true,
+    updateWhenZooming: false,
     // Throttle wheel zoom so the viewport doesn't request a new tile set on
     // every scroll tick.
     wheelDebounceTime: 100,
@@ -4087,7 +3931,6 @@ function serializeCurrentMapState() {
     hiddenContentIds: [...state.hiddenContentIds],
     activeTerrainId: state.activeTerrainId,
     activeProjectId: state.session.activeProjectId ?? null,
-    planState: serializePlanViewState(),
   };
 }
 
@@ -4276,8 +4119,6 @@ function applySavedMapState(rawSaved) {
   if (saved.activeTerrainId) {
     state.activeTerrainId = saved.activeTerrainId;
   }
-
-  applySavedPlanState(saved.planState);
 
   // Apply hidden visibility after all layers are added
   syncAllContentVisibility();
@@ -5222,42 +5063,6 @@ function initViewModeToggle() {
     });
     dom.viewModeToggle.setAttribute("data-active", "map");
   }
-  initViewAiPanelCollapse();
-}
-
-function initViewAiPanelCollapse() {
-  // Wire collapse/expand for each secondary view AI panel
-  const panels = [
-    { panelId: "planAiPanel",    collapseId: "planAiCollapseBtn",    openId: "planAiOpenBtn"    },
-    { panelId: "topoAiPanel",    collapseId: "topoAiCollapseBtn",    openId: "topoAiOpenBtn"    },
-    { panelId: "analyzeAiPanel", collapseId: "analyzeAiCollapseBtn", openId: "analyzeAiOpenBtn" },
-  ];
-  for (const { panelId, collapseId, openId } of panels) {
-    const panel      = document.getElementById(panelId);
-    const collapseBtn = document.getElementById(collapseId);
-    const openBtn    = document.getElementById(openId);
-    if (!panel) continue;
-    const divider = panel.previousElementSibling?.classList.contains("view-ai-divider")
-      ? panel.previousElementSibling : null;
-
-    const collapse = () => {
-      panel.classList.add("view-ai-collapsed");
-      if (divider) divider.style.opacity = "0";
-      if (divider) divider.style.pointerEvents = "none";
-      if (collapseBtn) collapseBtn.innerHTML = "&#9664;";
-      if (openBtn) openBtn.textContent = "AI";
-    };
-    const expand = () => {
-      panel.classList.remove("view-ai-collapsed");
-      if (divider) divider.style.opacity = "";
-      if (divider) divider.style.pointerEvents = "";
-      if (collapseBtn) collapseBtn.innerHTML = "&#9654;";
-    };
-
-    collapseBtn?.addEventListener("click", collapse);
-    openBtn?.addEventListener("click", expand);
-  }
-  initViewAiDividers();
 }
 
 function endPanelResize() {
@@ -5627,8 +5432,6 @@ function renderAiEmptyState() {
 }
 
 function syncAiUi() {
-  // Notify secondary view forms that AI status may have changed
-  setTimeout(() => document.dispatchEvent(new Event("ai-status-changed")), 0);
   if (!dom.aiProviderSelect || !dom.aiApiKeyInput) {
     return;
   }
@@ -7124,21 +6927,17 @@ function buildCompactAiScenarioSummary(contextIds = []) {
       viewsheds: state.viewsheds.length,
       terrains: state.terrains.length,
     },
-    assets: state.assets.slice(0, 40).map((asset) => {
-      const toUnit = asset.toUnitId ? _toState.units.find(u => u.id === asset.toUnitId) : null;
-      return {
-        id: asset.id,
-        contentId: `asset:${asset.id}`,
-        name: asset.name,
-        unit: asset.unit ?? "",
-        force: asset.force ?? "",
-        lat: roundAiNumber(asset.lat),
-        lon: roundAiNumber(asset.lon),
-        frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
-        powerW: roundAiNumber(asset.powerW, 3),
-        toUnit: toUnit ? { label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
-      };
-    }),
+    assets: state.assets.slice(0, 40).map((asset) => ({
+      id: asset.id,
+      contentId: `asset:${asset.id}`,
+      name: asset.name,
+      unit: asset.unit ?? "",
+      force: asset.force ?? "",
+      lat: roundAiNumber(asset.lat),
+      lon: roundAiNumber(asset.lon),
+      frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
+      powerW: roundAiNumber(asset.powerW, 3),
+    })),
     // importedItems: two tiers to keep token count bounded.
     // Tier 1: explicitly linked context items — full geometry + properties.
     // Tier 2: everything else — lean name/type/folder index (no geometry/properties), capped at 400.
@@ -8074,10 +7873,9 @@ function extractGenAiMilErrorMessage(status, bodyText, fallback) {
 async function fetchGenAiMilModels(url, apiKey) {
   let response, bodyText;
   try {
-    response = await fetchWithTimeout(url, {
+    response = await fetch(url, {
       method: "GET",
       headers: { "Authorization": `Bearer ${apiKey}` },
-      timeoutMs: 12000,
     });
     bodyText = await response.text();
   } catch (networkErr) {
@@ -8102,14 +7900,13 @@ async function fetchGenAiMilModels(url, apiKey) {
 async function postGenAiMilChat(url, apiKey, payload) {
   let response, bodyText;
   try {
-    response = await fetchWithTimeout(url, {
+    response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
-      timeoutMs: 20000,
     });
     bodyText = await response.text();
   } catch (networkErr) {
@@ -8170,18 +7967,16 @@ function createGenAiMilProxyTransport(id, label, modelsEndpoint, chatEndpoint) {
     id,
     label,
     async fetchModels(apiKey) {
-      return fetchWithTimeout(modelsEndpoint, {
+      return fetch(modelsEndpoint, {
         method: "GET",
         headers: { "Authorization": `Bearer ${apiKey}` },
-        timeoutMs: 12000,
       });
     },
     async postChat(apiKey, payload) {
-      return fetchWithTimeout(chatEndpoint, {
+      return fetch(chatEndpoint, {
         method: "POST",
         headers: buildGenAiMilTransportHeaders(apiKey),
         body: JSON.stringify(payload),
-        timeoutMs: 20000,
       });
     },
   };
@@ -8198,19 +7993,17 @@ const GENAI_MIL_TRANSPORTS = {
     id: "backend",
     label: "RF Planner backend relay",
     async fetchModels(apiKey) {
-      return fetchWithTimeout(GENAI_MIL_BACKEND_MODELS_ENDPOINT, {
+      return fetch(GENAI_MIL_BACKEND_MODELS_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey }),
-        timeoutMs: 12000,
       });
     },
     async postChat(apiKey, payload) {
-      return fetchWithTimeout(GENAI_MIL_BACKEND_CHAT_ENDPOINT, {
+      return fetch(GENAI_MIL_BACKEND_CHAT_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey, ...payload }),
-        timeoutMs: 20000,
       });
     },
   },
@@ -8613,7 +8406,6 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   let systemText = [
     "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
     "You have deep knowledge of military and civilian radio systems, link budget analysis, antenna theory, terrain effects on propagation, and spectrum management.",
-    "Each asset in the scenario may have a 'toUnit' field linking it to a unit in the Table of Organization (TO). When answering questions about why specific units can or cannot communicate, cross-reference their linked emitter's frequencyMHz, waveform, power, elevation, and distance. The TO also contains parent-child hierarchy via toLinks. Use this to answer questions like 'why can't Kilo 1st Platoon talk to Kilo 3rd Platoon' by finding their linked emitters and diagnosing the RF path.",
     "For map-item location questions ('where is X', 'what grid is X', 'find X'), always answer in a complete sentence: '<name> is located at <coordinate>.' — never return just a raw coordinate with no context.",
     "Keep responses terse by default. Do not preface answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
     "For a single location answer, one sentence is enough. For ambiguous lookups, list at most 3 short candidates each on its own line with name and coordinate.",
@@ -9072,7 +8864,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0, onToken)
 
 async function callAnthropic(messages, maxTokens = 256, temperature = 0, onToken) {
   const streaming = Boolean(onToken);
-  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -9087,7 +8879,6 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0, onToken
       stream: streaming,
       messages,
     }),
-    timeoutMs: 20000,
   });
 
   if (!response.ok) {
@@ -9141,11 +8932,10 @@ async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2, onT
 
   let response;
   try {
-    response = await fetchWithTimeout(LOCAL_MODEL_PROXY_ENDPOINT, {
+    response = await fetch(LOCAL_MODEL_PROXY_ENDPOINT, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
-      timeoutMs: 20000,
     });
   } catch (err) {
     if (err instanceof TypeError) {
@@ -9188,7 +8978,7 @@ async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2, onT
 
 async function fetchLocalModelList() {
   try {
-    const res = await fetchWithTimeout(LOCAL_MODEL_HEALTH_ENDPOINT, { timeoutMs: 3000 });
+    const res = await fetch(LOCAL_MODEL_HEALTH_ENDPOINT, { signal: AbortSignal.timeout(3000) });
     if (!res.ok) return { reachable: false, models: [] };
     return await res.json();
   } catch {
@@ -10865,7 +10655,6 @@ function applyBasemap(key) {
     keepBuffer: 4,
     updateWhenIdle: true,
     updateWhenZooming: false,
-    updateInterval: 200,
   });
   state.baseLayer.addTo(state.map);
   updateImageryMenuValue(config.label);
@@ -11141,10 +10930,7 @@ function addAsset(latlng) {
     lat: latlng.lat,
     lon: latlng.lng,
     groundElevationM: sampleTerrainElevation(latlng.lat, latlng.lng),
-    // Carry forward TO link if user picked one in the emitter modal
-    ...(window._pendingToUnitId != null ? { toUnitId: window._pendingToUnitId } : {}),
   });
-  clearPendingToLink();
 
   const marker = L.marker(latlng, {
     icon: createEmitterIcon(asset),
@@ -11685,7 +11471,7 @@ async function fetchWeather() {
   setStatus("Fetching local weather...");
 
   try {
-    const response = await fetchWithTimeout(url.toString(), { timeoutMs: 8000 });
+    const response = await fetch(url.toString());
     if (!response.ok) {
       throw new Error("Weather request failed.");
     }
@@ -13807,10 +13593,7 @@ async function runGeocoderSearch(query) {
   showGeocoderStatus("Searching…");
   try {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`;
-    const resp = await fetchWithTimeout(url, {
-      headers: { "Accept-Language": "en", "User-Agent": "RFSim/1.0" },
-      timeoutMs: 6000,
-    });
+    const resp = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "RFSim/1.0" } });
     if (!resp.ok) throw new Error("Nominatim error");
     const data = await resp.json();
     if (!data.length) { showGeocoderStatus("No results found."); return; }
@@ -18606,11 +18389,13 @@ const CoordinateGridLayer = L.Layer.extend({
     // automatically follows pans without needing a move event.
     map.getPane("overlayPane").appendChild(canvas);
     map.on("moveend zoomend resize viewreset", this._scheduleRedraw, this);
+    // Also redraw on every move so the grid stays locked during panning.
+    map.on("move", this._scheduleRedraw, this);
     this._scheduleRedraw();
   },
 
   onRemove(map) {
-    map.off("moveend zoomend resize viewreset", this._scheduleRedraw, this);
+    map.off("moveend zoomend resize viewreset move", this._scheduleRedraw, this);
     if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
     if (this._canvas?.parentNode) this._canvas.parentNode.removeChild(this._canvas);
     this._canvas = null;
@@ -19147,7 +18932,7 @@ function getTileUrl(z, x, y) {
 
 async function checkLocalDataServer() {
   try {
-    const res = await fetchWithTimeout(`${LOCAL_DATA_SERVER}/health`, { timeoutMs: 2000 });
+    const res = await fetch(`${LOCAL_DATA_SERVER}/health`, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) throw new Error();
     const data = await res.json();
     _offline.serverOnline = true;
@@ -19294,7 +19079,7 @@ function offlineSetProgress(pct) {
 
 async function fetchTileBlob(z, x, y) {
   const url = getTileUrl(z, x, y);
-  const res = await fetchWithTimeout(url, { timeoutMs: 10000 });
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.arrayBuffer();
 }
@@ -19316,9 +19101,9 @@ async function fetchElevationGrid(bbox) {
 
   const results = [];
   for (const chunk of chunks) {
-    const res = await fetchWithTimeout(
+    const res = await fetch(
       `https://api.opentopodata.org/v1/srtm30m?locations=${chunk.join("|")}`,
-      { timeoutMs: 15000 }
+      { signal: AbortSignal.timeout(15000) }
     );
     if (!res.ok) throw new Error(`Elevation API HTTP ${res.status}`);
     const data = await res.json();
@@ -19335,10 +19120,10 @@ async function fetchOsmBuildings(bbox) {
 );
 out body;>;out skel qt;`;
 
-  const res = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
     method: "POST",
     body: query,
-    timeoutMs: 60000,
+    signal: AbortSignal.timeout(60000),
   });
   if (!res.ok) throw new Error(`Overpass API HTTP ${res.status}`);
   const osm = await res.json();
@@ -19417,11 +19202,9 @@ async function runOfflineDownload(mode) {
         try {
           const buf = await fetchTileBlob(z, x, y);
           if (mode === "server") {
-            await fetchWithTimeout(`${LOCAL_DATA_SERVER}/store/tiles/${source}/${z}/${x}/${y}.png`, {
-              method: "POST",
-              body: buf,
+            await fetch(`${LOCAL_DATA_SERVER}/store/tiles/${source}/${z}/${x}/${y}.png`, {
+              method: "POST", body: buf,
               signal: _offline.abortController.signal,
-              timeoutMs: 15000,
             });
           } else {
             zip.folder(`tiles/${source}/${z}/${x}`).file(`${y}.png`, buf);
@@ -19448,10 +19231,8 @@ async function runOfflineDownload(mode) {
       const key = bboxKey(bbox);
       const json = JSON.stringify(elevData);
       if (mode === "server") {
-        await fetchWithTimeout(`${LOCAL_DATA_SERVER}/store/elevation/0/0/${key}.json`, {
-          method: "POST",
-          body: json,
-          timeoutMs: 15000,
+        await fetch(`${LOCAL_DATA_SERVER}/store/elevation/0/0/${key}.json`, {
+          method: "POST", body: json,
         });
       } else {
         zip.folder("elevation").file(`${key}.json`, json);
@@ -19472,10 +19253,8 @@ async function runOfflineDownload(mode) {
       const key = bboxKey(bbox);
       const json = JSON.stringify(geojson);
       if (mode === "server") {
-        await fetchWithTimeout(`${LOCAL_DATA_SERVER}/store/osm/${key}.geojson`, {
-          method: "POST",
-          body: json,
-          timeoutMs: 15000,
+        await fetch(`${LOCAL_DATA_SERVER}/store/osm/${key}.geojson`, {
+          method: "POST", body: json,
         });
       } else {
         zip.folder("osm").file(`${key}.geojson`, json);
@@ -19558,7 +19337,7 @@ function initOfflineDownload() {
       offlineLog("Local server not running.", "err");
       return;
     }
-    await fetchWithTimeout(`${LOCAL_DATA_SERVER}/cache`, { method: "DELETE", timeoutMs: 5000 });
+    await fetch(`${LOCAL_DATA_SERVER}/cache`, { method: "DELETE" });
     offlineLog("Cache cleared.", "ok");
     await refreshOfflineServerStatus();
   });
@@ -20302,563 +20081,22 @@ function esc(s) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TO ↔ EMITTER LINK SYSTEM
-   _toEmitterLinks: Map<emitterId, toUnitId>
-   Stored on state.assets items as .toUnitId
-═══════════════════════════════════════════════════════════════ */
-
-// The emitter currently being edited (set when modal opens)
-let _currentEmitterEditId = null;
-
-function initToPickerModal() {
-  const linkBtn   = document.getElementById("emLinkToToBtn");
-  const closeBtn  = document.getElementById("toPickerCloseBtn");
-  const cancelBtn = document.getElementById("toPickerCancelBtn");
-  const unlinkBtn = document.getElementById("emToUnlinkBtn");
-
-  linkBtn?.addEventListener("click", openToPicker);
-  closeBtn?.addEventListener("click", closeToPicker);
-  cancelBtn?.addEventListener("click", closeToPicker);
-  unlinkBtn?.addEventListener("click", () => {
-    unlinkEmitterFromTo();
-    updateEmitterToLinkBadge(null);
-  });
-
-  // Close on backdrop click
-  document.getElementById("toPickerModal")?.addEventListener("click", (e) => {
-    if (e.target === document.getElementById("toPickerModal")) closeToPicker();
-  });
-}
-
-function openToPicker() {
-  const modal = document.getElementById("toPickerModal");
-  if (!modal) return;
-  modal.classList.remove("hidden");
-  renderToPickerCanvas();
-}
-
-function closeToPicker() {
-  document.getElementById("toPickerModal")?.classList.add("hidden");
-}
-
-function renderToPickerCanvas() {
-  const world  = document.getElementById("toPickerWorld");
-  const edgeSvg = document.getElementById("toPickerEdgeSvg");
-  const empty  = document.getElementById("toPickerEmpty");
-  if (!world || !edgeSvg) return;
-
-  world.innerHTML = "";
-  edgeSvg.innerHTML = "";
-
-  if (!_toState.units.length) {
-    empty?.classList.remove("hidden");
-    return;
-  }
-  empty?.classList.add("hidden");
-
-  // Run auto-layout to position units sensibly for the picker
-  const snapshot = _toState.units.map(u => ({ ...u }));
-  const linkSnap = [..._toState.links];
-
-  // Compute positions using same layout algorithm but write to temp objects
-  const tempUnits = JSON.parse(JSON.stringify(_toState.units));
-  const H_GAP = 120, V_GAP = 130;
-
-  function subtreeWidth(id) {
-    const children = linkSnap.filter(l => l.parentId === id).map(l => l.childId);
-    if (!children.length) return H_GAP;
-    return Math.max(H_GAP, children.reduce((s, cid) => s + subtreeWidth(cid), 0));
-  }
-  function layout(id, x, y) {
-    const u = tempUnits.find(u => u.id === id);
-    if (!u) return;
-    u.x = x; u.y = y;
-    const children = linkSnap.filter(l => l.parentId === id).map(l => l.childId);
-    const totalW = children.reduce((s, cid) => s + subtreeWidth(cid), 0);
-    let cx = x - totalW / 2;
-    for (const cid of children) { const w = subtreeWidth(cid); layout(cid, cx + w/2, y + V_GAP); cx += w; }
-  }
-  const childSet = new Set(linkSnap.map(l => l.childId));
-  const roots = tempUnits.filter(u => !childSet.has(u.id));
-  if (roots.length) {
-    let sx = 160;
-    for (const r of roots) { const w = subtreeWidth(r.id); layout(r.id, sx + w/2, 80); sx += w + H_GAP; }
-  } else {
-    // No links — just spread units across
-    tempUnits.forEach((u, i) => { u.x = 80 + (i % 5) * H_GAP; u.y = 80 + Math.floor(i / 5) * V_GAP; });
-  }
-
-  // Get currently linked toUnitId for this emitter
-  const currentToId = getCurrentEmitterToId();
-
-  // Render units (read-only — click to select)
-  for (const unit of tempUnits) {
-    const el = document.createElement("div");
-    el.className = "to-unit";
-    el.dataset.id = unit.id;
-    el.style.left = unit.x + "px";
-    el.style.top  = unit.y + "px";
-    if (unit.id === currentToId) el.classList.add("to-picker-selected");
-
-    // Show linked-emitter indicator for units already claimed by another emitter
-    const otherLink = getEmitterLinkedToUnit(unit.id);
-    if (otherLink && otherLink !== _currentEmitterEditId) el.classList.add("has-emitter-link");
-
-    el.innerHTML = `
-      <span class="to-unit-icon">${getPlanUnitSvg(unit)}</span>
-      <span class="to-unit-label">${esc(unit.label)}</span>
-      <span class="to-unit-size-badge">${esc(unit.size || "")}</span>
-    `;
-    el.addEventListener("click", () => selectToUnitForEmitter(unit, el));
-    world.appendChild(el);
-  }
-
-  // Draw edges
-  renderPickerEdges(tempUnits, linkSnap, edgeSvg);
-
-  // Center the view
-  fitPickerView(tempUnits);
-}
-
-function renderPickerEdges(units, links, svg) {
-  svg.innerHTML = "";
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-  marker.setAttribute("id", "pickerArrow");
-  marker.setAttribute("markerWidth", "7"); marker.setAttribute("markerHeight", "7");
-  marker.setAttribute("refX", "3.5");      marker.setAttribute("refY", "6");
-  marker.setAttribute("orient", "auto");
-  marker.innerHTML = `<path d="M0,0 L7,0 L3.5,7 z" fill="#565d67"/>`;
-  defs.appendChild(marker);
-  svg.appendChild(defs);
-
-  const UNIT_H = 56;
-  for (const lnk of links) {
-    const p = units.find(u => u.id === lnk.parentId);
-    const c = units.find(u => u.id === lnk.childId);
-    if (!p || !c) continue;
-    const x1 = p.x, y1 = p.y + UNIT_H / 2;
-    const x2 = c.x, y2 = c.y - UNIT_H / 2;
-    const midY = (y1 + y2) / 2;
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`);
-    path.setAttribute("stroke", "#565d67");
-    path.setAttribute("stroke-width", "1.5");
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke-linejoin", "miter");
-    path.setAttribute("marker-end", "url(#pickerArrow)");
-    svg.appendChild(path);
-  }
-}
-
-function fitPickerView(units) {
-  const canvas = document.getElementById("toPickerCanvas");
-  const world  = document.getElementById("toPickerWorld");
-  const svg    = document.getElementById("toPickerEdgeSvg");
-  if (!canvas || !world || !units.length) return;
-  const xs = units.map(u => u.x), ys = units.map(u => u.y);
-  const minX = Math.min(...xs) - 80, maxX = Math.max(...xs) + 80;
-  const minY = Math.min(...ys) - 60, maxY = Math.max(...ys) + 80;
-  const W = canvas.clientWidth, H = canvas.clientHeight;
-  const scaleX = W / (maxX - minX), scaleY = H / (maxY - minY);
-  const zoom = Math.max(0.3, Math.min(1.6, Math.min(scaleX, scaleY) * 0.88));
-  const panX = W/2 - ((minX + maxX)/2) * zoom;
-  const panY = H/2 - ((minY + maxY)/2) * zoom;
-  const t = `translate(${panX}px,${panY}px) scale(${zoom})`;
-  world.style.transform = t;
-  svg.style.transform = t;
-}
-
-function selectToUnitForEmitter(unit, el) {
-  // Deselect previous
-  document.querySelectorAll("#toPickerWorld .to-picker-selected").forEach(e => e.classList.remove("to-picker-selected"));
-  el.classList.add("to-picker-selected");
-
-  // Update identity fields in the emitter modal
-  const affiliationMap = { friendly: "friendly", hostile: "enemy", neutral: "host-nation", unknown: "other" };
-  const nameInput = document.getElementById("emName");
-  const unitInput = document.getElementById("emUnit");
-  const forceSelect = document.getElementById("emForce");
-
-  if (nameInput && !nameInput.value) nameInput.value = unit.label;
-  if (unitInput) unitInput.value = unit.designator || unit.label;
-  if (forceSelect) forceSelect.value = affiliationMap[unit.affiliation] || "friendly";
-
-  // Store the link on the pending emitter state
-  linkEmitterToToUnit(unit.id);
-  updateEmitterToLinkBadge(unit);
-
-  closeToPicker();
-}
-
-function linkEmitterToToUnit(unitId) {
-  // Store on temporary pending state — committed when "Place on Map" is clicked
-  window._pendingToUnitId = unitId;
-}
-
-function unlinkEmitterFromTo() {
-  window._pendingToUnitId = null;
-  if (_currentEmitterEditId) {
-    const asset = (state.assets || []).find(a => a.id === _currentEmitterEditId);
-    if (asset) delete asset.toUnitId;
-  }
-  // Refresh topology/analyze if visible
-  refreshLinkedViews();
-}
-
-function getCurrentEmitterToId() {
-  if (window._pendingToUnitId !== undefined) return window._pendingToUnitId;
-  if (_currentEmitterEditId) {
-    const asset = (state.assets || []).find(a => a.id === _currentEmitterEditId);
-    return asset?.toUnitId ?? null;
-  }
-  return null;
-}
-
-function getEmitterLinkedToUnit(unitId) {
-  return (state.assets || []).find(a => a.toUnitId === unitId)?.id ?? null;
-}
-
-function updateEmitterToLinkBadge(unit) {
-  const badge = document.getElementById("emToLinkBadge");
-  const label = document.getElementById("emToLinkLabel");
-  if (!badge) return;
-  if (!unit) {
-    badge.classList.add("hidden");
-    if (label) label.textContent = "Linked to: —";
-    return;
-  }
-  badge.classList.remove("hidden");
-  if (label) label.textContent = `Linked to: ${unit.label}${unit.size ? ` (${unit.size})` : ""}`;
-}
-
-function commitEmitterToLink(emitterId) {
-  if (window._pendingToUnitId === undefined || window._pendingToUnitId === null) return;
-  const asset = (state.assets || []).find(a => a.id === emitterId);
-  if (asset) {
-    asset.toUnitId = window._pendingToUnitId;
-    // Refresh TO canvas to show linked badge on the unit
-    refreshLinkedViews();
-  }
-  window._pendingToUnitId = undefined;
-}
-
-function clearPendingToLink() {
-  window._pendingToUnitId = undefined;
-}
-
-function refreshLinkedViews() {
-  // If topology or analyze view is active, re-render
-  if (state.ui?.currentView === "topology") renderTopologyView();
-  if (state.ui?.currentView === "analyze")  renderAnalyzeView();
-  // Refresh TO canvas if PLAN is open to update emitter-link indicators
-  if (state.ui?.currentView === "plan" && _toState._initialized) renderToView();
-}
-
-/* ═══════════════════════════════════════════════════════════════
    PLAN VIEW — Military Table of Organization Builder
 ═══════════════════════════════════════════════════════════════ */
 const _toState = {
-  units: [],           // { id, label, designator, affiliation, type, size, x, y }
-  links: [],           // { parentId, childId }
+  units: [],       // { id, label, designator, affiliation, type, size, x, y }
+  links: [],       // { parentId, childId }
   nextId: 1,
-  renderer: "aigen",
   zoom: 1,
   panX: 0,
   panY: 0,
-  dragging: null,      // { unitId, startX, startY, origPositions: Map<id,{x,y}> }
+  dragging: null,  // { unitId, startX, startY, origX, origY }
   panning: false,
   panStart: null,
-  selectedUnits: new Set(),  // Set of unit ids (multi-select)
-  linkMode: null,      // null | { type: "parent"|"child", fromId }
+  selectedUnit: null,
+  linkMode: null,  // null | { type: "parent"|"child", fromId }
   _initialized: false,
 };
-
-const PLAN_RENDERER_AIGEN = "aigen";
-const PLAN_RENDERER_MILSTD = "milstd";
-
-const PLAN_MILSTD_AFFILIATIONS = {
-  friendly: { identityCode: "3", fullFrameSuffix: "1" },
-  hostile: { identityCode: "6", fullFrameSuffix: "3" },
-  neutral: { identityCode: "4", fullFrameSuffix: "2" },
-  unknown: { identityCode: "1", fullFrameSuffix: "0" },
-};
-
-const PLAN_MILSTD_DIMENSIONS = {
-  air: "01",
-  space: "05",
-  landUnit: "10",
-  landEquipment: "15",
-  seaSurface: "30",
-  seaSubsurface: "35",
-};
-
-const PLAN_MILSTD_ECHELONS = {
-  team: { group: "1", code: "1" },
-  fireteam: { group: "1", code: "1" },
-  squad: { group: "1", code: "2" },
-  section: { group: "1", code: "3" },
-  platoon: { group: "1", code: "4" },
-  company: { group: "1", code: "5" },
-  battalion: { group: "1", code: "6" },
-  regiment: { group: "1", code: "7" },
-  brigade: { group: "1", code: "8" },
-  division: { group: "2", code: "1" },
-  corps: { group: "2", code: "2" },
-  army: { group: "2", code: "3" },
-  army_group: { group: "2", code: "4" },
-  theater: { group: "2", code: "5" },
-};
-
-const PLAN_MILSTD_TYPE_SPECS = {
-  infantry: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true },
-  light_infantry: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true, mod2: "10192" },
-  mechanized_infantry: { folder: "Land", dimension: "landUnit", icon: "10121102", fullFrame: true },
-  airborne_infantry: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true, mod2: "10012" },
-  ranger: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true, mod1: "10761" },
-  special_forces: { folder: "Land", dimension: "landUnit", icon: "10121700" },
-  marine_infantry: { folder: "Land", dimension: "landUnit", icon: "10121101", fullFrame: true },
-  recon: { folder: "Land", dimension: "landUnit", icon: "10121300", fullFrame: true },
-  armor: { folder: "Land", dimension: "landUnit", icon: "10120500" },
-  armored_cavalry: { folder: "Land", dimension: "landUnit", icon: "10120501", fullFrame: true },
-  artillery: { folder: "Land", dimension: "landUnit", icon: "10130300" },
-  air_defense: { folder: "Land", dimension: "landUnit", icon: "10130100", fullFrame: true },
-  engineer: { folder: "Land", dimension: "landUnit", icon: "10140700" },
-  signal: { folder: "Land", dimension: "landUnit", icon: "10111000", fullFrame: true },
-  military_intelligence: { folder: "Land", dimension: "landUnit", icon: "10151000" },
-  military_police: { folder: "Land", dimension: "landUnit", icon: "10141200" },
-  medical: { folder: "Land", dimension: "landUnit", icon: "10161300", fullFrame: true },
-  logistics: { folder: "Land", dimension: "landUnit", icon: "10163400", fullFrame: true },
-  maintenance: { folder: "Land", dimension: "landUnit", icon: "10161100" },
-  chemical: { folder: "Land", dimension: "landUnit", icon: "10140100" },
-  finance: { folder: "Land", dimension: "landUnit", icon: "10160700" },
-  adjutant_general: { folder: "Land", dimension: "landUnit", icon: "10110000" },
-  chaplain: { folder: "Land", dimension: "landUnit", icon: "10110000" },
-  judge_advocate: { folder: "Land", dimension: "landUnit", icon: "10160800" },
-  civil_affairs: { folder: "Land", dimension: "landUnit", icon: "10110200" },
-  psyop: { folder: "Land", dimension: "landUnit", icon: "10110600" },
-  ew: { folder: "Land", dimension: "landUnit", icon: "10150500" },
-  cyber: { folder: "Cyberspace", dimension: "landEquipment", icon: "60110100" },
-  space: { folder: "Space", dimension: "space", icon: "05111500" },
-  headquarters: { folder: "Land", dimension: "landUnit", icon: "10110000", hq: true },
-  aviation_fixed: { folder: "Air", dimension: "air", icon: "01110100" },
-  fighter: { folder: "Air", dimension: "air", icon: "01110104" },
-  bomber: { folder: "Air", dimension: "air", icon: "01110103" },
-  attack_fixed: { folder: "Air", dimension: "air", icon: "01110102" },
-  transport_fixed: { folder: "Air", dimension: "air", icon: "01110107" },
-  isr_fixed: { folder: "Air", dimension: "air", icon: "01110111" },
-  tanker: { folder: "Air", dimension: "air", icon: "01110109" },
-  uav_fixed: { folder: "Air", dimension: "air", icon: "01110300" },
-  aviation_rotary: { folder: "Air", dimension: "air", icon: "01110200" },
-  attack_helo: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01011" },
-  utility_helo: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01071" },
-  recon_helo: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01181" },
-  medevac: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01141" },
-  uav_rotary: { folder: "Air", dimension: "air", icon: "01110400" },
-  naval_surface: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120200" },
-  submarine: { folder: "SeaSubsurface", dimension: "seaSubsurface", icon: "35110100" },
-  naval_aviation: { folder: "Air", dimension: "air", icon: "01110100" },
-  amphibious: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120300" },
-  mine_warfare: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120400" },
-  coast_guard: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120500" },
-};
-
-const PLAN_MILSTD_ASSET_CACHE = new Map();
-let _planMilstdAssetsPromise = null;
-
-function serializePlanViewState() {
-  return {
-    renderer: _toState.renderer,
-    nextId: Number.isFinite(_toState.nextId) ? _toState.nextId : 1,
-    units: _toState.units.map((unit) => ({
-      id: unit.id,
-      label: unit.label,
-      designator: unit.designator ?? "",
-      affiliation: unit.affiliation ?? "friendly",
-      type: unit.type ?? "infantry",
-      size: unit.size ?? "team",
-      x: Number.isFinite(unit.x) ? unit.x : 0,
-      y: Number.isFinite(unit.y) ? unit.y : 0,
-    })),
-    links: _toState.links.map((link) => ({ parentId: link.parentId, childId: link.childId })),
-  };
-}
-
-function applySavedPlanState(planState) {
-  if (!planState || typeof planState !== "object") return;
-  _toState.renderer = planState.renderer === PLAN_RENDERER_MILSTD ? PLAN_RENDERER_MILSTD : PLAN_RENDERER_AIGEN;
-  _toState.units = Array.isArray(planState.units)
-    ? planState.units.map((unit) => ({
-      id: unit.id,
-      label: unit.label ?? "Unit",
-      designator: unit.designator ?? "",
-      affiliation: unit.affiliation ?? "friendly",
-      type: unit.type ?? "infantry",
-      size: unit.size ?? "team",
-      x: Number.isFinite(unit.x) ? unit.x : 0,
-      y: Number.isFinite(unit.y) ? unit.y : 0,
-    }))
-    : [];
-  _toState.links = Array.isArray(planState.links)
-    ? planState.links
-        .filter((link) => Number.isFinite(link?.parentId) && Number.isFinite(link?.childId))
-        .map((link) => ({ parentId: link.parentId, childId: link.childId }))
-    : [];
-  const maxUnitId = _toState.units.reduce((maxId, unit) => Math.max(maxId, Number(unit.id) || 0), 0);
-  _toState.nextId = Math.max(maxUnitId + 1, Number.isFinite(planState.nextId) ? planState.nextId : 1);
-}
-
-function markPlanStateDirty() {
-  saveMapState();
-}
-
-function isToPickerOpen() {
-  const modal = document.getElementById("toPickerModal");
-  return Boolean(modal && !modal.classList.contains("hidden"));
-}
-
-function syncPlanRendererToggle() {
-  const milstdBtn = document.getElementById("toRendererMilstdBtn");
-  const aigenBtn = document.getElementById("toRendererAigenBtn");
-  if (!milstdBtn || !aigenBtn) return;
-  const isMilstd = _toState.renderer === PLAN_RENDERER_MILSTD;
-  milstdBtn.classList.toggle("active", isMilstd);
-  aigenBtn.classList.toggle("active", !isMilstd);
-  milstdBtn.setAttribute("aria-pressed", String(isMilstd));
-  aigenBtn.setAttribute("aria-pressed", String(!isMilstd));
-}
-
-async function setPlanRendererMode(mode, { persist = true } = {}) {
-  const nextMode = mode === PLAN_RENDERER_MILSTD ? PLAN_RENDERER_MILSTD : PLAN_RENDERER_AIGEN;
-  if (nextMode === PLAN_RENDERER_MILSTD) {
-    await ensurePlanMilstdAssetsLoaded();
-  }
-  _toState.renderer = nextMode;
-  syncPlanRendererToggle();
-  if (_toState._initialized) {
-    renderToView();
-    if (isToPickerOpen()) renderToPickerCanvas();
-  }
-  if (persist) markPlanStateDirty();
-}
-
-function getPlanUnitSvg(unit) {
-  if (_toState.renderer === PLAN_RENDERER_MILSTD) return milstd2525Svg(unit);
-  return ms2525Svg(unit);
-}
-
-function getPlanMilstdSpec(unitType) {
-  return PLAN_MILSTD_TYPE_SPECS[unitType] ?? PLAN_MILSTD_TYPE_SPECS.infantry;
-}
-
-function getPlanMilstdAffiliation(affiliation) {
-  return PLAN_MILSTD_AFFILIATIONS[affiliation] ?? PLAN_MILSTD_AFFILIATIONS.unknown;
-}
-
-function getPlanMilstdDimensionCode(dimensionKey) {
-  return PLAN_MILSTD_DIMENSIONS[dimensionKey] ?? PLAN_MILSTD_DIMENSIONS.landUnit;
-}
-
-function buildPlanMilstdFrameFile(unit) {
-  const spec = getPlanMilstdSpec(unit.type);
-  const dim = getPlanMilstdDimensionCode(spec.dimension);
-  const aff = getPlanMilstdAffiliation(unit.affiliation);
-  return `Frames/0_${aff.identityCode}${dim}_0.svg`;
-}
-
-function buildPlanMilstdIconLayer(spec, unit) {
-  const aff = getPlanMilstdAffiliation(unit.affiliation);
-  const file = spec.fullFrame ? `${spec.icon}_${aff.fullFrameSuffix}.svg` : `${spec.icon}.svg`;
-  return `Appendices/${spec.folder}/${file}`;
-}
-
-function buildPlanMilstdModLayer(spec, key) {
-  const file = spec[key];
-  if (!file) return null;
-  return `Appendices/${spec.folder}/mod${key === "mod1" ? "1" : "2"}/${file}.svg`;
-}
-
-function buildPlanMilstdEchelonFile(unit) {
-  const echelon = PLAN_MILSTD_ECHELONS[unit.size];
-  if (!echelon) return null;
-  const aff = getPlanMilstdAffiliation(unit.affiliation);
-  return `Echelon/${aff.identityCode}${echelon.group}${echelon.code}.svg`;
-}
-
-function buildPlanMilstdHqFile(unit) {
-  const spec = getPlanMilstdSpec(unit.type);
-  if (!spec.hq) return null;
-  const aff = getPlanMilstdAffiliation(unit.affiliation);
-  const dim = getPlanMilstdDimensionCode(spec.dimension);
-  return `HQTFFD/${aff.identityCode}${dim}2.svg`;
-}
-
-function collectPlanMilstdAssetFiles() {
-  const files = new Set();
-  Object.values(PLAN_MILSTD_TYPE_SPECS).forEach((spec) => {
-    const dimensionCode = getPlanMilstdDimensionCode(spec.dimension);
-    Object.values(PLAN_MILSTD_AFFILIATIONS).forEach((aff) => {
-      files.add(`Frames/0_${aff.identityCode}${dimensionCode}_0.svg`);
-      if (spec.fullFrame) files.add(`Appendices/${spec.folder}/${spec.icon}_${aff.fullFrameSuffix}.svg`);
-      if (spec.hq) files.add(`HQTFFD/${aff.identityCode}${dimensionCode}2.svg`);
-    });
-    if (!spec.fullFrame) files.add(`Appendices/${spec.folder}/${spec.icon}.svg`);
-    const mod1 = buildPlanMilstdModLayer(spec, "mod1");
-    const mod2 = buildPlanMilstdModLayer(spec, "mod2");
-    if (mod1) files.add(mod1);
-    if (mod2) files.add(mod2);
-  });
-  Object.values(PLAN_MILSTD_ECHELONS).forEach((echelon) => {
-    Object.values(PLAN_MILSTD_AFFILIATIONS).forEach((aff) => {
-      files.add(`Echelon/${aff.identityCode}${echelon.group}${echelon.code}.svg`);
-    });
-  });
-  return [...files];
-}
-
-async function ensurePlanMilstdAssetsLoaded() {
-  if (_planMilstdAssetsPromise) return _planMilstdAssetsPromise;
-  const files = collectPlanMilstdAssetFiles();
-  _planMilstdAssetsPromise = Promise.all(files.map(async (file) => {
-    if (PLAN_MILSTD_ASSET_CACHE.has(file)) return;
-    const response = await fetch(`./images/milstd/${file}`);
-    if (!response.ok) throw new Error(`MILSTD asset missing: ${file}`);
-    PLAN_MILSTD_ASSET_CACHE.set(file, await response.text());
-  })).catch((error) => {
-    console.warn("[plan] MILSTD asset load failed:", error);
-    _planMilstdAssetsPromise = null;
-    throw error;
-  });
-  return _planMilstdAssetsPromise;
-}
-
-function getPlanMilstdLayerMarkup(file) {
-  const raw = PLAN_MILSTD_ASSET_CACHE.get(file);
-  if (!raw) return "";
-  const match = raw.match(/<svg[^>]*>([\s\S]*?)<\/svg>/i);
-  let markup = match ? match[1] : raw;
-  if (file.startsWith("Frames/")) {
-    markup = markup.replace(/<text\b[^>]*>[\s\S]*?<\/text>/gi, "");
-  }
-  return markup
-    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/gi, "")
-    .replace(/<desc\b[^>]*>[\s\S]*?<\/desc>/gi, "");
-}
-
-function milstd2525Svg(unit) {
-  const spec = getPlanMilstdSpec(unit.type);
-  const layers = [
-    buildPlanMilstdFrameFile(unit),
-    buildPlanMilstdIconLayer(spec, unit),
-    buildPlanMilstdModLayer(spec, "mod1"),
-    buildPlanMilstdModLayer(spec, "mod2"),
-    buildPlanMilstdEchelonFile(unit),
-    buildPlanMilstdHqFile(unit),
-  ].filter(Boolean);
-  const markup = layers.map((file) => getPlanMilstdLayerMarkup(file)).filter(Boolean).join("");
-  if (!markup) return ms2525Svg(unit);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 230 420 560" width="56" height="56" class="ms2525-icon milstd2525-icon">${markup}</svg>`;
-}
 
 const MIL_COLORS = {
   friendly: { frame: "#006bb6", bg: "#aad4f5", text: "#003566" },
@@ -20947,7 +20185,7 @@ function ms2525Svg(unit) {
     ? `<line x1="4" y1="8" x2="52" y2="48" stroke="${col.frame}" stroke-width="1.5"/>
        <line x1="52" y1="8" x2="4" y2="48" stroke="${col.frame}" stroke-width="1.5"/>`
     : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -10 56 70" width="56" height="66" class="ms2525-icon">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" width="56" height="56" class="ms2525-icon">
     ${frameShape}
     ${hostile_marks}
     <text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
@@ -20979,16 +20217,6 @@ function initPlanViewIfNeeded() {
     addToUnit({ label, designator: des, affiliation: aff, type, size, x: cx + jitter(), y: cy + jitter() });
     document.getElementById("toUnitDesignator").value = "";
   });
-  document.getElementById("toRendererMilstdBtn")?.addEventListener("click", () => {
-    setPlanRendererMode(PLAN_RENDERER_MILSTD).catch((error) => {
-      console.warn("[plan] failed to switch renderer:", error);
-    });
-  });
-  document.getElementById("toRendererAigenBtn")?.addEventListener("click", () => {
-    setPlanRendererMode(PLAN_RENDERER_AIGEN).catch((error) => {
-      console.warn("[plan] failed to switch renderer:", error);
-    });
-  });
   document.getElementById("toAutoLayoutBtn")?.addEventListener("click", toAutoLayout);
   document.getElementById("toFitViewBtn")?.addEventListener("click", toFitView);
   document.getElementById("toClearAllBtn")?.addEventListener("click", () => {
@@ -20996,7 +20224,6 @@ function initPlanViewIfNeeded() {
     _toState.units = [];
     _toState.links = [];
     renderToView();
-    markPlanStateDirty();
   });
   document.getElementById("toZoomInBtn")?.addEventListener("click",  () => setToZoom(_toState.zoom * 1.2));
   document.getElementById("toZoomOutBtn")?.addEventListener("click", () => setToZoom(_toState.zoom / 1.2));
@@ -21020,11 +20247,6 @@ function initPlanViewIfNeeded() {
       _toState.panning = true;
       _toState.panStart = { x: e.clientX - _toState.panX, y: e.clientY - _toState.panY };
       hideToContextMenu();
-      // Click on empty canvas clears selection (unless Ctrl held)
-      if (!e.ctrlKey && !e.metaKey) {
-        _toState.selectedUnits.clear();
-        document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
-      }
     }
   });
   document.addEventListener("mousemove", (e) => {
@@ -21038,111 +20260,58 @@ function initPlanViewIfNeeded() {
       const d = _toState.dragging;
       const dx = (e.clientX - d.startX) / _toState.zoom;
       const dy = (e.clientY - d.startY) / _toState.zoom;
-      // Move all selected units together
-      for (const [id, orig] of d.origPositions) {
-        const unit = _toState.units.find(u => u.id === id);
-        if (!unit) continue;
-        unit.x = orig.x + dx;
-        unit.y = orig.y + dy;
+      const unit = _toState.units.find(u => u.id === d.unitId);
+      if (unit) {
+        unit.x = d.origX + dx;
+        unit.y = d.origY + dy;
         const el = document.querySelector(`.to-unit[data-id="${unit.id}"]`);
         if (el) { el.style.left = unit.x + "px"; el.style.top = unit.y + "px"; }
+        renderToEdges();
       }
-      renderToEdges();
     }
   });
   document.addEventListener("mouseup", () => {
-    const hadDrag = Boolean(_toState.dragging);
     _toState.panning = false;
     _toState.dragging = null;
-    if (hadDrag) markPlanStateDirty();
   });
 
-  // ── Context menu actions ──
-  document.getElementById("toCtxRename")?.addEventListener("click", () => {
-    const id = [..._toState.selectedUnits][0];
-    if (!id) return;
-    hideToContextMenu();
-    startToRename(id);
-  });
-  document.getElementById("toCtxDuplicate")?.addEventListener("click", () => {
-    if (!_toState.selectedUnits.size) return;
-    const OFFSET = 80;
-    const newIds = [];
-    for (const id of _toState.selectedUnits) {
-      const src = _toState.units.find(u => u.id === id);
-      if (!src) continue;
-      const copy = { ...src, id: _toState.nextId++, x: src.x + OFFSET, y: src.y + OFFSET };
-      _toState.units.push(copy);
-      newIds.push(copy.id);
-    }
-    _toState.selectedUnits = new Set(newIds);
-    hideToContextMenu();
-    renderToView();
-    markPlanStateDirty();
-  });
+  // ── Context menu ──
   document.getElementById("toCtxLinkParent")?.addEventListener("click", () => {
-    const id = [..._toState.selectedUnits][0];
-    if (!id) return;
-    _toState.linkMode = { type: "parent", fromId: id };
+    if (!_toState.selectedUnit) return;
+    _toState.linkMode = { type: "parent", fromId: _toState.selectedUnit };
     const banner = document.getElementById("toLinkBanner");
     const msg    = document.getElementById("toLinkBannerMsg");
-    if (msg) msg.textContent = "Click another unit to set it as PARENT";
+    if (msg) msg.textContent = "Click another unit to set it as PARENT of the selected unit";
     if (banner) banner.classList.remove("hidden");
     hideToContextMenu();
   });
   document.getElementById("toCtxLinkChild")?.addEventListener("click", () => {
-    const id = [..._toState.selectedUnits][0];
-    if (!id) return;
-    _toState.linkMode = { type: "child", fromId: id };
+    if (!_toState.selectedUnit) return;
+    _toState.linkMode = { type: "child", fromId: _toState.selectedUnit };
     const banner = document.getElementById("toLinkBanner");
     const msg    = document.getElementById("toLinkBannerMsg");
-    if (msg) msg.textContent = "Click another unit to set it as CHILD";
+    if (msg) msg.textContent = "Click another unit to set it as CHILD of the selected unit";
     if (banner) banner.classList.remove("hidden");
     hideToContextMenu();
   });
   document.getElementById("toCtxDelete")?.addEventListener("click", () => {
-    if (!_toState.selectedUnits.size) return;
-    const ids = _toState.selectedUnits;
-    _toState.units = _toState.units.filter(u => !ids.has(u.id));
-    _toState.links = _toState.links.filter(l => !ids.has(l.parentId) && !ids.has(l.childId));
-    _toState.selectedUnits.clear();
+    if (!_toState.selectedUnit) return;
+    _toState.units = _toState.units.filter(u => u.id !== _toState.selectedUnit);
+    _toState.links = _toState.links.filter(l => l.parentId !== _toState.selectedUnit && l.childId !== _toState.selectedUnit);
+    _toState.selectedUnit = null;
     hideToContextMenu();
     renderToView();
-    markPlanStateDirty();
   });
   document.getElementById("toLinkCancelBtn")?.addEventListener("click", cancelToLink);
 
   canvas.addEventListener("click", () => { hideToContextMenu(); });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { hideToContextMenu(); cancelToLink(); }
-    // Delete/Backspace removes selected units
-    if ((e.key === "Delete" || e.key === "Backspace") &&
-        _toState.selectedUnits.size &&
-        document.activeElement?.tagName !== "INPUT" &&
-        document.activeElement?.tagName !== "TEXTAREA") {
-      const ids = _toState.selectedUnits;
-      _toState.units = _toState.units.filter(u => !ids.has(u.id));
-      _toState.links = _toState.links.filter(l => !ids.has(l.parentId) && !ids.has(l.childId));
-      _toState.selectedUnits.clear();
-      renderToView();
-      markPlanStateDirty();
-    }
   });
 
   // ── AI form ──
   wireViewAiForm("planAiForm", "planAiInput", "planAiSendBtn", "planAiClearBtn", "planAiMessages", buildPlanAiContext);
 
-  syncPlanRendererToggle();
-  if (_toState.renderer === PLAN_RENDERER_MILSTD) {
-    ensurePlanMilstdAssetsLoaded()
-      .then(() => {
-        if (_toState.renderer === PLAN_RENDERER_MILSTD) {
-          renderToView();
-          if (isToPickerOpen()) renderToPickerCanvas();
-        }
-      })
-      .catch((error) => console.warn("[plan] MILSTD preload failed:", error));
-  }
   renderToView();
 }
 
@@ -21150,7 +20319,6 @@ function addToUnit(props) {
   const unit = { id: _toState.nextId++, ...props };
   _toState.units.push(unit);
   renderToView();
-  markPlanStateDirty();
   return unit;
 }
 
@@ -21167,49 +20335,27 @@ function renderToUnit(unit) {
   if (!world) return;
   const el = document.createElement("div");
   el.className = "to-unit";
-  if (_toState.selectedUnits.has(unit.id)) el.classList.add("selected");
+  if (_toState.selectedUnit === unit.id) el.classList.add("selected");
   el.dataset.id = unit.id;
   el.style.left = unit.x + "px";
   el.style.top  = unit.y + "px";
   el.innerHTML = `
-    <span class="to-unit-icon">${getPlanUnitSvg(unit)}</span>
+    <span class="to-unit-icon">${ms2525Svg(unit)}</span>
     <span class="to-unit-label">${esc(unit.label)}</span>
     <span class="to-unit-size-badge">${esc(UNIT_SIZE_SYMBOLS[unit.size] || "")} ${esc(unit.size || "")}</span>
   `;
 
-  // Mousedown: select + start drag
+  // Drag to move
   el.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     e.stopPropagation();
-
-    // Ctrl/Meta: toggle this unit in/out of selection
-    if (e.ctrlKey || e.metaKey) {
-      if (_toState.selectedUnits.has(unit.id)) {
-        _toState.selectedUnits.delete(unit.id);
-        el.classList.remove("selected");
-      } else {
-        _toState.selectedUnits.add(unit.id);
-        el.classList.add("selected");
-      }
-    } else {
-      // Plain click: if unit not already in selection, replace selection
-      if (!_toState.selectedUnits.has(unit.id)) {
-        _toState.selectedUnits.clear();
-        document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
-        _toState.selectedUnits.add(unit.id);
-        el.classList.add("selected");
-      }
-      // Either way, start drag for all selected units
-      const origPositions = new Map();
-      for (const id of _toState.selectedUnits) {
-        const u = _toState.units.find(x => x.id === id);
-        if (u) origPositions.set(id, { x: u.x, y: u.y });
-      }
-      _toState.dragging = { startX: e.clientX, startY: e.clientY, origPositions };
-    }
+    _toState.dragging = { unitId: unit.id, startX: e.clientX, startY: e.clientY, origX: unit.x, origY: unit.y };
+    _toState.selectedUnit = unit.id;
+    document.querySelectorAll(".to-unit").forEach(u => u.classList.remove("selected"));
+    el.classList.add("selected");
   });
 
-  // Click: link mode or plain selection
+  // Click to pick link target
   el.addEventListener("click", (e) => {
     e.stopPropagation();
     if (_toState.linkMode) {
@@ -21222,81 +20368,22 @@ function renderToUnit(unit) {
       cancelToLink();
       renderToEdges();
       toAutoLayout();
-      markPlanStateDirty();
       return;
     }
-    // Ctrl+click handled in mousedown; plain click with no drag just ensures selection
-    if (!e.ctrlKey && !e.metaKey) {
-      _toState.selectedUnits.clear();
-      document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
-      _toState.selectedUnits.add(unit.id);
-      el.classList.add("selected");
-    }
-  });
-
-  // Double-click: rename inline
-  el.addEventListener("dblclick", (e) => {
-    e.stopPropagation();
-    startToRename(unit.id);
+    _toState.selectedUnit = unit.id;
   });
 
   // Right-click context menu
   el.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    // If right-clicking on an unselected unit, select only it
-    if (!_toState.selectedUnits.has(unit.id)) {
-      _toState.selectedUnits.clear();
-      document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
-      _toState.selectedUnits.add(unit.id);
-      el.classList.add("selected");
-    }
-    // Update selection label in context menu
-    const labelEl = document.getElementById("toCtxSelectionLabel");
-    if (labelEl) {
-      const count = _toState.selectedUnits.size;
-      labelEl.textContent = count > 1 ? `${count} units selected` : unit.label;
-    }
+    _toState.selectedUnit = unit.id;
+    document.querySelectorAll(".to-unit").forEach(u => u.classList.remove("selected"));
+    el.classList.add("selected");
     showToContextMenu(e.clientX, e.clientY);
   });
 
   world.appendChild(el);
-}
-
-function startToRename(id) {
-  const unit = _toState.units.find(u => u.id === id);
-  if (!unit) return;
-  const el = document.querySelector(`.to-unit[data-id="${id}"]`);
-  if (!el) return;
-  const labelEl = el.querySelector(".to-unit-label");
-  if (!labelEl) return;
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.value = unit.label;
-  input.className = "to-unit-rename-input";
-  input.style.cssText = "width:90px;font-size:11px;padding:1px 4px;border:1px solid var(--accent-blue);border-radius:3px;background:var(--surface-2);color:var(--text-primary);outline:none;";
-
-  labelEl.replaceWith(input);
-  input.focus();
-  input.select();
-
-  const commit = () => {
-    const newLabel = input.value.trim() || unit.label;
-    unit.label = newLabel;
-    const span = document.createElement("span");
-    span.className = "to-unit-label";
-    span.textContent = newLabel;
-    input.replaceWith(span);
-    markPlanStateDirty();
-  };
-
-  input.addEventListener("blur", commit);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); input.blur(); }
-    if (e.key === "Escape") { input.value = unit.label; input.blur(); }
-    e.stopPropagation();
-  });
 }
 
 function showToContextMenu(x, y) {
@@ -21414,7 +20501,6 @@ function toAutoLayout() {
     if (el) { el.style.left = u.x + "px"; el.style.top = u.y + "px"; }
   });
   renderToEdges();
-  markPlanStateDirty();
 }
 
 function toFitView() {
@@ -21711,16 +20797,10 @@ function buildTopoAiContext() {
   return JSON.stringify({
     view: "topology",
     emitterCount: emitters.length,
-    emitters: emitters.slice(0, 30).map(e => {
-      const toUnit = e.toUnitId ? _toState.units.find(u => u.id === e.toUnitId) : null;
-      return {
-        id: e.id, name: e.name, freq: e.freq || e.frequency, waveform: e.waveform,
-        netId: e.netId || e.net_id, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
-        toUnit: toUnit ? { id: toUnit.id, label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
-      };
-    }),
-    toUnits: _toState.units.map(u => ({ id: u.id, label: u.label, size: u.size, affiliation: u.affiliation, type: u.type })),
-    toLinks: _toState.links,
+    emitters: emitters.slice(0, 30).map(e => ({
+      id: e.id, name: e.name, freq: e.freq || e.frequency, waveform: e.waveform,
+      netId: e.netId || e.net_id, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
+    })),
   });
 }
 
@@ -21889,17 +20969,11 @@ function buildAnalyzeAiContext() {
   return JSON.stringify({
     view: "analyze",
     emitterCount: emitters.length,
-    emitters: emitters.slice(0, 40).map(e => {
-      const toUnit = e.toUnitId ? _toState.units.find(u => u.id === e.toUnitId) : null;
-      return {
-        id: e.id, name: e.name, freq: e.freq || e.frequency, bandwidth: e.bandwidth,
-        waveform: e.waveform, antenna: e.antenna || e.antennaType,
-        power: e.power || e.txPower, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
-        toUnit: toUnit ? { label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
-      };
-    }),
-    toUnits: _toState.units.map(u => ({ id: u.id, label: u.label, size: u.size, affiliation: u.affiliation, type: u.type })),
-    toLinks: _toState.links,
+    emitters: emitters.slice(0, 40).map(e => ({
+      id: e.id, name: e.name, freq: e.freq || e.frequency, bandwidth: e.bandwidth,
+      waveform: e.waveform, antenna: e.antenna || e.antennaType,
+      power: e.power || e.txPower, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
+    })),
   });
 }
 
@@ -21917,15 +20991,13 @@ function wireViewAiForm(formId, inputId, sendId, clearId, messagesId, contextFn)
   if (!form || !input || !msgs) return;
   _viewAiWired.add(formId);
 
-  // Enable input when AI is configured and ready
+  // Enable input when AI is configured
   const checkAi = () => {
-    const ready = state.ai?.status === "ready" || state.ai?.status === "pending";
-    input.disabled = !ready;
-    if (sendBtn) sendBtn.disabled = !ready;
+    const hasProvider = !!(state.ui?.aiProvider || localStorage.getItem("ai_api_key") || localStorage.getItem("ai_provider_url"));
+    input.disabled = !hasProvider;
+    if (sendBtn) sendBtn.disabled = !hasProvider;
   };
   checkAi();
-  // Re-check when AI status changes
-  document.addEventListener("ai-status-changed", checkAi);
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -21933,30 +21005,17 @@ function wireViewAiForm(formId, inputId, sendId, clearId, messagesId, contextFn)
     if (!text) return;
     appendViewAiMessage(msgs, "user", text);
     input.value = "";
-    input.disabled = true;
-    if (sendBtn) sendBtn.disabled = true;
-
-    const pendingEl = appendViewAiMessage(msgs, "assistant", "", "pending");
-    const bodyEl = pendingEl.querySelector(".ai-chat-message-body");
-    let accumulated = "";
-
+    appendViewAiMessage(msgs, "assistant", "Thinking…", "pending");
+    const context = contextFn ? contextFn() : "{}";
     try {
-      const context = contextFn ? contextFn() : "{}";
-      const result = await callViewAi(text, context, (chunk) => {
-        accumulated = chunk;
-        bodyEl.innerHTML = renderMarkdown(accumulated);
-        msgs.scrollTop = msgs.scrollHeight;
-      });
-      pendingEl.classList.remove("pending");
-      if (!accumulated && result) {
-        bodyEl.innerHTML = renderMarkdown(result);
-        msgs.scrollTop = msgs.scrollHeight;
-      }
+      const reply = await callViewAi(text, context);
+      const pending = msgs.querySelector(".ai-chat-message.pending");
+      if (pending) pending.remove();
+      appendViewAiMessage(msgs, "assistant", reply);
     } catch (err) {
-      pendingEl.classList.remove("pending");
-      bodyEl.innerHTML = `<em>Error: ${err.message}</em>`;
-    } finally {
-      checkAi();
+      const pending = msgs.querySelector(".ai-chat-message.pending");
+      if (pending) pending.remove();
+      appendViewAiMessage(msgs, "assistant", `Error: ${err.message}`);
     }
   });
 
@@ -21972,59 +21031,65 @@ function appendViewAiMessage(container, role, text, extraClass) {
   label.textContent = role === "user" ? "You" : "Assistant";
   const body = document.createElement("div");
   body.className = "ai-chat-message-body";
-  if (text) body.innerHTML = renderMarkdown(text);
+  body.innerHTML = renderMarkdown(text);
   el.appendChild(label);
   el.appendChild(body);
   container.appendChild(el);
   container.scrollTop = container.scrollHeight;
-  return el;
 }
 
-async function callViewAi(userMessage, contextJson, onToken) {
-  const systemText = [
-    "You are an expert military RF communications and operations planning assistant embedded in RF Planner.",
-    "The user is working in a specialized view. Here is the current scenario context (JSON):",
-    contextJson,
-    "Be concise, technical, and actionable. Format responses with markdown where helpful.",
-    "USER REQUEST:",
-    userMessage,
-  ].join("\n\n");
+async function callViewAi(userMessage, contextJson) {
+  // Reuse the same provider logic as the main AI chat
+  const providerUrl = state.ui?.aiProviderUrl || localStorage.getItem("ai_provider_url") || "";
+  const apiKey      = state.ui?.aiApiKey      || localStorage.getItem("ai_api_key")      || "";
+  const model       = state.ui?.aiModel       || localStorage.getItem("ai_model")        || "claude-sonnet-4-6";
 
-  const messages = [{ role: "user", content: systemText }];
+  const systemPrompt = `You are an expert military RF communications and operations planning assistant embedded in RF Planner.
+The user is working in a specialized view. Here is the current scenario context (JSON):
+${contextJson}
+Be concise, technical, and actionable. Format responses with markdown where helpful.`;
 
-  const providerResponse = state.ai.provider === "anthropic"
-    ? await callAnthropic(messages, 2048, 0.2, onToken)
-    : state.ai.provider === "local-model"
-      ? await callLocalModel(messages, 4096, 0.2, onToken)
-      : await callGenAiMil(messages, 4096, 0.2, onToken);
-
-  return providerResponse.text;
-}
-
-/* ── View AI panel drag-to-resize ── */
-function initViewAiDividers() {
-  document.querySelectorAll(".view-ai-divider").forEach(divider => {
-    divider.addEventListener("mousedown", (e) => {
-      const panelId = divider.dataset.target;
-      const panel = document.getElementById(panelId);
-      if (!panel || panel.classList.contains("view-ai-collapsed")) return;
-      e.preventDefault();
-      document.body.classList.add("is-resizing");
-
-      const onMove = (ev) => {
-        const rect = panel.parentElement.getBoundingClientRect();
-        const newWidth = clamp(rect.right - ev.clientX, 240, 640);
-        panel.style.width = newWidth + "px";
-      };
-      const onUp = () => {
-        document.body.classList.remove("is-resizing");
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
+  if (providerUrl.includes("anthropic") || providerUrl.includes("claude") || model.includes("claude")) {
+    const payload = {
+      model,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    };
+    const resp = await fetch(providerUrl || "https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(payload),
     });
+    if (!resp.ok) throw new Error(`AI error ${resp.status}`);
+    const data = await resp.json();
+    return data.content?.[0]?.text || "(no response)";
+  }
+
+  // Generic OpenAI-compatible endpoint
+  const payload = {
+    model,
+    max_tokens: 1024,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user",   content: userMessage },
+    ],
+  };
+  const resp = await fetch(providerUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify(payload),
   });
+  if (!resp.ok) throw new Error(`AI error ${resp.status}`);
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || data.content?.[0]?.text || "(no response)";
 }
 
 /* Helper — haversine km (may already exist; guard against redeclaration) */
@@ -22041,7 +21106,5 @@ if (typeof haversineKm === "undefined") {
 
 init().catch((error) => {
   console.error(error);
-  setBootPending(false);
-  syncAuthScreenUi();
   setStatus(`Startup failed: ${error.message}`, true);
 });

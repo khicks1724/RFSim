@@ -36,17 +36,17 @@
     href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
   >
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260424-01">
-  <link rel="stylesheet" href="./styles.css?v=20260429-34">
+  <link rel="stylesheet" href="./styles.css?v=20260429-30">
 </head>
-<body class="auth-screen-active">
-  <div id="authScreen" class="auth-screen" aria-hidden="false">
+<body>
+  <div id="authScreen" class="auth-screen hidden" aria-hidden="true">
     <div class="auth-rf-spectrum" aria-hidden="true">
       <canvas id="authWaterfall"></canvas>
     </div>
     <div class="auth-card">
       <h1 id="authScreenTitle">RF Sim</h1>
       <p id="authScreenCopy" class="auth-card-copy">Sign in to enter the workspace and access server-backed projects.</p>
-      <div id="authScreenStatus" class="auth-screen-status">Checking session...</div>
+      <div id="authScreenStatus" class="auth-screen-status">Sign in to continue.</div>
       <div class="auth-screen-form" autocomplete="off">
         <label id="authScreenFullNameRow" class="hidden">
           Display Name
@@ -700,10 +700,6 @@
         <!-- Top toolbar -->
         <div class="to-toolbar">
           <div class="to-toolbar-section">
-            <div class="to-renderer-toggle" role="group" aria-label="PLAN icon renderer">
-              <button id="toRendererMilstdBtn" class="to-renderer-btn" type="button" aria-pressed="false">MILSTD</button>
-              <button id="toRendererAigenBtn" class="to-renderer-btn active" type="button" aria-pressed="true">AIGEN</button>
-            </div>
             <span class="to-toolbar-label">Add Unit</span>
             <select id="toAffiliation" class="to-select" title="Affiliation">
               <option value="friendly">Friendly</option>
@@ -811,14 +807,11 @@
           </div>
           <!-- Context menu -->
           <div id="toContextMenu" class="to-context-menu hidden">
-            <div id="toCtxSelectionLabel" class="to-ctx-selection-label"></div>
-            <button class="to-ctx-item" id="toCtxRename" type="button">Rename</button>
-            <button class="to-ctx-item" id="toCtxDuplicate" type="button">Duplicate</button>
-            <hr class="to-ctx-divider">
             <button class="to-ctx-item" id="toCtxLinkParent" type="button">Link Parent</button>
             <button class="to-ctx-item" id="toCtxLinkChild" type="button">Link Child</button>
             <hr class="to-ctx-divider">
-            <button class="to-ctx-item to-ctx-danger" id="toCtxDelete" type="button">Delete</button>
+            <button class="to-ctx-item" id="toCtxEdit" type="button">Edit Unit</button>
+            <button class="to-ctx-item to-ctx-danger" id="toCtxDelete" type="button">Delete Unit</button>
           </div>
           <!-- Link-pending banner -->
           <div id="toLinkBanner" class="to-link-banner hidden">
@@ -830,14 +823,10 @@
         </div>
 
         <!-- AI Panel — right sidebar alongside canvas -->
-        <div class="panel-divider panel-divider-right view-ai-divider" data-target="planAiPanel"></div>
         <div id="planAiPanel" class="plan-ai-panel">
           <div class="plan-ai-header">
-            <div class="plan-ai-header-text">
-              <strong>AI Agent</strong>
-              <span class="eyebrow">TO &amp; Organization Assistant</span>
-            </div>
-            <button class="plan-ai-collapse-btn" id="planAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
+            <strong>AI Agent</strong>
+            <span class="eyebrow">TO &amp; Organization Assistant</span>
           </div>
           <div id="planAiMessages" class="ai-chat-messages plan-ai-messages">
             <article class="ai-chat-message ai-chat-message-system">
@@ -855,7 +844,6 @@
             </div>
           </form>
         </div>
-        <button class="view-ai-open-btn" id="planAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
         </div><!-- /to-main -->
       </div>
     </div>
@@ -898,14 +886,10 @@
             </div>
           </div>
           <!-- Topology AI panel -->
-          <div class="panel-divider panel-divider-right view-ai-divider" data-target="topoAiPanel"></div>
           <div id="topoAiPanel" class="plan-ai-panel topo-ai-panel">
             <div class="plan-ai-header">
-              <div class="plan-ai-header-text">
-                <strong>AI Agent</strong>
-                <span class="eyebrow">Link Quality Analyst</span>
-              </div>
-              <button class="plan-ai-collapse-btn" id="topoAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
+              <strong>AI Agent</strong>
+              <span class="eyebrow">Link Quality Analyst</span>
             </div>
             <div id="topoAiMessages" class="ai-chat-messages plan-ai-messages">
               <article class="ai-chat-message ai-chat-message-system">
@@ -923,7 +907,6 @@
               </div>
             </form>
           </div>
-          <button class="view-ai-open-btn" id="topoAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
         </div>
       </div>
     </div>
@@ -994,14 +977,10 @@
               </div>
             </div>
             <!-- Analyze AI panel -->
-            <div class="panel-divider panel-divider-right view-ai-divider" data-target="analyzeAiPanel"></div>
             <div id="analyzeAiPanel" class="plan-ai-panel analyze-ai-panel">
               <div class="plan-ai-header">
-                <div class="plan-ai-header-text">
-                  <strong>AI Agent</strong>
-                  <span class="eyebrow">RF Analysis Assistant</span>
-                </div>
-                <button class="plan-ai-collapse-btn" id="analyzeAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
+                <strong>AI Agent</strong>
+                <span class="eyebrow">RF Analysis Assistant</span>
               </div>
               <div id="analyzeAiMessages" class="ai-chat-messages plan-ai-messages">
                 <article class="ai-chat-message ai-chat-message-system">
@@ -1019,7 +998,6 @@
                 </div>
               </form>
             </div>
-            <button class="view-ai-open-btn" id="analyzeAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
           </div>
         </div>
       </div>
@@ -1247,12 +1225,6 @@
 
           <!-- Identity fields -->
           <div class="emitter-section-label" style="margin-top:16px">Identity</div>
-          <!-- TO Link badge — shown when linked -->
-          <div id="emToLinkBadge" class="em-to-link-badge hidden">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            <span id="emToLinkLabel">Linked to: —</span>
-            <button id="emToUnlinkBtn" class="em-to-unlink-btn" type="button" title="Remove link">&#10005;</button>
-          </div>
           <div class="emitter-field-group">
             <label>
               <span>Emitter Name</span>
@@ -1262,12 +1234,6 @@
               <span>Unit / Callsign</span>
               <input id="emUnit" type="text" placeholder="e.g. 1-68 AR, K 1">
             </label>
-            <div class="em-to-link-row">
-              <button id="emLinkToToBtn" class="ghost-button small em-link-to-btn" type="button">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                Link to TO
-              </button>
-            </div>
             <label>
               <span>Force Affiliation</span>
               <select id="emForce">
@@ -2510,37 +2476,30 @@
   <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
   <script src="./app-config.js"></script>
-  <script type="module" src="./app.js?v=20260429-88"></script>
+  <script type="module" src="./app.js?v=20260429-77"></script>
   <script>
   (function () {
     const canvas = document.getElementById('authWaterfall');
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-
+    const ctx = canvas.getContext('2d');
     const SCROLL_SPEED = 0.35;
-    const NOISE_LEVEL = 0.22;
+    const NOISE_LEVEL = 0.13;
     let emitters = [];
     let scrollAccumulator = 0;
     let time = 0;
     let rafId = null;
-    let started = false;
-    let visible = document.visibilityState !== 'hidden';
 
-    function resizeCanvas() {
+    function resize() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
       initEmitters();
-      scrollAccumulator = 0;
-      ctx.fillStyle = 'rgb(8, 0, 20)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
       prefillCanvas();
     }
 
     function initEmitters() {
       emitters = [];
-      const count = Math.floor(canvas.width / 105);
+      const count = Math.floor(canvas.width / 180);
       for (let i = 0; i < count; i++) {
         emitters.push({
           x: Math.random() * canvas.width,
@@ -2577,7 +2536,7 @@
       const row = new Float32Array(canvas.width);
       for (let x = 0; x < row.length; x++) {
         const grain = Math.random() * NOISE_LEVEL;
-        const smooth = (smoothNoise(x, t) * 0.5 + 0.5) * 0.12;
+        const smooth = (smoothNoise(x, t) * 0.5 + 0.5) * 0.06;
         row[x] = grain + smooth;
       }
       emitters.forEach(e => {
@@ -2597,7 +2556,7 @@
           }
         }
       });
-      if (Math.random() < 0.025) {
+      if (Math.random() < 0.01) {
         const start = Math.floor(Math.random() * canvas.width);
         const w = 40 + Math.random() * 120;
         for (let i = 0; i < w; i++) {
@@ -2608,137 +2567,62 @@
       return row;
     }
 
-    function draw() {
-      rafId = null;
-      if (!started || !visible) return;
-
-      scrollAccumulator += SCROLL_SPEED;
-      time += 0.02;
-
-      if (scrollAccumulator >= 1) {
-        const steps = Math.floor(scrollAccumulator);
-        scrollAccumulator -= steps;
-        for (let step = 0; step < steps; step++) {
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          ctx.putImageData(imageData, 0, 1);
-
-          const row = generateRow(time);
-          const img = ctx.createImageData(canvas.width, 1);
-          for (let x = 0; x < canvas.width; x++) {
-            const [r, g, b] = getColor(row[x]);
-            const i = x * 4;
-            img.data[i] = r;
-            img.data[i + 1] = g;
-            img.data[i + 2] = b;
-            img.data[i + 3] = 255;
-          }
-          ctx.putImageData(img, 0, 0);
-        }
+    function putRow(row, y) {
+      const img = ctx.createImageData(canvas.width, 1);
+      for (let x = 0; x < canvas.width; x++) {
+        const [r, g, b] = getColor(row[x]);
+        const i = x * 4;
+        img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
       }
-
-      queueFrame();
+      ctx.putImageData(img, 0, y);
     }
 
     function prefillCanvas() {
       for (let y = canvas.height - 1; y >= 0; y--) {
         time += 0.02;
-        const row = generateRow(time);
-        const img = ctx.createImageData(canvas.width, 1);
-        for (let x = 0; x < canvas.width; x++) {
-          const [r, g, b] = getColor(row[x]);
-          const i = x * 4;
-          img.data[i] = r;
-          img.data[i + 1] = g;
-          img.data[i + 2] = b;
-          img.data[i + 3] = 255;
-        }
-        ctx.putImageData(img, 0, y);
+        putRow(generateRow(time), y);
       }
     }
 
-    const authScreen = document.getElementById('authScreen');
-
-    function queueFrame() {
-      if (!started || !visible || rafId !== null) return;
+    function draw() {
+      scrollAccumulator += SCROLL_SPEED;
+      time += 0.02;
+      if (scrollAccumulator >= 1) {
+        const steps = Math.floor(scrollAccumulator);
+        scrollAccumulator -= steps;
+        for (let s = 0; s < steps; s++) {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          ctx.putImageData(imageData, 0, 1);
+          putRow(generateRow(time), 0);
+        }
+      }
       rafId = requestAnimationFrame(draw);
     }
 
-    function stop() {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
+    const authScreen = document.getElementById('authScreen');
+    let started = false;
+
+    function start() {
+      if (started) return;
+      started = true;
+      resize();
+      draw();
     }
 
-    function syncRunningState() {
-      const shouldRun = !authScreen || !authScreen.classList.contains('hidden');
-      if (!shouldRun) {
-        started = false;
-        stop();
-        return;
-      }
-      if (!started) {
-        started = true;
-        resizeCanvas();
-        queueFrame();
-        return;
-      }
-      queueFrame();
-    }
-
+    // Start when auth screen becomes visible
     const observer = new MutationObserver(() => {
-      syncRunningState();
+      if (!authScreen.classList.contains('hidden')) start();
     });
-    if (authScreen) {
-      observer.observe(authScreen, { attributes: true, attributeFilter: ['class'] });
-    }
+    observer.observe(authScreen, { attributes: true, attributeFilter: ['class'] });
 
     window.addEventListener('resize', () => {
-      if (!started) return;
-      stop();
-      resizeCanvas();
-      queueFrame();
-    });
-
-    document.addEventListener('visibilitychange', () => {
-      visible = document.visibilityState !== 'hidden';
-      if (!visible) {
-        stop();
-      } else if (started) {
-        queueFrame();
+      if (started) {
+        cancelAnimationFrame(rafId);
+        resize();
+        draw();
       }
     });
-
-    syncRunningState();
   })();
   </script>
-
-  <!-- TO UNIT PICKER MODAL ══════════════════════════════════════ -->
-  <div id="toPickerModal" class="to-picker-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="toPickerTitle">
-    <div class="to-picker-modal">
-      <div class="to-picker-header">
-        <div class="to-picker-title-group">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          <h3 id="toPickerTitle">Link to Table of Organization</h3>
-        </div>
-        <button id="toPickerCloseBtn" class="icon-button ghost-button" type="button" aria-label="Close">&#10005;</button>
-      </div>
-      <div class="to-picker-instructions">
-        Click a unit below to link this emitter to it. The emitter will inherit the unit's name, callsign, and affiliation.
-      </div>
-      <!-- Mini TO canvas -->
-      <div id="toPickerCanvas" class="to-picker-canvas">
-        <div id="toPickerWorld" class="to-world"></div>
-        <svg id="toPickerEdgeSvg" class="to-edge-svg" xmlns="http://www.w3.org/2000/svg"></svg>
-        <div id="toPickerEmpty" class="to-picker-empty hidden">
-          No units in the Table of Organization yet.<br>
-          <span class="fine-print">Build your TO in the PLAN view first.</span>
-        </div>
-      </div>
-      <div class="to-picker-footer">
-        <button id="toPickerCancelBtn" class="ghost-button small" type="button">Cancel</button>
-      </div>
-    </div>
-  </div>
 </body>
 </html>
