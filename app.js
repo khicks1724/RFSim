@@ -6766,7 +6766,7 @@ function buildCompactAiScenarioSummary(contextIds = []) {
             geometry,
             bounds: typeof item.layer?.getBounds === "function" ? serializeBoundsForAi(item.layer.getBounds()) : null,
           });
-        } else if (index.length < 400) {
+        } else if (index.length < 200) {
           index.push({
             contentId: cid,
             name: item.name,
@@ -6798,8 +6798,7 @@ function buildCompactAiScenarioSummary(contextIds = []) {
     },
     activeContext,
     explicitContext,
-    terrainLosMatrix: state.assets.length <= 10 ? buildLosMatrix(state.assets) : [],
-  }, null, 2);
+  });
 }
 
 function tokenizeLookupPrompt(prompt) {
@@ -8187,12 +8186,36 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     return localLookup;
   }
 
-  // Yield to the event loop so the UI can paint the thinking bubble before heavy serialization
+  // Yield so the UI can paint the thinking bubble before heavy synchronous work
   await wait(0);
 
   const scenarioSummary = buildCompactAiScenarioSummary(contextIds);
+
+  // Yield again after serialization — large KMZ imports make JSON.stringify expensive
+  await wait(0);
+
+  // Append LOS matrix separately so it doesn't block the summary build.
+  // Only run when assets are few enough to be meaningful.
+  let scenarioWithLos = scenarioSummary;
+  if (state.assets.length > 0 && state.assets.length <= 10) {
+    try {
+      const losMatrix = buildLosMatrix(state.assets);
+      if (losMatrix.length > 0) {
+        // Splice into the JSON string — parse, add, re-stringify
+        const parsed = JSON.parse(scenarioSummary);
+        parsed.terrainLosMatrix = losMatrix;
+        scenarioWithLos = JSON.stringify(parsed);
+      }
+    } catch {
+      // LOS computation failure is non-fatal — proceed without it
+    }
+  }
+
   const contextDetail = buildContextDetail(contextIds);
   const fileDetail = buildFileContextDetail(files);
+
+  // Replace reference used below
+  const scenarioSummaryFinal = scenarioWithLos;
 
   let systemText = [
     "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
@@ -8486,7 +8509,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "- If no action is needed, return an empty actions array.",
     "- RESPONSE FORMATTING: In your assistantMessage, reference asset and map item names using markdown bold (**name**). The system will automatically convert these to clickable navigation links.",
     "SCENARIO SUMMARY:",
-    scenarioSummary,
+    scenarioSummaryFinal,
     contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
     fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
     "USER REQUEST:",
@@ -8496,9 +8519,9 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   if (state.ai.provider === "local-model") {
     // Smaller models need a tighter, example-driven prompt with JSON first.
     // Trim the scenario summary to avoid overwhelming a 4B model.
-    const trimmedSummary = scenarioSummary.length > 6000
-      ? scenarioSummary.slice(0, 6000) + "\n...[truncated]"
-      : scenarioSummary;
+    const trimmedSummary = scenarioSummaryFinal.length > 6000
+      ? scenarioSummaryFinal.slice(0, 6000) + "\n...[truncated]"
+      : scenarioSummaryFinal;
 
     systemText = [
       "You are an RF planning assistant. You MUST respond with valid JSON only — no prose, no markdown, no code fences.",
@@ -8573,7 +8596,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "Do not invent tools, URLs, or ids.",
       "If terrainLosMatrix is present, use it when discussing LOS or relay placement.",
       "SCENARIO SUMMARY:",
-      scenarioSummary,
+      scenarioSummaryFinal,
       contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
       fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
       "USER REQUEST:",
@@ -9273,23 +9296,29 @@ function enrichAiResponseWithLinks(text, placedAssets = []) {
   // Enrich coordinates first so they don't get mangled by name-link replacements
   result = enrichAiCoordinates(result);
 
-  // Link newly placed assets by name
+  // Link newly placed assets by name (always — these are directly relevant to this response)
   for (const asset of placedAssets) {
     const escaped = asset.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${asset.name}**](asset:${asset.id})`);
   }
 
-  // Link existing assets by name
-  for (const asset of state.assets) {
+  // Link existing assets by name — capped at 40 to prevent O(n) regex blowup
+  const assetsToLink = state.assets.slice(0, 40);
+  for (const asset of assetsToLink) {
     if (placedAssets.some((a) => a.id === asset.id)) continue;
     const escaped = asset.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${asset.name}**](asset:${asset.id})`);
   }
 
-  // Link imported items (polygons, shapes, etc.) by name
-  for (const item of state.importedItems) {
-    const escaped = item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${item.name}**](imported:${item.id})`);
+  // Link imported items only if the response text is short enough that regex won't block
+  // and only for items whose names actually appear in the text (fast pre-filter).
+  if (result.length < 4000) {
+    const lowerResult = result.toLowerCase();
+    for (const item of state.importedItems) {
+      if (!lowerResult.includes(item.name.toLowerCase())) continue;
+      const escaped = item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${item.name}**](imported:${item.id})`);
+    }
   }
 
   return result;
