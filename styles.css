@@ -1736,11 +1736,22 @@ body:not(.ai-panel-open) .ai-panel {
   gap: 10px;
 }
 
+/* Flip wrapper: scaleY(-1) moves the resize handle to the top-right so
+   the user can drag upward to expand. The textarea is counter-flipped so
+   text stays readable. */
+.ai-textarea-flip {
+  transform: scaleY(-1);
+}
 .ai-chat-form textarea {
   width: 100%;
   min-height: 88px;
   resize: vertical;
+  transform: scaleY(-1);
 }
+.ai-chat-form textarea::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
 
 .ai-chat-actions {
   justify-content: space-between;

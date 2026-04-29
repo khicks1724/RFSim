@@ -5957,14 +5957,14 @@ function onAiChatKeyDown(event) {
     const idx = items.indexOf(active);
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      items[idx === -1 ? 0 : Math.min(idx + 1, items.length - 1)]?.classList.add("active");
-      if (idx !== -1) items[idx].classList.remove("active");
+      const next = items[idx === -1 ? 0 : Math.min(idx + 1, items.length - 1)];
+      if (next) { items.forEach((el) => el.classList.remove("active")); next.classList.add("active"); next.scrollIntoView({ block: "nearest" }); }
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      items[idx <= 0 ? 0 : idx - 1]?.classList.add("active");
-      if (idx > 0) items[idx].classList.remove("active");
+      const prev = items[idx <= 0 ? 0 : idx - 1];
+      if (prev) { items.forEach((el) => el.classList.remove("active")); prev.classList.add("active"); prev.scrollIntoView({ block: "nearest" }); }
       return;
     }
     if (event.key === "Tab" || event.key === "Enter") {
@@ -6228,10 +6228,14 @@ function onAiChatInput() {
   }
 
   dom.aiMentionDropdown.innerHTML = "";
-  filtered.slice(0, 12).forEach((entry) => {
+  filtered.slice(0, 12).forEach((entry, i) => {
     const item = document.createElement("div");
-    item.className = "ai-mention-item";
+    item.className = "ai-mention-item" + (i === 0 ? " active" : "");
     item.innerHTML = `<span>${escapeHtml(entry.name)}</span><span class="ai-mention-item-kind">${escapeHtml(entry.kind ?? "")}</span>`;
+    item.addEventListener("mouseover", () => {
+      dom.aiMentionDropdown.querySelectorAll(".ai-mention-item").forEach((el) => el.classList.remove("active"));
+      item.classList.add("active");
+    });
     item.addEventListener("mousedown", (e) => {
       e.preventDefault(); // Don't blur textarea
       // Replace the @query with @"name" in the textarea
