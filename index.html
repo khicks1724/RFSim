@@ -38,15 +38,15 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260424-01">
   <link rel="stylesheet" href="./styles.css?v=20260429-34">
 </head>
-<body>
-  <div id="authScreen" class="auth-screen hidden" aria-hidden="true">
+<body class="boot-pending auth-screen-active">
+  <div id="authScreen" class="auth-screen" aria-hidden="false">
     <div class="auth-rf-spectrum" aria-hidden="true">
       <canvas id="authWaterfall"></canvas>
     </div>
     <div class="auth-card">
       <h1 id="authScreenTitle">RF Sim</h1>
       <p id="authScreenCopy" class="auth-card-copy">Sign in to enter the workspace and access server-backed projects.</p>
-      <div id="authScreenStatus" class="auth-screen-status">Sign in to continue.</div>
+      <div id="authScreenStatus" class="auth-screen-status">Checking session...</div>
       <div class="auth-screen-form" autocomplete="off">
         <label id="authScreenFullNameRow" class="hidden">
           Display Name

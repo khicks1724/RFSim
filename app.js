@@ -2289,6 +2289,29 @@ function setAuthScreenStatus(message = "", isError = false) {
   dom.authScreenStatus.classList.toggle("error", Boolean(isError));
 }
 
+function setBootPending(isPending) {
+  const pending = Boolean(isPending);
+  document.body.classList.toggle("boot-pending", pending);
+
+  [
+    dom.authScreenFullName,
+    dom.authScreenEmail,
+    dom.authScreenPassword,
+    dom.authScreenSubmitBtn,
+    dom.authScreenToggleModeBtn,
+    dom.authScreenGuestBtn,
+  ].forEach((control) => {
+    if (control) control.disabled = pending;
+  });
+
+  if (pending && dom.authScreen) {
+    document.body.classList.add("auth-screen-active");
+    dom.authScreen.classList.remove("hidden");
+    dom.authScreen.setAttribute("aria-hidden", "false");
+    setAuthScreenStatus("Checking session...", false);
+  }
+}
+
 function setAuthScreenMode(mode) {
   state.authScreenMode = mode === "register" ? "register" : "login";
   syncAuthScreenUi();
@@ -2298,11 +2321,13 @@ function syncAuthScreenUi() {
   if (!dom.authScreen) {
     return;
   }
+  const bootPending = document.body.classList.contains("boot-pending");
   const hasAccess = hasWorkspaceAccess();
-  document.body.classList.toggle("auth-screen-active", !hasAccess);
-  dom.authScreen.classList.toggle("hidden", hasAccess);
-  dom.authScreen.setAttribute("aria-hidden", String(hasAccess));
-  if (hasAccess) {
+  const showAuthScreen = bootPending || !hasAccess;
+  document.body.classList.toggle("auth-screen-active", showAuthScreen);
+  dom.authScreen.classList.toggle("hidden", !showAuthScreen);
+  dom.authScreen.setAttribute("aria-hidden", String(!showAuthScreen));
+  if (bootPending || hasAccess) {
     return;
   }
 
@@ -3382,14 +3407,13 @@ async function bootstrapWorkspaceData() {
 }
 
 async function init() {
+  setBootPending(true);
   initMap();
   initTopBarDropdowns();
   initRangeInputs();
   ensureMapContentsSearchUi();
   initEmitterModal();
-  if (!state.session.token || isGuestSession()) {
-    syncAuthScreenUi();
-  }
+  syncAuthScreenUi();
   loadAiProviderSettings();
   await hydrateSession();
   loadCesiumIonToken();
@@ -3403,6 +3427,8 @@ async function init() {
   applySettings();
   refreshActionButtons();
   updateTerrainSummary();
+  setBootPending(false);
+  syncAuthScreenUi();
   if (hasWorkspaceAccess()) {
     await bootstrapWorkspaceData();
   }
@@ -22021,5 +22047,7 @@ if (typeof haversineKm === "undefined") {
 
 init().catch((error) => {
   console.error(error);
+  setBootPending(false);
+  syncAuthScreenUi();
   setStatus(`Startup failed: ${error.message}`, true);
 });

@@ -135,6 +135,57 @@ function usernameToInternalEmail(username) {
   return `${slug}@rfsim.local`;
 }
 
+function buildLoginIdentifierCandidates(rawIdentifier = "") {
+  const trimmed = normalizeUsername(rawIdentifier);
+  if (!trimmed) {
+    return [];
+  }
+
+  const candidates = new Set();
+  const lowered = trimmed.toLowerCase();
+  candidates.add(lowered);
+
+  // Support the current username -> internal email scheme.
+  candidates.add(usernameToInternalEmail(trimmed).toLowerCase());
+
+  // If the user typed an email address, also allow its local-part to resolve to
+  // the synthesized internal account form for backward compatibility.
+  const atIndex = lowered.indexOf("@");
+  if (atIndex > 0) {
+    const localPart = lowered.slice(0, atIndex).trim();
+    if (localPart) {
+      candidates.add(localPart);
+      candidates.add(usernameToInternalEmail(localPart).toLowerCase());
+    }
+  }
+
+  return [...candidates];
+}
+
+async function findUserByLoginIdentifier(identifier) {
+  const candidates = buildLoginIdentifierCandidates(identifier);
+  if (!candidates.length) {
+    return null;
+  }
+
+  const result = await query(
+    `select id, email, full_name, password_hash, is_admin
+     from app_user
+     where lower(email) = any($1::text[])
+        or lower(full_name) = any($1::text[])
+     order by
+       case
+         when lower(email) = $2 then 0
+         when lower(full_name) = $2 then 1
+         else 2
+       end
+     limit 1`,
+    [candidates, candidates[0]]
+  );
+
+  return result.rows[0] ?? null;
+}
+
 async function fetchUserById(userId) {
   const result = await query(
     "select id, email, full_name, is_admin from app_user where id = $1",
@@ -375,11 +426,15 @@ app.post("/api/auth/register", rateLimit("auth"), async (request, response) => {
   const password = parsed.data.password;
   const fullName = normalizeUsername(parsed.data.fullName || username);
   const internalEmail = usernameToInternalEmail(username);
+  const identifierCandidates = buildLoginIdentifierCandidates(username);
 
   try {
     const existing = await query(
-      "select id from app_user where lower(email) = lower($1)",
-      [internalEmail]
+      `select id
+       from app_user
+       where lower(email) = any($1::text[])
+          or lower(full_name) = any($1::text[])`,
+      [identifierCandidates]
     );
     if (existing.rowCount > 0) {
       response.status(409).json({ error: "An account with that username already exists." });
@@ -414,19 +469,14 @@ app.post("/api/auth/login", rateLimit("auth"), async (request, response) => {
 
   const username = normalizeUsername(parsed.data.username);
   const password = parsed.data.password;
-  const internalEmail = usernameToInternalEmail(username);
 
   try {
-    const result = await query(
-      "select id, email, full_name, password_hash, is_admin from app_user where lower(email) = lower($1)",
-      [internalEmail]
-    );
-    if (result.rowCount === 0) {
+    const user = await findUserByLoginIdentifier(username);
+    if (!user) {
       response.status(401).json({ error: "Invalid username or password." });
       return;
     }
 
-    const user = result.rows[0];
     const matches = await bcrypt.compare(password, user.password_hash);
     if (!matches) {
       response.status(401).json({ error: "Invalid username or password." });

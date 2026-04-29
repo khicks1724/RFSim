@@ -113,6 +113,18 @@ body.auth-screen-active .app-shell {
   user-select: none;
 }
 
+body.boot-pending .app-shell {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body.boot-pending .auth-screen-form,
+body.boot-pending .auth-screen-footer {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .auth-screen {
   position: fixed;
   inset: 0;
