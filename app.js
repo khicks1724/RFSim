@@ -5398,9 +5398,24 @@ async function onAiChatSubmit(event) {
   const assistantMessageController = createAiMessageController("assistant", "Thinking");
   const stopThinkingIndicator = startAiThinkingIndicator(assistantMessageController);
 
+  let streamedTokenCount = 0;
+  let thinkingStopped = false;
+  const safeStopThinking = () => { if (!thinkingStopped) { thinkingStopped = true; stopThinkingIndicator(); } };
+
   try {
     const response = await callAiPlanningAssistant(prompt, images, files, contextIds, {
       onStatus: (statusText) => assistantMessageController.setStatus(statusText),
+      onToken: (accumulatedText) => {
+        streamedTokenCount++;
+        if (streamedTokenCount === 1) {
+          safeStopThinking();
+          assistantMessageController.setStatus("Generating…");
+        } else if (streamedTokenCount % 6 === 0) {
+          // Count approximate words for a human-readable progress indicator
+          const wordCount = accumulatedText.trim().split(/\s+/).length;
+          assistantMessageController.setStatus(`Generating… ${wordCount} words`);
+        }
+      },
     });
     const { results: executionSummary, placedAssets, terrainSampleResults } = await executeAiActions(response.actions ?? []);
 
@@ -5425,14 +5440,14 @@ async function onAiChatSubmit(event) {
     const reply = executionSummary.length
       ? `${assistantMsg}\n\n**Applied changes:**\n- ${executionSummary.join("\n- ")}`
       : assistantMsg;
-    stopThinkingIndicator();
+    safeStopThinking();
     assistantMessageController.setStatus(executionSummary.length ? "Applied changes" : "Response ready");
     await streamAiMessageText(assistantMessageController, reply);
     state.ai.status = "ready";
     state.ai.statusMessage = "AI assistant ready.";
     saveAiChatHistory();
   } catch (error) {
-    stopThinkingIndicator();
+    safeStopThinking();
     assistantMessageController.setStatus("Request failed");
     assistantMessageController.setText(`I couldn't complete that request. ${error.message}`);
     state.ai.status = "error";
@@ -7891,7 +7906,64 @@ async function fetchGenAiMilModelsViaTransport(transport, apiKey) {
   return { models, transport };
 }
 
-async function postGenAiMilChatViaTransport(transport, apiKey, payload) {
+// ── Shared SSE stream reader (OpenAI-compatible format used by GenAI.mil, local model) ──────────
+// Reads a streaming fetch Response and calls onToken(accumulatedText) for each content chunk.
+// Returns { text, inputTokens, outputTokens }.
+async function readSseStream(response, onToken, errorLabel) {
+  if (!response.body) throw new Error(`${errorLabel}: streaming response body is unavailable.`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let fullText = "";
+  let inputTokens = 0, outputTokens = 0;
+  let buf = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") continue;
+        try {
+          const evt = JSON.parse(data);
+          // OpenAI-compatible delta
+          const chunk = evt.choices?.[0]?.delta?.content ?? "";
+          if (chunk) {
+            fullText += chunk;
+            onToken(fullText);
+          }
+          // Anthropic-compatible delta (fallback)
+          if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+            const chunk2 = evt.delta.text ?? "";
+            if (chunk2) { fullText += chunk2; onToken(fullText); }
+          }
+          // Token counts — may appear on any event or only the final one
+          const usage = evt.usage ?? evt.x_groq?.usage;
+          if (usage) {
+            inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? inputTokens) || inputTokens;
+            outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? outputTokens) || outputTokens;
+          }
+          if (evt.type === "message_start") {
+            inputTokens = Number(evt.message?.usage?.input_tokens ?? inputTokens) || inputTokens;
+          }
+          if (evt.type === "message_delta") {
+            outputTokens = Number(evt.usage?.output_tokens ?? outputTokens) || outputTokens;
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    if (!fullText) throw new Error(`${errorLabel}: stream read error — ${err.message}`);
+    // Partial stream: use what we got
+  }
+  if (!fullText) throw new Error(`${errorLabel}: received empty streaming response.`);
+  return { text: fullText, inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+}
+
+async function postGenAiMilChatViaTransport(transport, apiKey, payload, onToken) {
   let response;
   try {
     response = await transport.postChat(apiKey, payload);
@@ -7899,14 +7971,25 @@ async function postGenAiMilChatViaTransport(transport, apiKey, payload) {
     throw explainGenAiMilNetworkFailure(transport, "chat completion", networkErr);
   }
 
-  const parsed = await readGenAiMilJsonResponse(
-    response,
-    `GenAI.mil chat completion failed via ${transport.label}.`
-  );
-  const content = parsed?.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error(`GenAI.mil returned an empty completion via ${transport.label}.`);
+  if (!response.ok) {
+    throw new Error(parseGenAiMilErrorDetail(
+      response.status,
+      await response.text(),
+      `GenAI.mil chat completion failed via ${transport.label}.`
+    ));
   }
+
+  const label = `GenAI.mil via ${transport.label}`;
+
+  if (onToken && response.body) {
+    const { text, inputTokens, outputTokens, totalTokens } = await readSseStream(response, onToken, label);
+    return { content: text, transport, inputTokens, outputTokens, totalTokens };
+  }
+
+  // Non-streaming path
+  const parsed = await readGenAiMilJsonResponse(response, `${label} chat completion failed.`);
+  const content = parsed?.choices?.[0]?.message?.content;
+  if (!content) throw new Error(`${label} returned an empty completion.`);
   const inputTokens = Number(parsed?.usage?.prompt_tokens ?? parsed?.usage?.input_tokens ?? 0) || 0;
   const outputTokens = Number(parsed?.usage?.completion_tokens ?? parsed?.usage?.output_tokens ?? 0) || 0;
   return {
@@ -8026,12 +8109,15 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
   syncAiUi();
 }
 
-async function callAiPlanningAssistant(prompt, images = [], files = [], contextIds = [], { onStatus } = {}) {
+async function callAiPlanningAssistant(prompt, images = [], files = [], contextIds = [], { onStatus, onToken } = {}) {
   const localLookup = images.length === 0 && files.length === 0 ? tryResolveAiMapLookup(prompt) : null;
   if (localLookup) {
     onStatus?.("Searching map contents");
     return localLookup;
   }
+
+  // Yield to the event loop so the UI can paint the thinking bubble before heavy serialization
+  await wait(0);
 
   const scenarioSummary = buildCompactAiScenarioSummary(contextIds);
   const contextDetail = buildContextDetail(contextIds);
@@ -8428,10 +8514,10 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
 
   onStatus?.("Contacting provider");
   const providerResponse = state.ai.provider === "anthropic"
-    ? await callAnthropic(messages, 16000, 0.2)
+    ? await callAnthropic(messages, 16000, 0.2, onToken)
     : state.ai.provider === "local-model"
-      ? await callLocalModel(messages, 999999, 0.1)
-      : await callGenAiMil(messages, 32000, 0.2);
+      ? await callLocalModel(messages, 999999, 0.1, onToken)
+      : await callGenAiMil(messages, 32000, 0.2, onToken);
   const raw = providerResponse.text;
   onStatus?.("Parsing response");
   const parsed = parseAiAssistantResponse(raw, prompt);
@@ -8459,14 +8545,14 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   };
 }
 
-async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
+async function callGenAiMil(messages, maxTokens = 256, temperature = 0, onToken) {
   const selectedModel = await ensureGenAiMilModelsLoaded();
-  const payload = { model: selectedModel, messages, max_tokens: maxTokens, temperature };
+  const payload = { model: selectedModel, messages, max_tokens: maxTokens, temperature, stream: Boolean(onToken) };
   const errors = [];
 
   for (const transport of getGenAiMilTransportPlan()) {
     try {
-      const result = await postGenAiMilChatViaTransport(transport, state.ai.apiKey, payload);
+      const result = await postGenAiMilChatViaTransport(transport, state.ai.apiKey, payload, onToken);
       state.ai.genAiMilPreferredTransportId = transport.id;
       return {
         text: result.content,
@@ -8483,7 +8569,8 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0) {
   throw summarizeGenAiMilTransportFailures("chat completion", errors);
 }
 
-async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
+async function callAnthropic(messages, maxTokens = 256, temperature = 0, onToken) {
+  const streaming = Boolean(onToken);
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -8496,12 +8583,13 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
       model: ensureAiModelForProvider("anthropic", state.ai.model),
       max_tokens: maxTokens,
       temperature,
+      stream: streaming,
       messages,
     }),
   });
 
-  const bodyText = await response.text();
   if (!response.ok) {
+    const bodyText = await response.text();
     try {
       const err = JSON.parse(bodyText);
       const msg = err?.error?.message || err?.message;
@@ -8512,10 +8600,14 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
     throw new Error(`Anthropic request failed (HTTP ${response.status}).`);
   }
 
+  if (streaming && response.body) {
+    const { text, inputTokens, outputTokens, totalTokens } = await readSseStream(response, onToken, "Anthropic");
+    return { text, inputTokens, outputTokens, totalTokens };
+  }
+
+  const bodyText = await response.text();
   let parsed;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
+  try { parsed = JSON.parse(bodyText); } catch {
     throw new Error("Anthropic returned a non-JSON response.");
   }
   const content = parsed?.content?.[0]?.text;
@@ -8528,7 +8620,7 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0) {
   };
 }
 
-async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2) {
+async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2, onToken) {
   const modelName = state.ai.apiKey.trim() || state.ai.model.trim();
   const customUrl = state.ai.localModelUrl.trim();
 
@@ -8537,6 +8629,7 @@ async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2) {
     messages,
     max_tokens: maxTokens,
     temperature,
+    stream: Boolean(onToken),
   };
 
   const headers = {
@@ -8561,13 +8654,19 @@ async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2) {
     throw err;
   }
 
-  const bodyText = await response.text();
   if (!response.ok) {
+    const bodyText = await response.text();
     let message;
     try { message = JSON.parse(bodyText)?.error?.message; } catch {}
     throw new Error(message || `Local model returned HTTP ${response.status}.`);
   }
 
+  if (onToken && response.body) {
+    const { text, inputTokens, outputTokens, totalTokens } = await readSseStream(response, onToken, "Local model");
+    return { text, inputTokens, outputTokens, totalTokens };
+  }
+
+  const bodyText = await response.text();
   let parsed;
   try { parsed = JSON.parse(bodyText); } catch {
     throw new Error("Local model returned a non-JSON response.");
