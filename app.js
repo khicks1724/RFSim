@@ -13202,10 +13202,14 @@ function updateMapContentsSearchUi() {
   dom.mapContentsSearchClearBtn?.classList.toggle("hidden", !hasValue);
 }
 
+let _mapContentsSearchDebounceTimer = null;
 function onMapContentsSearchInput() {
   state.mapContentsSearch = dom.mapContentsSearchInput?.value ?? "";
   updateMapContentsSearchUi();
-  renderMapContents();
+  // Debounce: wait 120 ms after the last keystroke before re-rendering.
+  // This prevents hammering renderMapContents on every character for large KMZ sets.
+  clearTimeout(_mapContentsSearchDebounceTimer);
+  _mapContentsSearchDebounceTimer = setTimeout(() => renderMapContents(), 120);
 }
 
 function clearMapContentsSearch() {
