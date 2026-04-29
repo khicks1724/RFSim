@@ -20408,29 +20408,38 @@ function renderToEdges() {
   const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
   const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
   marker.setAttribute("id", "toArrow");
-  marker.setAttribute("markerWidth", "8");
-  marker.setAttribute("markerHeight", "8");
-  marker.setAttribute("refX", "4");
-  marker.setAttribute("refY", "3");
+  marker.setAttribute("markerWidth", "7");
+  marker.setAttribute("markerHeight", "7");
+  marker.setAttribute("refX", "3.5");
+  marker.setAttribute("refY", "6");
   marker.setAttribute("orient", "auto");
-  marker.innerHTML = `<path d="M0,0 L0,6 L6,3 z" fill="var(--border-strong)"/>`;
+  marker.innerHTML = `<path d="M0,0 L7,0 L3.5,7 z" fill="#565d67"/>`;
   defs.appendChild(marker);
   svg.appendChild(defs);
 
+  const UNIT_H = 56; // icon height in world coords
   for (const link of _toState.links) {
     const parent = _toState.units.find(u => u.id === link.parentId);
     const child  = _toState.units.find(u => u.id === link.childId);
     if (!parent || !child) continue;
-    const px = parent.x * _toState.zoom + _toState.panX;
-    const py = parent.y * _toState.zoom + _toState.panY;
-    const cx2 = child.x * _toState.zoom + _toState.panX;
-    const cy2 = child.y * _toState.zoom + _toState.panY;
-    const midX = (px + cx2) / 2;
+    // Convert world coords to SVG coords (applying zoom+pan)
+    const px  = parent.x * _toState.zoom + _toState.panX;
+    const py  = parent.y * _toState.zoom + _toState.panY;
+    const cx2 = child.x  * _toState.zoom + _toState.panX;
+    const cy2 = child.y  * _toState.zoom + _toState.panY;
+    const halfH = (UNIT_H / 2) * _toState.zoom;
+    // Exit bottom-center of parent, enter top-center of child
+    const x1 = px,  y1 = py + halfH;
+    const x2 = cx2, y2 = cy2 - halfH;
+    const midY = (y1 + y2) / 2;
+    // Orthogonal elbow: down → horizontal → down
+    const d = `M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`;
     const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    line.setAttribute("d", `M${px},${py} C${midX},${py} ${midX},${cy2} ${cx2},${cy2}`);
+    line.setAttribute("d", d);
     line.setAttribute("stroke", "var(--border-strong)");
     line.setAttribute("stroke-width", "1.5");
     line.setAttribute("fill", "none");
+    line.setAttribute("stroke-linejoin", "miter");
     line.setAttribute("marker-end", "url(#toArrow)");
     svg.appendChild(line);
   }

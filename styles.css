@@ -5546,15 +5546,17 @@ body.emitter-modal-open {
 }
 .view-mode-toggle {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   background: var(--bg-card-alt, #1a1d24);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 2px;
   position: relative;
-  height: 26px;
+  height: 28px;
   gap: 0;
   flex-shrink: 0;
+  /* Fixed total width so thumb math is exact */
+  width: 280px;
 }
 .view-mode-toggle:hover {
   border-color: var(--border-strong);
@@ -5563,7 +5565,8 @@ body.emitter-modal-open {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: calc(25% - 2px);
+  /* Each tab = (100% - 4px) / 4 */
+  width: calc((100% - 4px) / 4);
   height: calc(100% - 4px);
   background: var(--border-strong, #4a5060);
   border-radius: 999px;
@@ -5577,18 +5580,22 @@ body.emitter-modal-open {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  line-height: 22px;
-  padding: 0 10px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   color: var(--muted);
   border-radius: 999px;
   transition: color 0.15s;
   -webkit-user-select: none;
   user-select: none;
   white-space: nowrap;
-  height: 22px;
+  /* Each tab fills exactly 1/4 of the toggle */
+  flex: 1 1 0;
+  text-align: center;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .view-mode-tab:hover {
   color: var(--text);
@@ -5596,11 +5603,11 @@ body.emitter-modal-open {
 .view-mode-tab.active {
   color: var(--text);
 }
-/* Thumb positions for each tab (4 tabs = 25% each) */
-.view-mode-toggle[data-active="plan"] .view-mode-thumb   { left: 2px; background: var(--border-strong); }
-.view-mode-toggle[data-active="map"] .view-mode-thumb    { left: calc(25%); background: #3b82f6; }
-.view-mode-toggle[data-active="topology"] .view-mode-thumb { left: calc(50%); background: #6366f1; }
-.view-mode-toggle[data-active="analyze"] .view-mode-thumb  { left: calc(75%); background: #10b981; }
+/* Thumb positions — each step = (100% - 4px) / 4 */
+.view-mode-toggle[data-active="plan"]     .view-mode-thumb { left: 2px;                         background: var(--border-strong, #4a5060); }
+.view-mode-toggle[data-active="map"]      .view-mode-thumb { left: calc(2px + (100% - 4px)/4);  background: #3b82f6; }
+.view-mode-toggle[data-active="topology"] .view-mode-thumb { left: calc(2px + (100% - 4px)/2);  background: #6366f1; }
+.view-mode-toggle[data-active="analyze"]  .view-mode-thumb { left: calc(2px + 3*(100% - 4px)/4); background: #10b981; }
 
 /* ═══════════════════════════════════════════════════════════════
    VIEW PANELS  (full workspace replacement panels)
@@ -5659,25 +5666,27 @@ body.emitter-modal-open {
 .to-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 5px 10px;
   background: var(--bg-topbar);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 .to-toolbar-section {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 5px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 .to-toolbar-section-right {
   margin-left: auto;
+  flex-shrink: 0;
 }
 .to-toolbar-label {
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   color: var(--muted);
   letter-spacing: 0.05em;
   white-space: nowrap;
@@ -5687,10 +5696,12 @@ body.emitter-modal-open {
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
-  font-size: 0.72rem;
-  padding: 2px 6px;
-  height: 26px;
+  font-size: 0.71rem;
+  padding: 2px 4px;
+  height: 24px;
   cursor: pointer;
+  max-width: 140px;
+  min-width: 70px;
 }
 .to-select:focus {
   outline: none;
@@ -5701,10 +5712,11 @@ body.emitter-modal-open {
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
-  font-size: 0.72rem;
-  padding: 2px 8px;
-  height: 26px;
-  width: 160px;
+  font-size: 0.71rem;
+  padding: 2px 6px;
+  height: 24px;
+  width: 130px;
+  flex-shrink: 0;
 }
 .to-input:focus {
   outline: none;
