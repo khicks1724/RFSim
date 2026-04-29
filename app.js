@@ -1517,6 +1517,75 @@ function timeoutAfter(ms, message = "Operation timed out") {
   });
 }
 
+function createAbortSignalWithTimeout(timeoutMs, externalSignal) {
+  const hasTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
+  if (!hasTimeout && !externalSignal) {
+    return {
+      signal: undefined,
+      didTimeout: () => false,
+      cleanup() {},
+    };
+  }
+
+  const controller = new AbortController();
+  let timeoutId = null;
+  let timedOut = false;
+  const abortFromExternalSignal = () => {
+    controller.abort(externalSignal?.reason ?? new DOMException("Aborted", "AbortError"));
+  };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      abortFromExternalSignal();
+    } else {
+      externalSignal.addEventListener("abort", abortFromExternalSignal, { once: true });
+    }
+  }
+
+  if (hasTimeout) {
+    timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error(`Request timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup() {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", abortFromExternalSignal);
+      }
+    },
+  };
+}
+
+async function fetchWithTimeout(resource, options = {}) {
+  const {
+    timeoutMs = 15000,
+    signal: externalSignal,
+    ...fetchOptions
+  } = options;
+  const timeoutState = createAbortSignalWithTimeout(timeoutMs, externalSignal);
+
+  try {
+    return await fetch(resource, {
+      ...fetchOptions,
+      signal: timeoutState.signal ?? externalSignal,
+    });
+  } catch (error) {
+    if (timeoutState.didTimeout()) {
+      throw new Error(`Request timed out after ${timeoutMs} ms`);
+    }
+    throw error;
+  } finally {
+    timeoutState.cleanup();
+  }
+}
+
 function createDefaultProfiles() {
   return [
     {
@@ -1791,14 +1860,16 @@ function simulationUsesBuildingModel(propagationModel) {
 
 
 async function apiFetch(path, options = {}) {
+  const { timeoutMs = 10000, ...requestOptions } = options;
   const headers = new Headers(options.headers ?? {});
   headers.set("Content-Type", headers.get("Content-Type") ?? "application/json");
   if (state.session.token) {
     headers.set("Authorization", `Bearer ${state.session.token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
+  const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
+    ...requestOptions,
+    timeoutMs,
     headers,
   });
 
@@ -7939,9 +8010,10 @@ function extractGenAiMilErrorMessage(status, bodyText, fallback) {
 async function fetchGenAiMilModels(url, apiKey) {
   let response, bodyText;
   try {
-    response = await fetch(url, {
+    response = await fetchWithTimeout(url, {
       method: "GET",
       headers: { "Authorization": `Bearer ${apiKey}` },
+      timeoutMs: 12000,
     });
     bodyText = await response.text();
   } catch (networkErr) {
@@ -7966,13 +8038,14 @@ async function fetchGenAiMilModels(url, apiKey) {
 async function postGenAiMilChat(url, apiKey, payload) {
   let response, bodyText;
   try {
-    response = await fetch(url, {
+    response = await fetchWithTimeout(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
+      timeoutMs: 20000,
     });
     bodyText = await response.text();
   } catch (networkErr) {
@@ -8033,16 +8106,18 @@ function createGenAiMilProxyTransport(id, label, modelsEndpoint, chatEndpoint) {
     id,
     label,
     async fetchModels(apiKey) {
-      return fetch(modelsEndpoint, {
+      return fetchWithTimeout(modelsEndpoint, {
         method: "GET",
         headers: { "Authorization": `Bearer ${apiKey}` },
+        timeoutMs: 12000,
       });
     },
     async postChat(apiKey, payload) {
-      return fetch(chatEndpoint, {
+      return fetchWithTimeout(chatEndpoint, {
         method: "POST",
         headers: buildGenAiMilTransportHeaders(apiKey),
         body: JSON.stringify(payload),
+        timeoutMs: 20000,
       });
     },
   };
@@ -8059,17 +8134,19 @@ const GENAI_MIL_TRANSPORTS = {
     id: "backend",
     label: "RF Planner backend relay",
     async fetchModels(apiKey) {
-      return fetch(GENAI_MIL_BACKEND_MODELS_ENDPOINT, {
+      return fetchWithTimeout(GENAI_MIL_BACKEND_MODELS_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey }),
+        timeoutMs: 12000,
       });
     },
     async postChat(apiKey, payload) {
-      return fetch(GENAI_MIL_BACKEND_CHAT_ENDPOINT, {
+      return fetchWithTimeout(GENAI_MIL_BACKEND_CHAT_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey, ...payload }),
+        timeoutMs: 20000,
       });
     },
   },
@@ -8931,7 +9008,7 @@ async function callGenAiMil(messages, maxTokens = 256, temperature = 0, onToken)
 
 async function callAnthropic(messages, maxTokens = 256, temperature = 0, onToken) {
   const streaming = Boolean(onToken);
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -8946,6 +9023,7 @@ async function callAnthropic(messages, maxTokens = 256, temperature = 0, onToken
       stream: streaming,
       messages,
     }),
+    timeoutMs: 20000,
   });
 
   if (!response.ok) {
@@ -8999,10 +9077,11 @@ async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2, onT
 
   let response;
   try {
-    response = await fetch(LOCAL_MODEL_PROXY_ENDPOINT, {
+    response = await fetchWithTimeout(LOCAL_MODEL_PROXY_ENDPOINT, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      timeoutMs: 20000,
     });
   } catch (err) {
     if (err instanceof TypeError) {
@@ -9045,7 +9124,7 @@ async function callLocalModel(messages, maxTokens = 1200, temperature = 0.2, onT
 
 async function fetchLocalModelList() {
   try {
-    const res = await fetch(LOCAL_MODEL_HEALTH_ENDPOINT, { signal: AbortSignal.timeout(3000) });
+    const res = await fetchWithTimeout(LOCAL_MODEL_HEALTH_ENDPOINT, { timeoutMs: 3000 });
     if (!res.ok) return { reachable: false, models: [] };
     return await res.json();
   } catch {
@@ -11546,7 +11625,7 @@ async function fetchWeather() {
   setStatus("Fetching local weather...");
 
   try {
-    const response = await fetch(url.toString());
+    const response = await fetchWithTimeout(url.toString(), { timeoutMs: 8000 });
     if (!response.ok) {
       throw new Error("Weather request failed.");
     }
@@ -13668,7 +13747,10 @@ async function runGeocoderSearch(query) {
   showGeocoderStatus("Searching…");
   try {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`;
-    const resp = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "RFSim/1.0" } });
+    const resp = await fetchWithTimeout(url, {
+      headers: { "Accept-Language": "en", "User-Agent": "RFSim/1.0" },
+      timeoutMs: 6000,
+    });
     if (!resp.ok) throw new Error("Nominatim error");
     const data = await resp.json();
     if (!data.length) { showGeocoderStatus("No results found."); return; }
@@ -19005,7 +19087,7 @@ function getTileUrl(z, x, y) {
 
 async function checkLocalDataServer() {
   try {
-    const res = await fetch(`${LOCAL_DATA_SERVER}/health`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetchWithTimeout(`${LOCAL_DATA_SERVER}/health`, { timeoutMs: 2000 });
     if (!res.ok) throw new Error();
     const data = await res.json();
     _offline.serverOnline = true;
@@ -19152,7 +19234,7 @@ function offlineSetProgress(pct) {
 
 async function fetchTileBlob(z, x, y) {
   const url = getTileUrl(z, x, y);
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const res = await fetchWithTimeout(url, { timeoutMs: 10000 });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.arrayBuffer();
 }
@@ -19174,9 +19256,9 @@ async function fetchElevationGrid(bbox) {
 
   const results = [];
   for (const chunk of chunks) {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.opentopodata.org/v1/srtm30m?locations=${chunk.join("|")}`,
-      { signal: AbortSignal.timeout(15000) }
+      { timeoutMs: 15000 }
     );
     if (!res.ok) throw new Error(`Elevation API HTTP ${res.status}`);
     const data = await res.json();
@@ -19193,10 +19275,10 @@ async function fetchOsmBuildings(bbox) {
 );
 out body;>;out skel qt;`;
 
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
+  const res = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
     method: "POST",
     body: query,
-    signal: AbortSignal.timeout(60000),
+    timeoutMs: 60000,
   });
   if (!res.ok) throw new Error(`Overpass API HTTP ${res.status}`);
   const osm = await res.json();
@@ -19275,9 +19357,11 @@ async function runOfflineDownload(mode) {
         try {
           const buf = await fetchTileBlob(z, x, y);
           if (mode === "server") {
-            await fetch(`${LOCAL_DATA_SERVER}/store/tiles/${source}/${z}/${x}/${y}.png`, {
-              method: "POST", body: buf,
+            await fetchWithTimeout(`${LOCAL_DATA_SERVER}/store/tiles/${source}/${z}/${x}/${y}.png`, {
+              method: "POST",
+              body: buf,
               signal: _offline.abortController.signal,
+              timeoutMs: 15000,
             });
           } else {
             zip.folder(`tiles/${source}/${z}/${x}`).file(`${y}.png`, buf);
@@ -19304,8 +19388,10 @@ async function runOfflineDownload(mode) {
       const key = bboxKey(bbox);
       const json = JSON.stringify(elevData);
       if (mode === "server") {
-        await fetch(`${LOCAL_DATA_SERVER}/store/elevation/0/0/${key}.json`, {
-          method: "POST", body: json,
+        await fetchWithTimeout(`${LOCAL_DATA_SERVER}/store/elevation/0/0/${key}.json`, {
+          method: "POST",
+          body: json,
+          timeoutMs: 15000,
         });
       } else {
         zip.folder("elevation").file(`${key}.json`, json);
@@ -19326,8 +19412,10 @@ async function runOfflineDownload(mode) {
       const key = bboxKey(bbox);
       const json = JSON.stringify(geojson);
       if (mode === "server") {
-        await fetch(`${LOCAL_DATA_SERVER}/store/osm/${key}.geojson`, {
-          method: "POST", body: json,
+        await fetchWithTimeout(`${LOCAL_DATA_SERVER}/store/osm/${key}.geojson`, {
+          method: "POST",
+          body: json,
+          timeoutMs: 15000,
         });
       } else {
         zip.folder("osm").file(`${key}.geojson`, json);
@@ -19410,7 +19498,7 @@ function initOfflineDownload() {
       offlineLog("Local server not running.", "err");
       return;
     }
-    await fetch(`${LOCAL_DATA_SERVER}/cache`, { method: "DELETE" });
+    await fetchWithTimeout(`${LOCAL_DATA_SERVER}/cache`, { method: "DELETE", timeoutMs: 5000 });
     offlineLog("Cache cleared.", "ok");
     await refreshOfflineServerStatus();
   });

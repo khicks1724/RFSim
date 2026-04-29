@@ -2514,29 +2514,56 @@
   <script>
   (function () {
     const canvas = document.getElementById('authWaterfall');
-    const ctx = canvas.getContext('2d');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+    if (!ctx) return;
+
     const SCROLL_SPEED = 0.35;
     const NOISE_LEVEL = 0.13;
+    const ROW_TIME_STEP = 0.02;
+    const MAX_INTERNAL_WIDTH = 1600;
+    const MAX_INTERNAL_HEIGHT = 900;
     let emitters = [];
+    let width = 0;
+    let height = 0;
     let scrollAccumulator = 0;
     let time = 0;
     let rafId = null;
+    let lastFrameTime = 0;
+    let rowImageData = null;
+    let prefillRow = -1;
+    let started = false;
+    let visible = document.visibilityState !== 'hidden';
 
-    function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+    function getRenderScale() {
+      const widthScale = Math.min(1, MAX_INTERNAL_WIDTH / Math.max(window.innerWidth, 1));
+      const heightScale = Math.min(1, MAX_INTERNAL_HEIGHT / Math.max(window.innerHeight, 1));
+      return Math.min(widthScale, heightScale);
+    }
+
+    function resizeCanvas() {
+      const scale = getRenderScale();
+      width = Math.max(320, Math.round(window.innerWidth * scale));
+      height = Math.max(180, Math.round(window.innerHeight * scale));
+      canvas.width = width;
+      canvas.height = height;
       canvas.style.width = window.innerWidth + 'px';
       canvas.style.height = window.innerHeight + 'px';
       initEmitters();
-      prefillCanvas();
+      rowImageData = ctx.createImageData(width, 1);
+      scrollAccumulator = 0;
+      prefillRow = height - 1;
+      ctx.fillStyle = 'rgb(8, 0, 20)';
+      ctx.fillRect(0, 0, width, height);
     }
 
     function initEmitters() {
       emitters = [];
-      const count = Math.floor(canvas.width / 180);
+      const count = Math.max(3, Math.floor(width / 180));
       for (let i = 0; i < count; i++) {
         emitters.push({
-          x: Math.random() * canvas.width,
+          x: Math.random() * width,
           width: 8 + Math.random() * 40,
           power: 0.4 + Math.random() * 0.6,
           drift: (Math.random() - 0.5) * 0.1,
@@ -2567,7 +2594,7 @@
     }
 
     function generateRow(t) {
-      const row = new Float32Array(canvas.width);
+      const row = new Float32Array(width);
       for (let x = 0; x < row.length; x++) {
         const grain = Math.random() * NOISE_LEVEL;
         const smooth = (smoothNoise(x, t) * 0.5 + 0.5) * 0.06;
@@ -2575,8 +2602,8 @@
       }
       emitters.forEach(e => {
         e.x += e.drift;
-        if (e.x < 0) e.x = canvas.width;
-        if (e.x > canvas.width) e.x = 0;
+        if (e.x < 0) e.x = width;
+        if (e.x > width) e.x = 0;
         e.variationPhase += e.variationSpeed;
         const powerMod = Math.sin(e.variationPhase) * 0.5 + 0.5;
         const center = Math.floor(e.x);
@@ -2602,8 +2629,11 @@
     }
 
     function putRow(row, y) {
-      const img = ctx.createImageData(canvas.width, 1);
-      for (let x = 0; x < canvas.width; x++) {
+      if (!rowImageData || rowImageData.width !== width) {
+        rowImageData = ctx.createImageData(width, 1);
+      }
+      const img = rowImageData;
+      for (let x = 0; x < width; x++) {
         const [r, g, b] = getColor(row[x]);
         const i = x * 4;
         img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
@@ -2611,51 +2641,106 @@
       ctx.putImageData(img, 0, y);
     }
 
-    function prefillCanvas() {
-      for (let y = canvas.height - 1; y >= 0; y--) {
-        time += 0.02;
-        putRow(generateRow(time), y);
+    function stepWaterfall(rows) {
+      for (let step = 0; step < rows; step++) {
+        time += ROW_TIME_STEP;
+        ctx.drawImage(canvas, 0, 0, width, height, 0, 1, width, height);
+        putRow(generateRow(time), 0);
       }
     }
 
-    function draw() {
-      scrollAccumulator += SCROLL_SPEED;
-      time += 0.02;
-      if (scrollAccumulator >= 1) {
-        const steps = Math.floor(scrollAccumulator);
-        scrollAccumulator -= steps;
-        for (let s = 0; s < steps; s++) {
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          ctx.putImageData(imageData, 0, 1);
-          putRow(generateRow(time), 0);
-        }
+    function prefill() {
+      if (!started || !visible) {
+        rafId = null;
+        return;
       }
+
+      const chunkSize = Math.max(12, Math.round(height / 24));
+      for (let i = 0; i < chunkSize && prefillRow >= 0; i++) {
+        time += ROW_TIME_STEP;
+        putRow(generateRow(time), prefillRow);
+        prefillRow -= 1;
+      }
+
+      if (prefillRow >= 0) {
+        rafId = requestAnimationFrame(prefill);
+        return;
+      }
+
+      lastFrameTime = performance.now();
+      rafId = requestAnimationFrame(draw);
+    }
+
+    function draw(now) {
+      if (!started || !visible) {
+        rafId = null;
+        return;
+      }
+
+      const elapsed = Math.min(48, Math.max(8, now - (lastFrameTime || now)));
+      lastFrameTime = now;
+      scrollAccumulator += SCROLL_SPEED * (elapsed / 16.6667);
+      const steps = Math.min(3, Math.floor(scrollAccumulator));
+      if (steps > 0) {
+        scrollAccumulator -= steps;
+        stepWaterfall(steps);
+      }
+
       rafId = requestAnimationFrame(draw);
     }
 
     const authScreen = document.getElementById('authScreen');
-    let started = false;
 
-    function start() {
-      if (started) return;
-      started = true;
-      resize();
-      draw();
+    function queueFrame() {
+      if (!started || !visible || rafId !== null) return;
+      rafId = requestAnimationFrame(prefillRow >= 0 ? prefill : draw);
     }
 
-    // Start when auth screen becomes visible
+    function stop() {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    }
+
+    function syncRunningState() {
+      const shouldRun = !authScreen || !authScreen.classList.contains('hidden');
+      if (!shouldRun) {
+        started = false;
+        stop();
+        return;
+      }
+      if (!started) {
+        started = true;
+        resizeCanvas();
+      }
+      queueFrame();
+    }
+
     const observer = new MutationObserver(() => {
-      if (!authScreen.classList.contains('hidden')) start();
+      syncRunningState();
     });
-    observer.observe(authScreen, { attributes: true, attributeFilter: ['class'] });
+    if (authScreen) {
+      observer.observe(authScreen, { attributes: true, attributeFilter: ['class'] });
+    }
 
     window.addEventListener('resize', () => {
-      if (started) {
-        cancelAnimationFrame(rafId);
-        resize();
-        draw();
+      if (!started) return;
+      stop();
+      resizeCanvas();
+      queueFrame();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      visible = document.visibilityState !== 'hidden';
+      if (!visible) {
+        stop();
+      } else if (started) {
+        queueFrame();
       }
     });
+
+    syncRunningState();
   })();
   </script>
 
