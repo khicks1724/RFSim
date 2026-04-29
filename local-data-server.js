@@ -41,23 +41,50 @@ const OSM_DIR    = path.join(DATA_DIR, "osm");
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
-const CORS = {
-  "Access-Control-Allow-Origin":  "*",
+const CORS_BASE = {
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age":       "86400",
+  "Access-Control-Max-Age": "86400",
+  Vary: "Origin",
 };
+
+function isTrustedLoopbackOrigin(origin = "") {
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function getCorsHeaders(req) {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
+  if (isTrustedLoopbackOrigin(origin)) {
+    return { ...CORS_BASE, "Access-Control-Allow-Origin": origin };
+  }
+  return CORS_BASE;
+}
+
+function rejectUntrustedOrigin(req, res) {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
+  if (!origin || isTrustedLoopbackOrigin(origin)) {
+    return false;
+  }
+  sendJson(res, 403, { error: "This localhost server only accepts requests from loopback origins." }, req);
+  return true;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function send(res, status, body, contentType = "application/json") {
+function send(res, status, body, contentType = "application/json", req = null) {
   const buf = typeof body === "string" ? Buffer.from(body) : body;
-  res.writeHead(status, { "Content-Type": contentType, "Content-Length": buf.length, ...CORS });
+  res.writeHead(status, { "Content-Type": contentType, "Content-Length": buf.length, ...(req ? getCorsHeaders(req) : CORS_BASE) });
   res.end(buf);
 }
 
-function sendJson(res, status, obj) {
-  send(res, status, JSON.stringify(obj));
+function sendJson(res, status, obj, req = null) {
+  send(res, status, JSON.stringify(obj), "application/json", req);
 }
 
 function countFiles(dir) {
@@ -95,48 +122,48 @@ function rmrf(dir) {
 
 // ─── Route handlers ──────────────────────────────────────────────────────────
 
-function handleHealth(res) {
+function handleHealth(req, res) {
   sendJson(res, 200, {
     ok: true,
     tileCount: countFiles(TILES_DIR),
     elevCount: countFiles(ELEV_DIR),
     osmCount:  countFiles(OSM_DIR),
-  });
+  }, req);
 }
 
-function handleTile(res, parts) {
+function handleTile(req, res, parts) {
   // parts: ["tiles", source, z, x, "y.png"]
-  if (parts.length < 5) return sendJson(res, 400, { error: "Bad tile path" });
+  if (parts.length < 5) return sendJson(res, 400, { error: "Bad tile path" }, req);
   const [, source, z, x, yfile] = parts;
   const filePath = path.join(TILES_DIR, source, z, x, yfile);
-  if (!filePath.startsWith(TILES_DIR)) return sendJson(res, 400, { error: "Invalid path" });
-  if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: "Tile not found" });
+  if (!filePath.startsWith(TILES_DIR)) return sendJson(res, 400, { error: "Invalid path" }, req);
+  if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: "Tile not found" }, req);
   const buf = fs.readFileSync(filePath);
-  send(res, 200, buf, "image/png");
+  send(res, 200, buf, "image/png", req);
 }
 
-function handleElevation(res, parts) {
+function handleElevation(req, res, parts) {
   // parts: ["elevation", z, x, "y.json"]
-  if (parts.length < 4) return sendJson(res, 400, { error: "Bad elevation path" });
+  if (parts.length < 4) return sendJson(res, 400, { error: "Bad elevation path" }, req);
   const [, z, x, yfile] = parts;
   const filePath = path.join(ELEV_DIR, z, x, yfile);
-  if (!filePath.startsWith(ELEV_DIR)) return sendJson(res, 400, { error: "Invalid path" });
-  if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: "Elevation not found" });
+  if (!filePath.startsWith(ELEV_DIR)) return sendJson(res, 400, { error: "Invalid path" }, req);
+  if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: "Elevation not found" }, req);
   const data = fs.readFileSync(filePath, "utf8");
-  send(res, 200, data, "application/json");
+  send(res, 200, data, "application/json", req);
 }
 
-function handleOsm(res, parts) {
+function handleOsm(req, res, parts) {
   // parts: ["osm", "bbox_key.geojson"]
-  if (parts.length < 2) return sendJson(res, 400, { error: "Bad OSM path" });
+  if (parts.length < 2) return sendJson(res, 400, { error: "Bad OSM path" }, req);
   const filePath = path.join(OSM_DIR, parts[1]);
-  if (!filePath.startsWith(OSM_DIR)) return sendJson(res, 400, { error: "Invalid path" });
-  if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: "OSM file not found" });
+  if (!filePath.startsWith(OSM_DIR)) return sendJson(res, 400, { error: "Invalid path" }, req);
+  if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: "OSM file not found" }, req);
   const data = fs.readFileSync(filePath, "utf8");
-  send(res, 200, data, "application/json");
+  send(res, 200, data, "application/json", req);
 }
 
-function handleInventory(res) {
+function handleInventory(req, res) {
   const sources = fs.existsSync(TILES_DIR)
     ? fs.readdirSync(TILES_DIR).filter((e) => fs.statSync(path.join(TILES_DIR, e)).isDirectory())
     : [];
@@ -149,58 +176,65 @@ function handleInventory(res) {
     elevCount:   countFiles(ELEV_DIR),
     osmFiles,
     dataDir:     DATA_DIR,
-  });
+  }, req);
 }
 
 async function handleStoreTile(req, res, parts) {
+  if (rejectUntrustedOrigin(req, res)) return;
   // POST /store/tiles/{source}/{z}/{x}/{y}.png  body=raw PNG bytes
-  if (parts.length < 6) return sendJson(res, 400, { error: "Bad store tile path" });
+  if (parts.length < 6) return sendJson(res, 400, { error: "Bad store tile path" }, req);
   const [,, source, z, x, yfile] = parts;
   const dir = path.join(TILES_DIR, source, z, x);
   const filePath = path.join(dir, yfile);
-  if (!filePath.startsWith(TILES_DIR)) return sendJson(res, 400, { error: "Invalid path" });
+  if (!filePath.startsWith(TILES_DIR)) return sendJson(res, 400, { error: "Invalid path" }, req);
   fs.mkdirSync(dir, { recursive: true });
   const body = await readBody(req);
   fs.writeFileSync(filePath, body);
-  sendJson(res, 200, { ok: true, path: filePath });
+  sendJson(res, 200, { ok: true, path: filePath }, req);
 }
 
 async function handleStoreElevation(req, res, parts) {
+  if (rejectUntrustedOrigin(req, res)) return;
   // POST /store/elevation/{z}/{x}/{y}.json  body=JSON string
-  if (parts.length < 5) return sendJson(res, 400, { error: "Bad store elevation path" });
+  if (parts.length < 5) return sendJson(res, 400, { error: "Bad store elevation path" }, req);
   const [,, z, x, yfile] = parts;
   const dir = path.join(ELEV_DIR, z, x);
   const filePath = path.join(dir, yfile);
-  if (!filePath.startsWith(ELEV_DIR)) return sendJson(res, 400, { error: "Invalid path" });
+  if (!filePath.startsWith(ELEV_DIR)) return sendJson(res, 400, { error: "Invalid path" }, req);
   fs.mkdirSync(dir, { recursive: true });
   const body = await readBody(req);
   fs.writeFileSync(filePath, body);
-  sendJson(res, 200, { ok: true, path: filePath });
+  sendJson(res, 200, { ok: true, path: filePath }, req);
 }
 
 async function handleStoreOsm(req, res, parts) {
+  if (rejectUntrustedOrigin(req, res)) return;
   // POST /store/osm/{bbox_key}.geojson  body=GeoJSON string
-  if (parts.length < 3) return sendJson(res, 400, { error: "Bad store OSM path" });
+  if (parts.length < 3) return sendJson(res, 400, { error: "Bad store OSM path" }, req);
   const filePath = path.join(OSM_DIR, parts[2]);
-  if (!filePath.startsWith(OSM_DIR)) return sendJson(res, 400, { error: "Invalid path" });
+  if (!filePath.startsWith(OSM_DIR)) return sendJson(res, 400, { error: "Invalid path" }, req);
   const body = await readBody(req);
   fs.writeFileSync(filePath, body);
-  sendJson(res, 200, { ok: true, path: filePath });
+  sendJson(res, 200, { ok: true, path: filePath }, req);
 }
 
-function handleDeleteCache(res) {
+function handleDeleteCache(req, res) {
+  if (rejectUntrustedOrigin(req, res)) return;
   rmrf(TILES_DIR);
   rmrf(ELEV_DIR);
   rmrf(OSM_DIR);
-  sendJson(res, 200, { ok: true, message: "Offline cache cleared." });
+  sendJson(res, 200, { ok: true, message: "Offline cache cleared." }, req);
 }
 
 // ─── Request router ──────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
-    res.writeHead(204, CORS);
+    res.writeHead(204, getCorsHeaders(req));
     res.end();
+    return;
+  }
+  if (rejectUntrustedOrigin(req, res)) {
     return;
   }
 
@@ -210,11 +244,11 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET") {
-      if (root === "health")    return handleHealth(res);
-      if (root === "inventory") return handleInventory(res);
-      if (root === "tiles")     return handleTile(res, parts);
-      if (root === "elevation") return handleElevation(res, parts);
-      if (root === "osm")       return handleOsm(res, parts);
+      if (root === "health")    return handleHealth(req, res);
+      if (root === "inventory") return handleInventory(req, res);
+      if (root === "tiles")     return handleTile(req, res, parts);
+      if (root === "elevation") return handleElevation(req, res, parts);
+      if (root === "osm")       return handleOsm(req, res, parts);
     }
 
     if (req.method === "POST" && root === "store") {
@@ -225,13 +259,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "DELETE" && root === "cache") {
-      return handleDeleteCache(res);
+      return handleDeleteCache(req, res);
     }
 
-    sendJson(res, 404, { error: "Not found" });
+    sendJson(res, 404, { error: "Not found" }, req);
   } catch (err) {
     console.error("Error handling request:", err.message);
-    sendJson(res, 500, { error: err.message });
+    sendJson(res, 500, { error: err.message }, req);
   }
 });
 

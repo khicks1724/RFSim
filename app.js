@@ -933,6 +933,34 @@ const GENAI_MIL_LOCAL_HTTP_PROXY_MODELS_ENDPOINT = `${GENAI_MIL_LOCAL_HTTP_PROXY
 const LOCAL_MODEL_PROXY_ENDPOINT = "https://127.0.0.1:8788/v1/local/chat/completions";
 const LOCAL_MODEL_HEALTH_ENDPOINT = "https://127.0.0.1:8788/v1/local/health";
 const INITIAL_GUEST_SESSION = window.sessionStorage.getItem(GUEST_SESSION_STORAGE_KEY) === "1";
+
+function getSessionToken() {
+  return window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
+    || window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+function setSessionToken(token) {
+  if (token) {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+  } else {
+    window.sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  }
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+function getSessionScopedItem(key) {
+  return window.sessionStorage.getItem(key)
+    || window.localStorage.getItem(key);
+}
+
+function setSessionScopedItem(key, value) {
+  if (value === null || value === undefined || value === "") {
+    window.sessionStorage.removeItem(key);
+  } else {
+    window.sessionStorage.setItem(key, value);
+  }
+  window.localStorage.removeItem(key);
+}
 const AI_PROVIDER_CATALOG = {
   "genai-mil": {
     shortLabel: "GenAI.mil",
@@ -1404,12 +1432,13 @@ const state = {
   },
   session: {
     guest: INITIAL_GUEST_SESSION,
-    token: INITIAL_GUEST_SESSION ? null : window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
-    activeProjectId: INITIAL_GUEST_SESSION ? null : window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY),
+    token: INITIAL_GUEST_SESSION ? null : getSessionToken(),
+    activeProjectId: INITIAL_GUEST_SESSION ? null : getSessionScopedItem(ACTIVE_PROJECT_STORAGE_KEY),
     user: null,
     projects: [],
     autosaveTimerId: null,
     autosavePending: false,
+    localSaveTimerId: null,
   },
   ai: {
     activeConfigId: "",
@@ -1435,6 +1464,15 @@ const state = {
   authScreenMode: "login",
   canceledSimulationRequestIds: new Set(),
 };
+
+if (!INITIAL_GUEST_SESSION) {
+  if (state.session.token) {
+    setSessionToken(state.session.token);
+  }
+  if (state.session.activeProjectId) {
+    setSessionScopedItem(ACTIVE_PROJECT_STORAGE_KEY, state.session.activeProjectId);
+  }
+}
 
 function updateModalBodyState() {
   const emitterBackdrop = dom.emitterModal ?? document.querySelector("#emitterModal");
@@ -1669,7 +1707,7 @@ function throwIfSimulationCanceled(requestId) {
 }
 
 function createSimulationWorker() {
-  return new Worker("./simulation-worker.js?v=20260425-5", { type: "module" });
+  return new Worker("./simulation-worker.js?v=20260429-1", { type: "module" });
 }
 
 function attachSimulationWorkerListener() {
@@ -1712,7 +1750,10 @@ function cancelSimulationProgress() {
     "Canceling",
   );
   if (state.simulationProgress.workerDispatched) {
-    recreateSimulationWorker();
+    state.worker?.postMessage({
+      type: "simulation:cancel",
+      payload: { requestId },
+    });
   }
   closeSimulationProgress();
   setStatus("Coverage generation canceled.");
@@ -1954,7 +1995,7 @@ function getSavedAiConfig(configId = state.ai.activeConfigId) {
 }
 
 function isAnalyticsAdmin() {
-  return !isGuestSession() && state.session.user?.email === "kyle.hicks@rfsim.local";
+  return !isGuestSession() && Boolean(state.session.user?.isAdmin);
 }
 
 function setActiveAiDraft(provider, apiKey, model, configId = "", label = "") {
@@ -2077,26 +2118,22 @@ async function loadServerAiProviderSettings() {
 
 function persistSessionStorage() {
   if (isGuestSession()) {
+    window.sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    window.sessionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
     return;
   }
-  if (state.session.token) {
-    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, state.session.token);
-  } else {
-    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  }
-
-  if (state.session.activeProjectId) {
-    window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, state.session.activeProjectId);
-  } else {
-    window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
-  }
+  setSessionToken(state.session.token);
+  setSessionScopedItem(ACTIVE_PROJECT_STORAGE_KEY, state.session.activeProjectId);
 }
 
 function clearSessionState({ preserveGuest = false } = {}) {
   if (state.session.autosaveTimerId) {
     window.clearTimeout(state.session.autosaveTimerId);
+  }
+  if (state.session.localSaveTimerId) {
+    window.clearTimeout(state.session.localSaveTimerId);
   }
   if (!preserveGuest) {
     setGuestSessionEnabled(false);
@@ -2109,6 +2146,7 @@ function clearSessionState({ preserveGuest = false } = {}) {
   state.session.activeProjectId = null;
   state.session.autosaveTimerId = null;
   state.session.autosavePending = false;
+  state.session.localSaveTimerId = null;
   persistSessionStorage();
 }
 
@@ -2495,6 +2533,10 @@ function xhrPutProject(projectId, body, token) {
 async function saveActiveProjectNow({ silent = false } = {}) {
   if (!state.session.token || !state.session.activeProjectId) return false;
 
+  if (state.session.localSaveTimerId) {
+    window.clearTimeout(state.session.localSaveTimerId);
+    state.session.localSaveTimerId = null;
+  }
   setAutosaveIndicator("saving");
 
   // Write to localStorage immediately as a safety net
@@ -2522,6 +2564,10 @@ async function saveActiveProjectNow({ silent = false } = {}) {
 }
 
 function flushPendingAutosave() {
+  if (state.session.localSaveTimerId) {
+    window.clearTimeout(state.session.localSaveTimerId);
+    state.session.localSaveTimerId = null;
+  }
   // Always write localStorage — guaranteed local recovery layer.
   try {
     window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(serializeCurrentMapState()));
@@ -3907,7 +3953,7 @@ function saveMapViewPosition() {
   }
 }
 
-function saveMapState() {
+function persistMapStateNow() {
   const payload = serializeCurrentMapState();
 
   // KMZ (non-drawn) items go to IndexedDB — no size limit, async, non-blocking.
@@ -3943,6 +3989,16 @@ function saveMapState() {
   }
 
   queueActiveProjectAutosave();
+}
+
+function saveMapState() {
+  if (state.session.localSaveTimerId) {
+    window.clearTimeout(state.session.localSaveTimerId);
+  }
+  state.session.localSaveTimerId = window.setTimeout(() => {
+    state.session.localSaveTimerId = null;
+    persistMapStateNow();
+  }, 120);
 }
 
 function applySavedMapState(rawSaved) {
@@ -4917,7 +4973,7 @@ function loadAiProviderSettings() {
     setAiStatusFromCurrentConfig();
     return;
   }
-  const stored = window.localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
+  const stored = getSessionScopedItem(AI_PROVIDER_STORAGE_KEY);
   if (!stored) {
     return;
   }
@@ -4970,7 +5026,9 @@ function loadAiProviderSettings() {
       document.documentElement.style.setProperty("--ai-panel-width", `${width}px`);
       document.documentElement.style.setProperty("--ai-divider-width", "7px");
     }
+    setSessionScopedItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify(parsed));
   } catch {
+    window.sessionStorage.removeItem(AI_PROVIDER_STORAGE_KEY);
     window.localStorage.removeItem(AI_PROVIDER_STORAGE_KEY);
   }
 }
@@ -4979,7 +5037,7 @@ function persistAiProviderSettings() {
   if (!canUsePersistentBrowserStorage()) {
     return;
   }
-  window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify({
+  setSessionScopedItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify({
     configs: state.ai.savedConfigs,
     activeConfigId: state.ai.activeConfigId,
     configLabel: state.ai.configLabel,
@@ -5512,7 +5570,9 @@ function renderMarkdown(text) {
       .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, "<em>$1</em>")
       .replace(/`([^`]+)`/g, "<code>$1</code>");
     result = result.replace(/\x00LINK\x00([^\x00]+)\x00([^\x00]+)\x00/g, (_, label, contentId) => {
-      return `<button class="ai-map-link" data-content-id="${contentId}" title="Navigate to ${label}">${label}</button>`;
+      const safeLabel = escapeHtml(label);
+      const safeContentId = escapeHtml(contentId);
+      return `<button class="ai-map-link" data-content-id="${safeContentId}" title="Navigate to ${safeLabel}">${safeLabel}</button>`;
     });
     // Render coord tokens as clickable coordinate pills in the user's chosen format
     result = result.replace(/\x00COORD\x00(\d+)\x00/g, (_, idx) => {
@@ -5521,7 +5581,8 @@ function renderMarkdown(text) {
       const display = mgrsHint && sys === "mgrs"
         ? formatMgrsDisplay(mgrsHint)
         : formatCoordinate(lat, lon, sys);
-      return `<button class="ai-coord-link" data-lat="${lat}" data-lon="${lon}" title="Pan map to ${display}">${display}</button>`;
+      const safeDisplay = escapeHtml(display);
+      return `<button class="ai-coord-link" data-lat="${lat}" data-lon="${lon}" title="Pan map to ${safeDisplay}">${safeDisplay}</button>`;
     });
     return result;
   };
@@ -7517,15 +7578,7 @@ function getAiChatHistoryStorageKey() {
   if (userId) return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:${userId}`;
   // Guest sessions are ephemeral — never persist their chat
   if (isGuestSession()) return null;
-  // Token-only session (user object not resolved yet) — use token tail
-  if (state.session.token) {
-    return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:tok:${state.session.token.slice(-16)}`;
-  }
-  // No server auth — key by AI provider+key so each API key gets its own history
-  if (state.ai.apiKey) {
-    return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:local:${state.ai.apiKey.slice(-16)}`;
-  }
-  return null;
+  return `${AI_CHAT_HISTORY_STORAGE_KEY_PREFIX}:session`;
 }
 
 function saveAiChatHistory() {
@@ -7534,7 +7587,7 @@ function saveAiChatHistory() {
   try {
     // Keep last 200 messages to cap storage usage
     const trimmed = state.ai.messages.slice(-200);
-    localStorage.setItem(key, JSON.stringify(trimmed));
+    window.sessionStorage.setItem(key, JSON.stringify(trimmed));
   } catch { /* storage full or unavailable */ }
 }
 
@@ -7543,7 +7596,7 @@ function loadAiChatHistory() {
   if (!key) return;
   let stored;
   try {
-    stored = JSON.parse(localStorage.getItem(key));
+    stored = JSON.parse(window.sessionStorage.getItem(key));
   } catch { return; }
   if (!Array.isArray(stored) || stored.length === 0) return;
 
@@ -7600,7 +7653,7 @@ function loadAiChatHistory() {
 
 function clearAiChatHistory() {
   const key = getAiChatHistoryStorageKey();
-  if (key) localStorage.removeItem(key);
+  if (key) window.sessionStorage.removeItem(key);
 }
 
 function isGenAiMilKey(key) {
@@ -13277,7 +13330,11 @@ function hideGeocoderResults() {
 function showGeocoderStatus(msg) {
   const el = getGeocoderResultsEl();
   if (!el) return;
-  el.innerHTML = `<div class="map-search-geocoder-status">${msg}</div>`;
+  el.textContent = "";
+  const status = document.createElement("div");
+  status.className = "map-search-geocoder-status";
+  status.textContent = msg;
+  el.appendChild(status);
 }
 
 function renderGeocoderResults(results) {
@@ -19181,258 +19238,6 @@ const _analytics = {
   filterText: "",
 };
 
-function openAnalyticsModalLegacy() {
-  if (!isAnalyticsAdmin()) {
-    closeAnalyticsModal();
-    return;
-  }
-  dom.analyticsModal?.classList.remove("hidden");
-  fetchAndRenderAnalyticsLegacy();
-}
-
-function closeAnalyticsModalLegacy() {
-  dom.analyticsModal?.classList.add("hidden");
-}
-
-async function fetchAndRenderAnalyticsLegacy() {
-  try {
-    _analytics.error = "";
-    _analytics.data = await apiFetch("/admin/analytics");
-    renderAnalyticsKpisLegacy();
-    renderAnalyticsActiveTabLegacy();
-    drawAnalyticsChartsLegacy();
-  } catch (err) {
-    _analytics.data = { users: [], events: [], aiTokens: [], projects: [], daily: [] };
-    _analytics.error = err?.message || "Analytics request failed.";
-    renderAnalyticsKpisLegacy();
-    renderAnalyticsActiveTabLegacy();
-    drawAnalyticsChartsLegacy();
-    console.error("Analytics fetch failed:", err);
-  }
-}
-
-function renderAnalyticsKpisLegacy() {
-  const d = _analytics.data;
-  if (!d) return;
-  const totalVisits = d.users.reduce((s, u) => s + (u.visit_count || 0), 0);
-  const totalTokens = d.aiTokens.reduce((s, r) => s + (r.total_input || 0) + (r.total_output || 0), 0);
-  const totalAiReqs = d.aiTokens.reduce((s, r) => s + (r.request_count || 0), 0);
-  document.getElementById("akpiUsers").textContent = d.users.length;
-  document.getElementById("akpiVisits").textContent = totalVisits;
-  document.getElementById("akpiProjects").textContent = d.projects.length;
-  document.getElementById("akpiAiRequests").textContent = totalAiReqs;
-  document.getElementById("akpiTokens").textContent = totalTokens >= 1000
-    ? `${(totalTokens / 1000).toFixed(1)}k`
-    : totalTokens;
-}
-
-function renderAnalyticsActiveTabLegacy() {
-  const tab = _analytics.activeTab;
-  const filter = _analytics.filterText.toLowerCase();
-
-  if (tab === "users") {
-    let rows = (_analytics.data?.users ?? []).map((u) => ({
-      username: u.username ?? "",
-      created_at: u.created_at ? new Date(u.created_at).toLocaleDateString() : "",
-      visit_count: u.visit_count ?? 0,
-      project_count: u.project_count ?? 0,
-      last_seen: u.last_seen ? new Date(u.last_seen).toLocaleDateString() : "—",
-      _raw: u,
-    }));
-    if (filter) rows = rows.filter((r) => r.username.toLowerCase().includes(filter));
-    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
-    fillTable("analyticsUsersTable", rows, ["username", "created_at", "visit_count", "project_count", "last_seen"]);
-  } else if (tab === "ai") {
-    let rows = (_analytics.data?.aiTokens ?? []).map((r) => ({
-      username: r.username ?? "",
-      provider: r.provider ?? "",
-      model: r.model ?? "",
-      request_count: r.request_count ?? 0,
-      total_input: r.total_input ?? 0,
-      total_output: r.total_output ?? 0,
-      total: (r.total_input ?? 0) + (r.total_output ?? 0),
-    }));
-    if (filter) rows = rows.filter((r) =>
-      r.username.toLowerCase().includes(filter) ||
-      r.provider.toLowerCase().includes(filter) ||
-      r.model.toLowerCase().includes(filter)
-    );
-    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
-    fillTable("analyticsAiTable", rows, ["username", "provider", "model", "request_count", "total_input", "total_output", "total"]);
-  } else if (tab === "projects") {
-    let rows = (_analytics.data?.projects ?? []).map((p) => ({
-      username: p.username ?? "",
-      name: p.name ?? "",
-      created_at: p.created_at ? new Date(p.created_at).toLocaleDateString() : "",
-      updated_at: p.updated_at ? new Date(p.updated_at).toLocaleDateString() : "",
-      snapshot_count: p.snapshot_count ?? 0,
-    }));
-    if (filter) rows = rows.filter((r) =>
-      r.username.toLowerCase().includes(filter) || r.name.toLowerCase().includes(filter)
-    );
-    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
-    fillTable("analyticsProjectsTable", rows, ["username", "name", "created_at", "updated_at", "snapshot_count"]);
-  } else if (tab === "events") {
-    let rows = (_analytics.data?.events ?? []).map((e) => ({
-      created_at: e.created_at ? new Date(e.created_at).toLocaleString() : "",
-      username: e.username ?? "",
-      event_type: e.event_type ?? "",
-      provider: e.provider ?? "",
-      model: e.model ?? "",
-      input_tokens: e.input_tokens ?? "",
-      output_tokens: e.output_tokens ?? "",
-    }));
-    if (filter) rows = rows.filter((r) =>
-      r.username.toLowerCase().includes(filter) ||
-      r.event_type.toLowerCase().includes(filter)
-    );
-    rows = sortRowsLegacy(rows, _analytics.sortCol, _analytics.sortDir);
-    fillTable("analyticsEventsTable", rows, ["created_at", "username", "event_type", "provider", "model", "input_tokens", "output_tokens"]);
-  }
-}
-
-function setAnalyticsTabLegacy(tab) {
-  _analytics.activeTab = tab;
-  _analytics.sortCol = null;
-  _analytics.sortDir = "desc";
-  document.querySelectorAll(".analytics-tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.tab === tab);
-  });
-  document.querySelectorAll(".analytics-tab-panel").forEach((panel) => {
-    panel.classList.toggle("hidden", panel.id !== `analyticsTab${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
-  });
-  updateSortSelectLegacy(tab);
-  renderAnalyticsActiveTabLegacy();
-}
-
-function updateSortSelectLegacy(tab) {
-  const sel = dom.analyticsSortSelect;
-  if (!sel) return;
-  const options = {
-    users:    [["", "Default"], ["visit_count", "Visits"], ["project_count", "Projects"], ["username", "Name"], ["created_at", "Joined"]],
-    ai:       [["", "Default"], ["total", "Total Tokens"], ["request_count", "Requests"], ["username", "Name"], ["provider", "Provider"]],
-    projects: [["", "Default"], ["updated_at", "Last Saved"], ["created_at", "Created"], ["snapshot_count", "Snapshots"], ["username", "Owner"]],
-    events:   [["", "Default"], ["created_at", "Time"], ["username", "User"], ["event_type", "Event"]],
-  };
-  sel.innerHTML = (options[tab] ?? [["", "Default"]]).map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
-  sel.value = "";
-}
-
-function drawAnalyticsChartsLegacy() {
-  drawVisitSparklineLegacy();
-  drawTokenBarChartLegacy();
-}
-
-function drawVisitSparklineLegacy() {
-  const canvas = document.getElementById("analyticsVisitChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const daily = _analytics.data?.daily ?? [];
-  const W = canvas.width;
-  const H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-  if (!daily.length) return;
-  const counts = daily.map((d) => d.count ?? 0);
-  const maxVal = Math.max(1, ...counts);
-  const pad = { top: 8, bottom: 6, left: 4, right: 4 };
-  const barW = Math.max(1, (W - pad.left - pad.right) / counts.length - 1);
-  const accent = "#8fb7ff";
-  const accentFaint = "rgba(143,183,255,0.18)";
-  counts.forEach((val, i) => {
-    const x = pad.left + i * ((W - pad.left - pad.right) / counts.length);
-    const barH = ((val / maxVal) * (H - pad.top - pad.bottom));
-    const y = H - pad.bottom - barH;
-    ctx.fillStyle = val > 0 ? accent : accentFaint;
-    ctx.fillRect(x, y, barW, barH);
-  });
-}
-
-function drawTokenBarChartLegacy() {
-  const canvas = document.getElementById("analyticsTokenChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const W = canvas.width;
-  const H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-
-  // Aggregate tokens per user
-  const byUser = {};
-  for (const r of (_analytics.data?.aiTokens ?? [])) {
-    const u = r.username || "(unknown)";
-    byUser[u] = (byUser[u] || 0) + (r.total_input || 0) + (r.total_output || 0);
-  }
-  const entries = Object.entries(byUser).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  if (!entries.length) return;
-
-  const maxVal = Math.max(1, entries[0][1]);
-  const rowH = Math.floor((H - 4) / entries.length);
-  const colors = ["#8fb7ff", "#6ee7b7", "#fbbf24", "#f87171", "#a78bfa", "#34d399", "#fb923c", "#60a5fa"];
-
-  entries.forEach(([username, tokens], i) => {
-    const barW = Math.max(2, (tokens / maxVal) * (W - 8));
-    const y = 2 + i * rowH;
-    ctx.fillStyle = colors[i % colors.length];
-    ctx.fillRect(0, y + 1, barW, rowH - 3);
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.font = `${Math.min(10, rowH - 2)}px sans-serif`;
-    ctx.fillText(username.length > 14 ? username.slice(0, 13) + "…" : username, 4, y + rowH - 3);
-  });
-}
-
-function initAnalyticsLegacy() {
-  dom.workspaceAnalyticsBtn?.addEventListener("click", () => {
-    if (!isAnalyticsAdmin()) {
-      return;
-    }
-    closeWorkspaceMenu();
-    openAnalyticsModalLegacy();
-  });
-
-  dom.analyticsModalCloseBtn?.addEventListener("click", closeAnalyticsModalLegacy);
-
-  dom.analyticsModal?.addEventListener("click", (e) => {
-    if (e.target === dom.analyticsModal) closeAnalyticsModalLegacy();
-  });
-
-  dom.analyticsRefreshBtn?.addEventListener("click", fetchAndRenderAnalyticsLegacy);
-
-  dom.analyticsSearchInput?.addEventListener("input", () => {
-    _analytics.filterText = dom.analyticsSearchInput.value;
-    renderAnalyticsActiveTabLegacy();
-  });
-
-  dom.analyticsSortSelect?.addEventListener("change", () => {
-    _analytics.sortCol = dom.analyticsSortSelect.value || null;
-    _analytics.sortDir = "desc";
-    renderAnalyticsActiveTabLegacy();
-  });
-
-  document.querySelectorAll(".analytics-tab").forEach((btn) => {
-    btn.addEventListener("click", () => setAnalyticsTabLegacy(btn.dataset.tab));
-  });
-
-  document.querySelectorAll(".analytics-table thead th[data-col]").forEach((th) => {
-    th.addEventListener("click", () => {
-      const col = th.dataset.col;
-      if (_analytics.sortCol === col) {
-        _analytics.sortDir = _analytics.sortDir === "asc" ? "desc" : "asc";
-      } else {
-        _analytics.sortCol = col;
-        _analytics.sortDir = "desc";
-      }
-      // Update header indicators
-      const table = th.closest("table");
-      table.querySelectorAll("th[data-col]").forEach((h) => {
-        h.classList.remove("sort-asc", "sort-desc");
-      });
-      th.classList.add(_analytics.sortDir === "asc" ? "sort-asc" : "sort-desc");
-      renderAnalyticsActiveTabLegacy();
-    });
-  });
-
-  updateSortSelectLegacy("users");
-}
-
 function getAnalyticsSessionId() {
   let sessionId = window.sessionStorage.getItem(ANALYTICS_SESSION_ID_STORAGE_KEY);
   if (!sessionId) {
@@ -19569,10 +19374,6 @@ function sortRows(rows, col, dir) {
   });
 }
 
-function sortRowsLegacy(rows, col, dir) {
-  return sortRows(rows, col, dir);
-}
-
 function fillTable(tableId, rows, cols) {
   const tbody = document.querySelector(`#${tableId} tbody`);
   if (!tbody) return;
@@ -19610,7 +19411,7 @@ function fillTable(tableId, rows, cols) {
 function ensureAnalyticsChrome() {
   const titleNote = document.querySelector("#analyticsModal .emitter-modal-title-group p");
   if (titleNote) {
-    titleNote.textContent = "Usage monitoring for users, projects, prompts, providers, and token spend. Visible only to kyle.hicks.";
+    titleNote.textContent = "Usage monitoring for users, projects, prompts, providers, and token spend. Visible only to workspace admins.";
   }
 
   const filterBar = dom.analyticsSearchInput?.closest(".analytics-filter-bar");

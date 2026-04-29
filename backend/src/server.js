@@ -3,6 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const { Readable } = require("stream");
 const fs = require("fs");
 const path = require("path");
@@ -16,6 +17,50 @@ app.use(helmet());
 app.use(cors({ origin: config.appOrigin, credentials: true }));
 
 app.use(express.json({ limit: "10mb" }));
+
+const projectSchemaCapabilities = {
+  hasStateSchemaVersion: false,
+  hasClientSavedAt: false,
+};
+
+const rateLimitState = new Map();
+const rateLimitBuckets = {
+  auth: { limit: 10, windowMs: 15 * 60 * 1000 },
+  aiRelay: { limit: 30, windowMs: 60 * 1000 },
+  analytics: { limit: 60, windowMs: 60 * 1000 },
+};
+
+function getClientIp(request) {
+  const forwarded = request.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    return forwarded.split(",")[0].trim();
+  }
+  return request.ip || request.socket?.remoteAddress || "unknown";
+}
+
+function rateLimit(bucketName) {
+  const bucket = rateLimitBuckets[bucketName];
+  return (request, response, next) => {
+    if (!bucket) {
+      next();
+      return;
+    }
+    const now = Date.now();
+    const key = `${bucketName}:${getClientIp(request)}`;
+    const entry = rateLimitState.get(key);
+    if (!entry || now >= entry.resetAt) {
+      rateLimitState.set(key, { count: 1, resetAt: now + bucket.windowMs });
+      next();
+      return;
+    }
+    if (entry.count >= bucket.limit) {
+      response.status(429).json({ error: "Too many requests. Please try again shortly." });
+      return;
+    }
+    entry.count += 1;
+    next();
+  };
+}
 
 function signToken(user) {
   return jwt.sign(
@@ -45,6 +90,42 @@ function normalizeUsername(value = "") {
   return String(value).trim();
 }
 
+function deriveEncryptionKey(secret) {
+  return crypto.createHash("sha256").update(String(secret || "")).digest();
+}
+
+const AI_CONFIG_ENCRYPTION_KEY = deriveEncryptionKey(config.aiConfigSecret);
+
+function encryptSecret(plainText = "") {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", AI_CONFIG_ENCRYPTION_KEY, iv);
+  const encrypted = Buffer.concat([cipher.update(String(plainText), "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `enc:${iv.toString("base64")}:${authTag.toString("base64")}:${encrypted.toString("base64")}`;
+}
+
+function decryptSecret(payload = "") {
+  const raw = String(payload || "");
+  if (!raw.startsWith("enc:")) {
+    return raw;
+  }
+  const [, ivB64, tagB64, dataB64] = raw.split(":");
+  if (!ivB64 || !tagB64 || !dataB64) {
+    throw new Error("Encrypted secret payload is malformed.");
+  }
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    AI_CONFIG_ENCRYPTION_KEY,
+    Buffer.from(ivB64, "base64")
+  );
+  decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(dataB64, "base64")),
+    decipher.final(),
+  ]);
+  return decrypted.toString("utf8");
+}
+
 function usernameToInternalEmail(username) {
   const slug = normalizeUsername(username)
     .toLowerCase()
@@ -52,6 +133,26 @@ function usernameToInternalEmail(username) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "user";
   return `${slug}@rfsim.local`;
+}
+
+async function fetchUserById(userId) {
+  const result = await query(
+    "select id, email, full_name, is_admin from app_user where id = $1",
+    [userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+function formatUser(user) {
+  if (!user) {
+    return null;
+  }
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.full_name,
+    isAdmin: Boolean(user.is_admin),
+  };
 }
 
 const registerSchema = z.object({
@@ -241,7 +342,7 @@ app.get("/api/health", async (_request, response) => {
 });
 
 // Diagnostic: test raw reachability of api.genai.mil (no key needed)
-app.get("/api/ai/genai-mil/ping", async (_request, response) => {
+app.get("/api/ai/genai-mil/ping", authRequired, rateLimit("aiRelay"), async (_request, response) => {
   try {
     const res = await fetch(`${GENAI_MIL_BASE_URL}/models`, {
       method: "GET",
@@ -263,7 +364,7 @@ app.get("/api/ai/genai-mil/ping", async (_request, response) => {
   }
 });
 
-app.post("/api/auth/register", async (request, response) => {
+app.post("/api/auth/register", rateLimit("auth"), async (request, response) => {
   const parsed = registerSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: parsed.error.flatten() });
@@ -277,8 +378,8 @@ app.post("/api/auth/register", async (request, response) => {
 
   try {
     const existing = await query(
-      "select id from app_user where lower(email) = lower($1) or lower(full_name) = lower($2)",
-      [internalEmail, username]
+      "select id from app_user where lower(email) = lower($1)",
+      [internalEmail]
     );
     if (existing.rowCount > 0) {
       response.status(409).json({ error: "An account with that username already exists." });
@@ -287,7 +388,7 @@ app.post("/api/auth/register", async (request, response) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await query(
-      "insert into app_user (email, password_hash, full_name) values ($1, $2, $3) returning id, email, full_name",
+      "insert into app_user (email, password_hash, full_name) values ($1, $2, $3) returning id, email, full_name, is_admin",
       [internalEmail, passwordHash, fullName]
     );
     const user = result.rows[0];
@@ -297,14 +398,14 @@ app.post("/api/auth/register", async (request, response) => {
     }, { username: user.full_name || user.email });
     response.status(201).json({
       token: signToken(user),
-      user: { id: user.id, email: user.email, fullName: user.full_name }
+      user: formatUser(user),
     });
   } catch (error) {
     response.status(500).json({ error: error.message });
   }
 });
 
-app.post("/api/auth/login", async (request, response) => {
+app.post("/api/auth/login", rateLimit("auth"), async (request, response) => {
   const parsed = loginSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: parsed.error.flatten() });
@@ -313,11 +414,12 @@ app.post("/api/auth/login", async (request, response) => {
 
   const username = normalizeUsername(parsed.data.username);
   const password = parsed.data.password;
+  const internalEmail = usernameToInternalEmail(username);
 
   try {
     const result = await query(
-      "select id, email, full_name, password_hash from app_user where lower(email) = lower($1) or lower(full_name) = lower($1)",
-      [username]
+      "select id, email, full_name, password_hash, is_admin from app_user where lower(email) = lower($1)",
+      [internalEmail]
     );
     if (result.rowCount === 0) {
       response.status(401).json({ error: "Invalid username or password." });
@@ -337,7 +439,7 @@ app.post("/api/auth/login", async (request, response) => {
     }, { username: user.full_name || user.email });
     response.json({
       token: signToken(user),
-      user: { id: user.id, email: user.email, fullName: user.full_name }
+      user: formatUser(user),
     });
   } catch (error) {
     response.status(500).json({ error: error.message });
@@ -346,16 +448,12 @@ app.post("/api/auth/login", async (request, response) => {
 
 app.get("/api/auth/me", authRequired, async (request, response) => {
   try {
-    const result = await query(
-      "select id, email, full_name from app_user where id = $1",
-      [request.user.sub]
-    );
-    if (result.rowCount === 0) {
+    const user = await fetchUserById(request.user.sub);
+    if (!user) {
       response.status(404).json({ error: "User not found." });
       return;
     }
-    const user = result.rows[0];
-    response.json({ user: { id: user.id, email: user.email, fullName: user.full_name } });
+    response.json({ user: formatUser(user) });
   } catch (error) {
     response.status(500).json({ error: error.message });
   }
@@ -370,7 +468,12 @@ app.get("/api/user/ai-configs", authRequired, async (request, response) => {
        order by position asc, updated_at desc`,
       [request.user.sub]
     );
-    response.json({ configs: result.rows });
+    response.json({
+      configs: result.rows.map((row) => ({
+        ...row,
+        apiKey: decryptSecret(row.apiKey),
+      })),
+    });
   } catch (error) {
     // Table may not exist yet if migration hasn't run — return empty rather than 500
     if (error.code === "42P01") {
@@ -402,7 +505,7 @@ app.put("/api/user/ai-configs", authRequired, async (request, response) => {
           request.user.sub,
           configItem.label ?? "",
           configItem.provider,
-          configItem.apiKey,
+          encryptSecret(configItem.apiKey),
           configItem.model ?? "",
           index,
         ]
@@ -423,7 +526,7 @@ app.put("/api/user/ai-configs", authRequired, async (request, response) => {
   }
 });
 
-app.post("/api/ai/genai-mil/models", async (request, response) => {
+app.post("/api/ai/genai-mil/models", authRequired, rateLimit("aiRelay"), async (request, response) => {
   const parsed = aiGenAiMilModelsSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: parsed.error.flatten() });
@@ -441,7 +544,7 @@ app.post("/api/ai/genai-mil/models", async (request, response) => {
   }
 });
 
-app.post("/api/ai/genai-mil/chat/completions", async (request, response) => {
+app.post("/api/ai/genai-mil/chat/completions", authRequired, rateLimit("aiRelay"), async (request, response) => {
   const parsed = aiGenAiMilChatSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: parsed.error.flatten() });
@@ -506,25 +609,7 @@ app.post("/api/projects", authRequired, async (request, response) => {
 });
 
 async function getProjectSchemaCapabilities() {
-  try {
-    const result = await query(
-      `select column_name
-       from information_schema.columns
-       where table_schema = 'public'
-         and table_name = 'project'
-         and column_name in ('state_schema_version', 'client_saved_at')`
-    );
-    const columns = new Set(result.rows.map((row) => row.column_name));
-    return {
-      hasStateSchemaVersion: columns.has("state_schema_version"),
-      hasClientSavedAt: columns.has("client_saved_at"),
-    };
-  } catch {
-    return {
-      hasStateSchemaVersion: false,
-      hasClientSavedAt: false,
-    };
-  }
+  return projectSchemaCapabilities;
 }
 
 app.get("/api/projects/:projectId", authRequired, async (request, response) => {
@@ -736,16 +821,18 @@ app.post("/api/projects/:projectId/snapshots", authRequired, async (request, res
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
 
-const ADMIN_USERNAME = "kyle.hicks";
-const ADMIN_INTERNAL_EMAIL = usernameToInternalEmail(ADMIN_USERNAME);
-
-function adminRequired(request, response, next) {
-  const userEmail = request.user?.email ?? "";
-  if (userEmail.toLowerCase() !== ADMIN_INTERNAL_EMAIL.toLowerCase()) {
-    response.status(403).json({ error: "Forbidden." });
-    return;
+async function adminRequired(request, response, next) {
+  try {
+    const user = await fetchUserById(request.user?.sub);
+    if (!user?.is_admin) {
+      response.status(403).json({ error: "Forbidden." });
+      return;
+    }
+    request.adminUser = user;
+    next();
+  } catch (error) {
+    response.status(500).json({ error: error.message });
   }
-  next();
 }
 
 const analyticsEventSchema = z.object({
@@ -805,7 +892,7 @@ function clampExcerpt(value, max = 220) {
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
 }
 
-app.post("/api/analytics/event", authRequired, async (request, response) => {
+app.post("/api/analytics/event", authRequired, rateLimit("analytics"), async (request, response) => {
   const parsed = analyticsEventSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: parsed.error.flatten() });
@@ -1128,20 +1215,56 @@ app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, re
 });
 
 async function runMigrations() {
+  await query(`
+    create table if not exists schema_migration (
+      filename text primary key,
+      applied_at timestamptz not null default now()
+    )
+  `);
+  const applied = await query("select filename from schema_migration");
+  const appliedFiles = new Set(applied.rows.map((row) => row.filename));
   const sqlDir = path.join(__dirname, "../sql");
   const files = fs.readdirSync(sqlDir).filter((f) => f.endsWith(".sql")).sort();
   for (const file of files) {
+    if (appliedFiles.has(file)) {
+      continue;
+    }
     const sql = fs.readFileSync(path.join(sqlDir, file), "utf8");
+    const client = await pool.connect();
     try {
-      await query(sql);
+      await client.query("begin");
+      await client.query(sql);
+      await client.query(
+        "insert into schema_migration (filename) values ($1) on conflict (filename) do nothing",
+        [file]
+      );
+      await client.query("commit");
       console.log(`Migration applied: ${file}`);
     } catch (error) {
-      console.error(`Migration failed (${file}): ${error.message}`);
+      await client.query("rollback");
+      throw new Error(`Migration failed (${file}): ${error.message}`);
+    } finally {
+      client.release();
     }
   }
 }
 
+async function loadProjectSchemaCapabilities() {
+  const result = await query(
+    `select column_name
+     from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'project'
+       and column_name in ('state_schema_version', 'client_saved_at')`
+  );
+  const columns = new Set(result.rows.map((row) => row.column_name));
+  projectSchemaCapabilities.hasStateSchemaVersion = columns.has("state_schema_version");
+  projectSchemaCapabilities.hasClientSavedAt = columns.has("client_saved_at");
+}
+
 runMigrations().then(() => {
+  return loadProjectSchemaCapabilities();
+}).then(() => {
   app.listen(config.port, () => {
     console.log(`EW Sim backend listening on port ${config.port}`);
   });

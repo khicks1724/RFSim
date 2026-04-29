@@ -161,17 +161,44 @@ function printTrustReminder() {
 
 // ─── CORS headers ────────────────────────────────────────────────────────────
 
-const CORS = {
-  "Access-Control-Allow-Origin":  "*",
+const CORS_BASE = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Api-Key, X-Local-Model-Url",
-  "Access-Control-Max-Age":       "86400",
+  "Access-Control-Max-Age": "86400",
+  Vary: "Origin",
 };
+
+function isTrustedLoopbackOrigin(origin = "") {
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function getCorsHeaders(req) {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
+  if (isTrustedLoopbackOrigin(origin)) {
+    return { ...CORS_BASE, "Access-Control-Allow-Origin": origin };
+  }
+  return CORS_BASE;
+}
+
+function rejectUntrustedOrigin(req, res) {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
+  if (!origin || isTrustedLoopbackOrigin(origin)) {
+    return false;
+  }
+  writeJson(res, 403, { error: { message: "This localhost relay only accepts requests from loopback origins." } }, req);
+  return true;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function writeJson(res, status, payload) {
-  res.writeHead(status, { "Content-Type": "application/json", ...CORS });
+function writeJson(res, status, payload, req = null) {
+  res.writeHead(status, { "Content-Type": "application/json", ...(req ? getCorsHeaders(req) : CORS_BASE) });
   res.end(JSON.stringify(payload));
 }
 
@@ -269,13 +296,14 @@ function printTrustInstructions() {
 // ─── Request handlers ─────────────────────────────────────────────────────────
 
 async function handleGenAiMil(req, res) {
+  if (rejectUntrustedOrigin(req, res)) return;
   let body;
-  try { body = await readBody(req); } catch { return writeJson(res, 400, { error: { message: "Could not read request body." } }); }
+  try { body = await readBody(req); } catch { return writeJson(res, 400, { error: { message: "Could not read request body." } }, req); }
 
   const authHeader = req.headers["authorization"];
   const xApiKey    = req.headers["x-api-key"];
   if (!authHeader && !xApiKey) {
-    return writeJson(res, 401, { error: { message: "Missing Authorization or X-Api-Key header." } });
+    return writeJson(res, 401, { error: { message: "Missing Authorization or X-Api-Key header." } }, req);
   }
   const bareKey = xApiKey ?? authHeader.replace(/^Bearer\s+/i, "");
 
@@ -284,18 +312,19 @@ async function handleGenAiMil(req, res) {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${bareKey}`,
     }, body);
-    res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...CORS });
+    res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...getCorsHeaders(req) });
     res.end(upstream.text);
   } catch (err) {
-    writeJson(res, 502, { error: { message: err.message || "Upstream request failed." } });
+    writeJson(res, 502, { error: { message: err.message || "Upstream request failed." } }, req);
   }
 }
 
 async function handleGenAiMilModels(req, res) {
+  if (rejectUntrustedOrigin(req, res)) return;
   const authHeader = req.headers["authorization"];
   const xApiKey = req.headers["x-api-key"];
   if (!authHeader && !xApiKey) {
-    return writeJson(res, 401, { error: { message: "Missing Authorization or X-Api-Key header." } });
+    return writeJson(res, 401, { error: { message: "Missing Authorization or X-Api-Key header." } }, req);
   }
   const bareKey = xApiKey ?? authHeader.replace(/^Bearer\s+/i, "");
 
@@ -303,16 +332,17 @@ async function handleGenAiMilModels(req, res) {
     const upstream = await proxyGet(GENAI_MODELS_URL, {
       "Authorization": `Bearer ${bareKey}`,
     });
-    res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...CORS });
+    res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...getCorsHeaders(req) });
     res.end(upstream.text);
   } catch (err) {
-    writeJson(res, 502, { error: { message: err.message || "Upstream request failed." } });
+    writeJson(res, 502, { error: { message: err.message || "Upstream request failed." } }, req);
   }
 }
 
 async function handleLocalModel(req, res) {
+  if (rejectUntrustedOrigin(req, res)) return;
   let body;
-  try { body = await readBody(req); } catch { return writeJson(res, 400, { error: { message: "Could not read request body." } }); }
+  try { body = await readBody(req); } catch { return writeJson(res, 400, { error: { message: "Could not read request body." } }, req); }
 
   // The browser can pass a custom endpoint via header; fall back to env/default.
   const targetUrl = req.headers["x-local-model-url"] || LOCAL_MODEL_ENDPOINT;
@@ -320,11 +350,11 @@ async function handleLocalModel(req, res) {
   // Validate it points at localhost — refuse to relay to external addresses.
   let parsed;
   try { parsed = new URL(targetUrl); } catch {
-    return writeJson(res, 400, { error: { message: "Invalid X-Local-Model-Url header." } });
+    return writeJson(res, 400, { error: { message: "Invalid X-Local-Model-Url header." } }, req);
   }
   const host = parsed.hostname;
   if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
-    return writeJson(res, 403, { error: { message: "Local model proxy only forwards to localhost addresses." } });
+    return writeJson(res, 403, { error: { message: "Local model proxy only forwards to localhost addresses." } }, req);
   }
 
   // Inject model from request body if not already set (convenience for Ollama which
@@ -334,7 +364,7 @@ async function handleLocalModel(req, res) {
 
   try {
     const upstream = await proxyPost(targetUrl, { "Content-Type": "application/json" }, body);
-    res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...CORS });
+    res.writeHead(upstream.status, { "Content-Type": upstream.contentType, ...getCorsHeaders(req) });
     res.end(upstream.text);
   } catch (err) {
     const hint = targetUrl.includes("11434")
@@ -344,13 +374,14 @@ async function handleLocalModel(req, res) {
         : targetUrl.includes("8080")
           ? " Is llama.cpp server running? (./server -m model.gguf)"
           : "";
-    writeJson(res, 502, { error: { message: `Could not reach local model at ${targetUrl}.${hint}` } });
+    writeJson(res, 502, { error: { message: `Could not reach local model at ${targetUrl}.${hint}` } }, req);
   }
 }
 
 // ─── /health endpoint ────────────────────────────────────────────────────────
 
 async function handleLocalModelHealth(req, res) {
+  if (rejectUntrustedOrigin(req, res)) return;
   // Try to reach the local model with a lightweight request.
   const targetUrl = req.headers["x-local-model-url"] || LOCAL_MODEL_ENDPOINT;
   let reachable = false;
@@ -381,7 +412,7 @@ async function handleLocalModelHealth(req, res) {
     }
   } catch {}
 
-  res.writeHead(200, { "Content-Type": "application/json", ...CORS });
+  res.writeHead(200, { "Content-Type": "application/json", ...getCorsHeaders(req) });
   res.end(JSON.stringify({ reachable, models, endpoint: LOCAL_MODEL_ENDPOINT }));
 }
 
@@ -390,7 +421,7 @@ async function handleLocalModelHealth(req, res) {
 function createRouter(enableLocalModel) {
   return async function router(req, res) {
     if (req.method === "OPTIONS") {
-      res.writeHead(204, CORS);
+      res.writeHead(204, getCorsHeaders(req));
       res.end();
       return;
     }
@@ -414,7 +445,7 @@ function createRouter(enableLocalModel) {
       }
     }
 
-    writeJson(res, 404, { error: { message: "Not found." } });
+    writeJson(res, 404, { error: { message: "Not found." } }, req);
   };
 }
 

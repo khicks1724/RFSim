@@ -2,6 +2,11 @@ self.addEventListener("message", (event) => {
   const { type, payload } = event.data;
 
   try {
+    if (type === "simulation:cancel") {
+      canceledSimulationRequestIds.add(payload?.requestId);
+      return;
+    }
+
     if (type === "terrain:cache") {
       terrainCache.set(payload.id, payload);
       self.postMessage({
@@ -58,6 +63,9 @@ self.addEventListener("message", (event) => {
       });
     }
   } catch (error) {
+    if (error instanceof Error && error.message === "SIMULATION_CANCELED") {
+      return;
+    }
     self.postMessage({
       type: "engine:error",
       payload: {
@@ -68,6 +76,7 @@ self.addEventListener("message", (event) => {
 });
 
 const terrainCache = new Map();
+const canceledSimulationRequestIds = new Set();
 
 function runSimulation(payload, reportProgress = () => {}) {
   const {
@@ -81,6 +90,7 @@ function runSimulation(payload, reportProgress = () => {}) {
     opacity,
     propagationModel,
   } = payload;
+  canceledSimulationRequestIds.delete(requestId);
   const terrain = resolveTerrain(terrainId);
   const latStep = metersToLatitudeDegrees(gridMeters);
   const lonStep = metersToLongitudeDegrees(gridMeters, asset.lat);
@@ -100,8 +110,16 @@ function runSimulation(payload, reportProgress = () => {}) {
     detail: "0%",
   });
   for (let northMeters = -radiusMeters; northMeters <= radiusMeters; northMeters += gridMeters) {
+    if (canceledSimulationRequestIds.has(requestId)) {
+      canceledSimulationRequestIds.delete(requestId);
+      throw new Error("SIMULATION_CANCELED");
+    }
     const lat = asset.lat + metersToLatitudeDegrees(northMeters);
     for (let eastMeters = -radiusMeters; eastMeters <= radiusMeters; eastMeters += gridMeters) {
+      if (canceledSimulationRequestIds.has(requestId)) {
+        canceledSimulationRequestIds.delete(requestId);
+        throw new Error("SIMULATION_CANCELED");
+      }
       const distanceMeters = Math.hypot(northMeters, eastMeters);
       if (distanceMeters > radiusMeters) {
         continue;
