@@ -3820,15 +3820,24 @@ function serializeImportedItem(item) {
     const outer = Array.isArray(rings[0]) ? rings[0] : rings;
     coordinates = outer.map((p) => [p.lat, p.lng]);
   }
-  // Only persist the two properties the app actually reads back — isCircle and radiusM.
-  // Full GeoJSON attribute tables from imports can be enormous (100+ fields × thousands
-  // of features) and are not used by any rendering or logic path after initial import.
-  const { isCircle, radiusM, center } = item.properties ?? {};
+  // Preserve rendering properties plus all KML/GeoJSON attributes for AI querying.
+  // Cap each string value at 200 chars and total property count at 40 to bound storage.
+  const { isCircle, radiusM, center, ...rest } = item.properties ?? {};
   const properties = {};
   if (isCircle) properties.isCircle = isCircle;
   if (radiusM !== undefined) properties.radiusM = radiusM;
   if (center && Number.isFinite(Number(center.lat)) && Number.isFinite(Number(center.lng))) {
     properties.center = { lat: Number(center.lat), lng: Number(center.lng) };
+  }
+  // Persist remaining KML ExtendedData/GeoJSON properties so the AI agent can
+  // query attributes (call sign, type, description, etc.) after page reload.
+  let extraCount = 0;
+  for (const [k, v] of Object.entries(rest)) {
+    if (extraCount >= 37) break; // keep total ≤ 40 entries
+    if (v === undefined || v === null || v === "") continue;
+    const str = String(v);
+    properties[k] = str.length > 200 ? str.slice(0, 200) : str;
+    extraCount++;
   }
 
   return {
@@ -3839,6 +3848,8 @@ function serializeImportedItem(item) {
     subtitle: item.subtitle,
     kind: item.kind,
     geometryType: item.geometryType,
+    folderPath: item.folderPath ?? [],
+    sourceLabel: item.sourceLabel ?? null,
     properties,
     drawn: item.drawn ?? false,
     shapeStyle: item.shapeStyle ?? null,
@@ -4005,6 +4016,8 @@ function applySavedMapState(rawSaved) {
           subtitle: saved.subtitle,
           kind: saved.kind,
           geometryType: saved.geometryType,
+          folderPath: Array.isArray(saved.folderPath) ? saved.folderPath : [],
+          sourceLabel: saved.sourceLabel ?? null,
           properties: saved.properties ?? {},
           drawn: saved.drawn ?? false,
           showLabel: typeof saved.showLabel === "boolean"
@@ -6723,13 +6736,16 @@ function buildCompactAiScenarioSummary(contextIds = []) {
       frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
       powerW: roundAiNumber(asset.powerW, 3),
     })),
-    importedItems: state.importedItems.slice(0, 20).map((item) => {
+    importedItems: state.importedItems.map((item) => {
       const geometry = getImportedItemGeometryForAi(item);
       return {
         id: item.id,
         contentId: `imported:${item.id}`,
         name: item.name,
         geometryType: item.geometryType,
+        folderPath: item.folderPath ?? [],
+        sourceLabel: item.sourceLabel ?? null,
+        properties: item.properties ?? {},
         geometry,
         bounds: typeof item.layer?.getBounds === "function" ? serializeBoundsForAi(item.layer.getBounds()) : null,
       };
@@ -7183,6 +7199,8 @@ function serializeImportedItemForAi(item) {
     name: item.name,
     subtitle: item.subtitle,
     geometryType: item.geometryType,
+    folderPath: item.folderPath ?? [],
+    sourceLabel: item.sourceLabel ?? null,
     drawn: Boolean(item.drawn),
     hidden: state.hiddenContentIds.has(contentId),
     folderId: getMapContentFolderId(contentId),
@@ -8291,6 +8309,17 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "- When the user says 'the linked shape', 'that shape', 'the context shape', 'make it red', or refers to a shape without naming it, they mean the first item in explicitAiContextObjects[]. Use its 'name' field directly as the 'name' value in update-shape/remove-shape. Do NOT use the contentId string.",
     "- Example: explicitAiContextObjects = [{contentId:'imported:abc',name:'OP CRAMPTON'}], user says 'best relay IVO OP Crampton' → find 'OP CRAMPTON' in importedItems[], get geometry.coordinates {lat,lon}, use check-los to find elevated terrain nearby, place relay with add-asset near those coords, run-simulation.",
     "- update-shape supports: color (#hex), fillOpacity (0–1), weight (px), lineStyle (solid|dashed|dotted), newName (rename), radiusM (resize circle by center+radius), coordinates (replace geometry).",
+    "",
+    "KMZ/KML ITEM STRUCTURE — each importedItem in importedItems[] has:",
+    "  name        — the Placemark name (e.g. 'OP Crampton', 'CP 34', 'Route Blue')",
+    "  geometryType — 'Point' | 'LineString' | 'Polygon'",
+    "  folderPath  — array of KML folder names from the file (e.g. ['OPs', 'Phase 2']) — use this to understand the category/type of item",
+    "  sourceLabel — import source ('KMZ', 'KML', 'GeoJSON', 'Drawn', etc.)",
+    "  properties  — key/value pairs from KML ExtendedData or GeoJSON properties (may include call sign, type, description, unit, mgrs, etc.)",
+    "  geometry    — GeoJSON-style geometry with actual coordinates",
+    "- When the user asks to 'list all OPs' or 'find CPs' or 'show routes': scan ALL importedItems[] entries, filter by name prefix/folderPath/properties, and return the matches with their coordinates.",
+    "- When asked to find an item by name, do case-insensitive substring matching across name AND folderPath segments AND properties values. 'OP Crampton' matches name='OP Crampton' or name='CRAMPTON' or folderPath=['OPs'].",
+    "- Always include coordinates (formatted per user's coordinate system preference) when listing or describing map items.",
     "",
     "═══════════════════════════════════════",
     "SPATIAL REASONING:",
@@ -15928,6 +15957,8 @@ function addImportedFeature(feature, folderId, index, options = {}) {
     subtitle: `${feature.sourceLabel} | ${feature.geometryType}`,
     kind: `imported-${feature.geometryType.toLowerCase()}`,
     geometryType: feature.geometryType,
+    folderPath: Array.isArray(feature.folderPath) ? feature.folderPath : [],
+    sourceLabel: feature.sourceLabel ?? null,
     properties: feature.properties ?? {},
     shapeStyle,
     markerStyle,
