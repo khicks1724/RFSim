@@ -5545,7 +5545,7 @@ function renderMarkdown(text) {
   };
 
   const flushTable = () => {
-    if (inTable) { out.push("</tbody></table>"); inTable = false; tableHeaderDone = false; }
+    if (inTable) { out.push("</tbody></table></div>"); inTable = false; tableHeaderDone = false; }
   };
 
   const isTableRow = (line) => /^\|.+\|/.test(line.trim());
@@ -5580,7 +5580,7 @@ function renderMarkdown(text) {
       }
       const cells = line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
       if (!inTable) {
-        out.push('<table class="ai-md-table"><thead><tr>');
+        out.push('<div class="ai-md-table-wrap"><table class="ai-md-table"><thead><tr>');
         cells.forEach((c) => out.push(`<th>${inlineFormat(c)}</th>`));
         out.push("</tr></thead><tbody>");
         inTable = true;

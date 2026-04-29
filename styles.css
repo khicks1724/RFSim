@@ -1518,11 +1518,16 @@ body:not(.ai-panel-open) .ai-panel {
 }
 
 /* Markdown table */
+.ai-chat-message-body .ai-md-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
 .ai-chat-message-body .ai-md-table {
   border-collapse: collapse;
   width: 100%;
   font-size: 0.78rem;
   margin: 6px 0;
+  table-layout: auto;
 }
 
 .ai-chat-message-body .ai-md-table th,
@@ -1530,7 +1535,10 @@ body:not(.ai-panel-open) .ai-panel {
   border: 1px solid var(--border);
   padding: 4px 8px;
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  min-width: 60px;
+  max-width: 320px;
 }
 
 .ai-chat-message-body .ai-md-table th {
