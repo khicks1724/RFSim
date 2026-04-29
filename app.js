@@ -3468,16 +3468,11 @@ function initMap() {
 
   state.map = L.map("map", {
     zoomControl: true,
-    // Render the base layer onto a canvas; prevents tile repaints from
-    // triggering a full SVG reflow on every frame.
-    preferCanvas: false, // tiles stay as <img> — canvas for vector layers only
-    // Keep a 3-tile-wide border of loaded tiles around the viewport so panning
-    // reveals pre-loaded tiles instead of blank grey areas.
-    keepBuffer: 4,
-    // Don't hammer the tile server while the user is actively panning —
-    // wait until movement stops before requesting new tiles.
-    updateWhenIdle: true,
-    updateWhenZooming: false,
+    // Vector layers use canvas where explicitly configured; basemap tiles stay
+    // as images so the browser can decode and cache them efficiently.
+    preferCanvas: false,
+    // Fade animations make tile swaps feel sluggish on large imagery layers.
+    fadeAnimation: false,
     // Throttle wheel zoom so the viewport doesn't request a new tile set on
     // every scroll tick.
     wheelDebounceTime: 100,
@@ -5497,7 +5492,8 @@ function renderAiEmptyState() {
 }
 
 function syncAiUi() {
-  document.dispatchEvent(new Event("ai-status-changed"));
+  // Notify secondary view forms that AI status may have changed
+  setTimeout(() => document.dispatchEvent(new Event("ai-status-changed")), 0);
   if (!dom.aiProviderSelect || !dom.aiApiKeyInput) {
     return;
   }
@@ -10723,9 +10719,14 @@ function applyBasemap(key) {
     attribution: config.attribution,
     maxZoom: config.maxZoom,
     crossOrigin: true,
-    keepBuffer: 4,
-    updateWhenIdle: true,
-    updateWhenZooming: false,
+    // Keep more edge tiles warm so short drags don't expose blank space.
+    keepBuffer: 6,
+    // Stream tiles during desktop pans instead of waiting for movement to stop.
+    updateWhenIdle: false,
+    // Refresh tiles during zoom transitions so imagery catches up immediately.
+    updateWhenZooming: true,
+    // Slightly reduce request churn without deferring visible tile updates.
+    updateInterval: 120,
   });
   state.baseLayer.addTo(state.map);
   updateImageryMenuValue(config.label);
@@ -18463,13 +18464,11 @@ const CoordinateGridLayer = L.Layer.extend({
     // automatically follows pans without needing a move event.
     map.getPane("overlayPane").appendChild(canvas);
     map.on("moveend zoomend resize viewreset", this._scheduleRedraw, this);
-    // Also redraw on every move so the grid stays locked during panning.
-    map.on("move", this._scheduleRedraw, this);
     this._scheduleRedraw();
   },
 
   onRemove(map) {
-    map.off("moveend zoomend resize viewreset move", this._scheduleRedraw, this);
+    map.off("moveend zoomend resize viewreset", this._scheduleRedraw, this);
     if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
     if (this._canvas?.parentNode) this._canvas.parentNode.removeChild(this._canvas);
     this._canvas = null;
