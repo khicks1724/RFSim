@@ -6736,20 +6736,39 @@ function buildCompactAiScenarioSummary(contextIds = []) {
       frequencyMHz: roundAiNumber(asset.frequencyMHz, 3),
       powerW: roundAiNumber(asset.powerW, 3),
     })),
-    importedItems: state.importedItems.map((item) => {
-      const geometry = getImportedItemGeometryForAi(item);
-      return {
-        id: item.id,
-        contentId: `imported:${item.id}`,
-        name: item.name,
-        geometryType: item.geometryType,
-        folderPath: item.folderPath ?? [],
-        sourceLabel: item.sourceLabel ?? null,
-        properties: item.properties ?? {},
-        geometry,
-        bounds: typeof item.layer?.getBounds === "function" ? serializeBoundsForAi(item.layer.getBounds()) : null,
-      };
-    }),
+    // importedItems: two tiers to keep token count bounded.
+    // Tier 1: explicitly linked context items — full geometry + properties.
+    // Tier 2: everything else — lean name/type/folder index (no geometry/properties), capped at 400.
+    importedItems: (() => {
+      const linkedIds = new Set(contextIds);
+      const full = [];
+      const index = [];
+      for (const item of state.importedItems) {
+        const cid = `imported:${item.id}`;
+        if (linkedIds.has(cid)) {
+          const geometry = getImportedItemGeometryForAi(item);
+          full.push({
+            id: item.id,
+            contentId: cid,
+            name: item.name,
+            geometryType: item.geometryType,
+            folderPath: item.folderPath ?? [],
+            sourceLabel: item.sourceLabel ?? null,
+            properties: item.properties ?? {},
+            geometry,
+            bounds: typeof item.layer?.getBounds === "function" ? serializeBoundsForAi(item.layer.getBounds()) : null,
+          });
+        } else if (index.length < 400) {
+          index.push({
+            contentId: cid,
+            name: item.name,
+            geometryType: item.geometryType,
+            folderPath: item.folderPath ?? [],
+          });
+        }
+      }
+      return [...full, ...index];
+    })(),
     viewsheds: state.viewsheds.slice(0, 20).map((viewshed) => ({
       id: viewshed.id,
       name: viewshed.name ?? `${viewshed.asset.name} Coverage`,
@@ -8310,16 +8329,17 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "- Example: explicitAiContextObjects = [{contentId:'imported:abc',name:'OP CRAMPTON'}], user says 'best relay IVO OP Crampton' → find 'OP CRAMPTON' in importedItems[], get geometry.coordinates {lat,lon}, use check-los to find elevated terrain nearby, place relay with add-asset near those coords, run-simulation.",
     "- update-shape supports: color (#hex), fillOpacity (0–1), weight (px), lineStyle (solid|dashed|dotted), newName (rename), radiusM (resize circle by center+radius), coordinates (replace geometry).",
     "",
-    "KMZ/KML ITEM STRUCTURE — each importedItem in importedItems[] has:",
-    "  name        — the Placemark name (e.g. 'OP Crampton', 'CP 34', 'Route Blue')",
-    "  geometryType — 'Point' | 'LineString' | 'Polygon'",
-    "  folderPath  — array of KML folder names from the file (e.g. ['OPs', 'Phase 2']) — use this to understand the category/type of item",
+    "KMZ/KML ITEM STRUCTURE — importedItems[] uses two tiers:",
+    "  Tier 1 (_detail='full' or no _detail field): explicitly linked context items — has full geometry + properties. Use these directly for RF actions and coordinate extraction.",
+    "  Tier 2 (no geometry/properties): index-only entries for all other map items. Has: contentId, name, geometryType, folderPath.",
+    "  folderPath  — array of KML folder names (e.g. ['OPs', 'Phase 2']) — tells you item category/type",
     "  sourceLabel — import source ('KMZ', 'KML', 'GeoJSON', 'Drawn', etc.)",
-    "  properties  — key/value pairs from KML ExtendedData or GeoJSON properties (may include call sign, type, description, unit, mgrs, etc.)",
-    "  geometry    — GeoJSON-style geometry with actual coordinates",
-    "- When the user asks to 'list all OPs' or 'find CPs' or 'show routes': scan ALL importedItems[] entries, filter by name prefix/folderPath/properties, and return the matches with their coordinates.",
-    "- When asked to find an item by name, do case-insensitive substring matching across name AND folderPath segments AND properties values. 'OP Crampton' matches name='OP Crampton' or name='CRAMPTON' or folderPath=['OPs'].",
-    "- Always include coordinates (formatted per user's coordinate system preference) when listing or describing map items.",
+    "  properties  — KML ExtendedData or GeoJSON attributes (call sign, type, description, unit, mgrs, etc.) — only present on full-detail items",
+    "  geometry    — only present on full-detail (linked) items",
+    "- When the user asks to 'list all OPs' or 'find CPs' or 'show routes': scan ALL importedItems[] entries, filter by name prefix/folderPath segments, and return matches. For index entries, report name + folderPath + geometryType.",
+    "- When asked to find an item by name: case-insensitive substring match across name AND folderPath segments. 'OP Crampton' matches name='OP Crampton' or folderPath containing 'OPs'.",
+    "- If the user asks to do something WITH a map item (place asset near it, check LOS from it, get its coordinates) and it is only an index entry (no geometry): tell the user to link it as context using the @ mention or + button so full geometry becomes available.",
+    "- Always include coordinates when listing full-detail items. For index-only items, report name, type, and folder.",
     "",
     "═══════════════════════════════════════",
     "SPATIAL REASONING:",
