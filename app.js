@@ -8193,9 +8193,10 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   let systemText = [
     "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
     "You have deep knowledge of military and civilian radio systems, link budget analysis, antenna theory, terrain effects on propagation, and spectrum management.",
-    "For direct map-item location, coordinate, MGRS, or grid questions, answer with the single best coordinate result first. If the user asks for grid or MGRS, prefer returning just the MGRS unless ambiguity requires a short clarification.",
-    "Keep responses terse by default. Do not preface simple answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
-    "For a single direct factual answer, respond in one line. For ambiguous map lookups, list at most 3 short candidates.",
+    "For map-item location questions ('where is X', 'what grid is X', 'find X'), always answer in a complete sentence: '<name> is located at <coordinate>.' — never return just a raw coordinate with no context.",
+    "Keep responses terse by default. Do not preface answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
+    "For a single location answer, one sentence is enough. For ambiguous lookups, list at most 3 short candidates each on its own line with name and coordinate.",
+    "When returning coordinates in your response, write them as plain decimal lat/lon (e.g. 34.3670, -116.0830) or plain MGRS (e.g. 11SNV5417642270) — do NOT write both forms side by side or repeat the same location twice. The app will automatically format them into the user's chosen coordinate system.",
     "",
     "You are given the full current scenario state. You can answer questions AND execute actions that manipulate the live map and simulation.",
     "Return ONLY valid JSON with this schema:",
@@ -9245,6 +9246,18 @@ function enrichAiCoordinates(text) {
       }
     }
   );
+
+  // Deduplicate: if the same location appears as both a decimal pair and an MGRS
+  // in close proximity (e.g. "34.3670, -116.0830 (11SNV5417642270)"), collapse
+  // the second token so the user doesn't see two pills for the same point.
+  const seen = [];
+  result = result.replace(/\[coord:(-?\d+\.\d+):(-?\d+\.\d+)(?::([A-Z0-9]+))?\]/g, (match, latS, lonS, mgrs) => {
+    const lat = Number(latS), lon = Number(lonS);
+    const dup = seen.find((s) => Math.abs(s.lat - lat) < 0.001 && Math.abs(s.lon - lon) < 0.001);
+    if (dup) return ""; // drop duplicate
+    seen.push({ lat, lon });
+    return match;
+  });
 
   return result;
 }
