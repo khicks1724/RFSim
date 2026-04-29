@@ -5971,7 +5971,7 @@ function onAiChatKeyDown(event) {
       const pick = active ?? items[0];
       if (pick) {
         event.preventDefault();
-        pick.click();
+        pick.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
         return;
       }
     }
@@ -6227,28 +6227,32 @@ function onAiChatInput() {
     return;
   }
 
+  const selectMentionEntry = (entry) => {
+    const before = val.slice(0, pos - match[0].length);
+    const after = val.slice(pos);
+    const inserted = `@"${entry.name}" `;
+    dom.aiChatInput.value = before + inserted + after;
+    dom.aiChatInput.selectionStart = dom.aiChatInput.selectionEnd = (before + inserted).length;
+    dom.aiMentionDropdown.classList.add("hidden");
+    dom.aiChatInput.focus();
+    if (!state.ai.contextItemIds.includes(entry.id)) {
+      toggleAiContextItem(entry.id, entry.name);
+    }
+  };
+
   dom.aiMentionDropdown.innerHTML = "";
   filtered.slice(0, 12).forEach((entry, i) => {
     const item = document.createElement("div");
     item.className = "ai-mention-item" + (i === 0 ? " active" : "");
+    item._mentionEntry = entry;
     item.innerHTML = `<span>${escapeHtml(entry.name)}</span><span class="ai-mention-item-kind">${escapeHtml(entry.kind ?? "")}</span>`;
     item.addEventListener("mouseover", () => {
       dom.aiMentionDropdown.querySelectorAll(".ai-mention-item").forEach((el) => el.classList.remove("active"));
       item.classList.add("active");
     });
     item.addEventListener("mousedown", (e) => {
-      e.preventDefault(); // Don't blur textarea
-      // Replace the @query with @"name" in the textarea
-      const before = val.slice(0, pos - match[0].length);
-      const after = val.slice(pos);
-      const inserted = `@"${entry.name}" `;
-      dom.aiChatInput.value = before + inserted + after;
-      dom.aiChatInput.selectionStart = dom.aiChatInput.selectionEnd = (before + inserted).length;
-      dom.aiMentionDropdown.classList.add("hidden");
-      // Auto-add to context chips
-      if (!state.ai.contextItemIds.includes(entry.id)) {
-        toggleAiContextItem(entry.id, entry.name);
-      }
+      e.preventDefault();
+      selectMentionEntry(entry);
     });
     dom.aiMentionDropdown.appendChild(item);
   });
