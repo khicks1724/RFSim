@@ -78,7 +78,7 @@ const BUILDING_MATERIAL_MODELS = {
 // Bump this integer whenever the serialized state shape changes in a way that
 // requires a migration. applySavedMapState() runs migrateStatePayload() first
 // so old saves are always upgraded before being applied.
-const STATE_SCHEMA_VERSION = 1;
+const STATE_SCHEMA_VERSION = 2;
 
 function nowIso() {
   return new Date().toISOString();
@@ -112,6 +112,15 @@ function migrateStatePayload(payload) {
       assets: stampArray(payload.assets),
       importedItems: stampArray(payload.importedItems),
       mapContentFolders: stampArray(payload.mapContentFolders),
+    };
+  }
+
+  // v1 -> v2: add PLAN-view state envelope.
+  if (from < 2) {
+    payload = {
+      ...payload,
+      schemaVersion: 2,
+      planState: payload.planState ?? null,
     };
   }
 
@@ -3948,6 +3957,7 @@ function serializeCurrentMapState() {
     hiddenContentIds: [...state.hiddenContentIds],
     activeTerrainId: state.activeTerrainId,
     activeProjectId: state.session.activeProjectId ?? null,
+    planState: serializePlanViewState(),
   };
 }
 
@@ -4136,6 +4146,8 @@ function applySavedMapState(rawSaved) {
   if (saved.activeTerrainId) {
     state.activeTerrainId = saved.activeTerrainId;
   }
+
+  applySavedPlanState(saved.planState);
 
   // Apply hidden visibility after all layers are added
   syncAllContentVisibility();
@@ -20238,7 +20250,7 @@ function renderToPickerCanvas() {
     if (otherLink && otherLink !== _currentEmitterEditId) el.classList.add("has-emitter-link");
 
     el.innerHTML = `
-      <span class="to-unit-icon">${ms2525Svg(unit)}</span>
+      <span class="to-unit-icon">${getPlanUnitSvg(unit)}</span>
       <span class="to-unit-label">${esc(unit.label)}</span>
       <span class="to-unit-size-badge">${esc(unit.size || "")}</span>
     `;
@@ -20392,19 +20404,306 @@ function refreshLinkedViews() {
    PLAN VIEW — Military Table of Organization Builder
 ═══════════════════════════════════════════════════════════════ */
 const _toState = {
-  units: [],       // { id, label, designator, affiliation, type, size, x, y }
-  links: [],       // { parentId, childId }
+  units: [],           // { id, label, designator, affiliation, type, size, x, y }
+  links: [],           // { parentId, childId }
   nextId: 1,
+  renderer: "aigen",
   zoom: 1,
   panX: 0,
   panY: 0,
-  dragging: null,  // { unitId, startX, startY, origX, origY }
+  dragging: null,      // { unitId, startX, startY, origPositions: Map<id,{x,y}> }
   panning: false,
   panStart: null,
-  selectedUnit: null,
-  linkMode: null,  // null | { type: "parent"|"child", fromId }
+  selectedUnits: new Set(),  // Set of unit ids (multi-select)
+  linkMode: null,      // null | { type: "parent"|"child", fromId }
   _initialized: false,
 };
+
+const PLAN_RENDERER_AIGEN = "aigen";
+const PLAN_RENDERER_MILSTD = "milstd";
+
+const PLAN_MILSTD_AFFILIATIONS = {
+  friendly: { identityCode: "3", fullFrameSuffix: "1" },
+  hostile: { identityCode: "6", fullFrameSuffix: "3" },
+  neutral: { identityCode: "4", fullFrameSuffix: "2" },
+  unknown: { identityCode: "1", fullFrameSuffix: "0" },
+};
+
+const PLAN_MILSTD_DIMENSIONS = {
+  air: "01",
+  space: "05",
+  landUnit: "10",
+  landEquipment: "15",
+  seaSurface: "30",
+  seaSubsurface: "35",
+};
+
+const PLAN_MILSTD_ECHELONS = {
+  team: { group: "1", code: "1" },
+  fireteam: { group: "1", code: "1" },
+  squad: { group: "1", code: "2" },
+  section: { group: "1", code: "3" },
+  platoon: { group: "1", code: "4" },
+  company: { group: "1", code: "5" },
+  battalion: { group: "1", code: "6" },
+  regiment: { group: "1", code: "7" },
+  brigade: { group: "1", code: "8" },
+  division: { group: "2", code: "1" },
+  corps: { group: "2", code: "2" },
+  army: { group: "2", code: "3" },
+  army_group: { group: "2", code: "4" },
+  theater: { group: "2", code: "5" },
+};
+
+const PLAN_MILSTD_TYPE_SPECS = {
+  infantry: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true },
+  light_infantry: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true, mod2: "10192" },
+  mechanized_infantry: { folder: "Land", dimension: "landUnit", icon: "10121102", fullFrame: true },
+  airborne_infantry: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true, mod2: "10012" },
+  ranger: { folder: "Land", dimension: "landUnit", icon: "10121100", fullFrame: true, mod1: "10761" },
+  special_forces: { folder: "Land", dimension: "landUnit", icon: "10121700" },
+  marine_infantry: { folder: "Land", dimension: "landUnit", icon: "10121101", fullFrame: true },
+  recon: { folder: "Land", dimension: "landUnit", icon: "10121300", fullFrame: true },
+  armor: { folder: "Land", dimension: "landUnit", icon: "10120500" },
+  armored_cavalry: { folder: "Land", dimension: "landUnit", icon: "10120501", fullFrame: true },
+  artillery: { folder: "Land", dimension: "landUnit", icon: "10130300" },
+  air_defense: { folder: "Land", dimension: "landUnit", icon: "10130100", fullFrame: true },
+  engineer: { folder: "Land", dimension: "landUnit", icon: "10140700" },
+  signal: { folder: "Land", dimension: "landUnit", icon: "10111000", fullFrame: true },
+  military_intelligence: { folder: "Land", dimension: "landUnit", icon: "10151000" },
+  military_police: { folder: "Land", dimension: "landUnit", icon: "10141200" },
+  medical: { folder: "Land", dimension: "landUnit", icon: "10161300", fullFrame: true },
+  logistics: { folder: "Land", dimension: "landUnit", icon: "10163400", fullFrame: true },
+  maintenance: { folder: "Land", dimension: "landUnit", icon: "10161100" },
+  chemical: { folder: "Land", dimension: "landUnit", icon: "10140100" },
+  finance: { folder: "Land", dimension: "landUnit", icon: "10160700" },
+  adjutant_general: { folder: "Land", dimension: "landUnit", icon: "10110000" },
+  chaplain: { folder: "Land", dimension: "landUnit", icon: "10110000" },
+  judge_advocate: { folder: "Land", dimension: "landUnit", icon: "10160800" },
+  civil_affairs: { folder: "Land", dimension: "landUnit", icon: "10110200" },
+  psyop: { folder: "Land", dimension: "landUnit", icon: "10110600" },
+  ew: { folder: "Land", dimension: "landUnit", icon: "10150500" },
+  cyber: { folder: "Cyberspace", dimension: "landEquipment", icon: "60110100" },
+  space: { folder: "Space", dimension: "space", icon: "05111500" },
+  headquarters: { folder: "Land", dimension: "landUnit", icon: "10110000", hq: true },
+  aviation_fixed: { folder: "Air", dimension: "air", icon: "01110100" },
+  fighter: { folder: "Air", dimension: "air", icon: "01110104" },
+  bomber: { folder: "Air", dimension: "air", icon: "01110103" },
+  attack_fixed: { folder: "Air", dimension: "air", icon: "01110102" },
+  transport_fixed: { folder: "Air", dimension: "air", icon: "01110107" },
+  isr_fixed: { folder: "Air", dimension: "air", icon: "01110111" },
+  tanker: { folder: "Air", dimension: "air", icon: "01110109" },
+  uav_fixed: { folder: "Air", dimension: "air", icon: "01110300" },
+  aviation_rotary: { folder: "Air", dimension: "air", icon: "01110200" },
+  attack_helo: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01011" },
+  utility_helo: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01071" },
+  recon_helo: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01181" },
+  medevac: { folder: "Air", dimension: "air", icon: "01110200", mod1: "01141" },
+  uav_rotary: { folder: "Air", dimension: "air", icon: "01110400" },
+  naval_surface: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120200" },
+  submarine: { folder: "SeaSubsurface", dimension: "seaSubsurface", icon: "35110100" },
+  naval_aviation: { folder: "Air", dimension: "air", icon: "01110100" },
+  amphibious: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120300" },
+  mine_warfare: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120400" },
+  coast_guard: { folder: "SeaSurface", dimension: "seaSurface", icon: "30120500" },
+};
+
+const PLAN_MILSTD_ASSET_CACHE = new Map();
+let _planMilstdAssetsPromise = null;
+
+function serializePlanViewState() {
+  return {
+    renderer: _toState.renderer,
+    nextId: Number.isFinite(_toState.nextId) ? _toState.nextId : 1,
+    units: _toState.units.map((unit) => ({
+      id: unit.id,
+      label: unit.label,
+      designator: unit.designator ?? "",
+      affiliation: unit.affiliation ?? "friendly",
+      type: unit.type ?? "infantry",
+      size: unit.size ?? "team",
+      x: Number.isFinite(unit.x) ? unit.x : 0,
+      y: Number.isFinite(unit.y) ? unit.y : 0,
+    })),
+    links: _toState.links.map((link) => ({ parentId: link.parentId, childId: link.childId })),
+  };
+}
+
+function applySavedPlanState(planState) {
+  if (!planState || typeof planState !== "object") return;
+  _toState.renderer = planState.renderer === PLAN_RENDERER_MILSTD ? PLAN_RENDERER_MILSTD : PLAN_RENDERER_AIGEN;
+  _toState.units = Array.isArray(planState.units)
+    ? planState.units.map((unit) => ({
+      id: unit.id,
+      label: unit.label ?? "Unit",
+      designator: unit.designator ?? "",
+      affiliation: unit.affiliation ?? "friendly",
+      type: unit.type ?? "infantry",
+      size: unit.size ?? "team",
+      x: Number.isFinite(unit.x) ? unit.x : 0,
+      y: Number.isFinite(unit.y) ? unit.y : 0,
+    }))
+    : [];
+  _toState.links = Array.isArray(planState.links)
+    ? planState.links
+        .filter((link) => Number.isFinite(link?.parentId) && Number.isFinite(link?.childId))
+        .map((link) => ({ parentId: link.parentId, childId: link.childId }))
+    : [];
+  const maxUnitId = _toState.units.reduce((maxId, unit) => Math.max(maxId, Number(unit.id) || 0), 0);
+  _toState.nextId = Math.max(maxUnitId + 1, Number.isFinite(planState.nextId) ? planState.nextId : 1);
+}
+
+function markPlanStateDirty() {
+  saveMapState();
+}
+
+function isToPickerOpen() {
+  const modal = document.getElementById("toPickerModal");
+  return Boolean(modal && !modal.classList.contains("hidden"));
+}
+
+function syncPlanRendererToggle() {
+  const milstdBtn = document.getElementById("toRendererMilstdBtn");
+  const aigenBtn = document.getElementById("toRendererAigenBtn");
+  if (!milstdBtn || !aigenBtn) return;
+  const isMilstd = _toState.renderer === PLAN_RENDERER_MILSTD;
+  milstdBtn.classList.toggle("active", isMilstd);
+  aigenBtn.classList.toggle("active", !isMilstd);
+  milstdBtn.setAttribute("aria-pressed", String(isMilstd));
+  aigenBtn.setAttribute("aria-pressed", String(!isMilstd));
+}
+
+async function setPlanRendererMode(mode, { persist = true } = {}) {
+  const nextMode = mode === PLAN_RENDERER_MILSTD ? PLAN_RENDERER_MILSTD : PLAN_RENDERER_AIGEN;
+  if (nextMode === PLAN_RENDERER_MILSTD) {
+    await ensurePlanMilstdAssetsLoaded();
+  }
+  _toState.renderer = nextMode;
+  syncPlanRendererToggle();
+  if (_toState._initialized) {
+    renderToView();
+    if (isToPickerOpen()) renderToPickerCanvas();
+  }
+  if (persist) markPlanStateDirty();
+}
+
+function getPlanUnitSvg(unit) {
+  if (_toState.renderer === PLAN_RENDERER_MILSTD) return milstd2525Svg(unit);
+  return ms2525Svg(unit);
+}
+
+function getPlanMilstdSpec(unitType) {
+  return PLAN_MILSTD_TYPE_SPECS[unitType] ?? PLAN_MILSTD_TYPE_SPECS.infantry;
+}
+
+function getPlanMilstdAffiliation(affiliation) {
+  return PLAN_MILSTD_AFFILIATIONS[affiliation] ?? PLAN_MILSTD_AFFILIATIONS.unknown;
+}
+
+function getPlanMilstdDimensionCode(dimensionKey) {
+  return PLAN_MILSTD_DIMENSIONS[dimensionKey] ?? PLAN_MILSTD_DIMENSIONS.landUnit;
+}
+
+function buildPlanMilstdFrameFile(unit) {
+  const spec = getPlanMilstdSpec(unit.type);
+  const dim = getPlanMilstdDimensionCode(spec.dimension);
+  const aff = getPlanMilstdAffiliation(unit.affiliation);
+  return `Frames/0_${aff.identityCode}${dim}_0.svg`;
+}
+
+function buildPlanMilstdIconLayer(spec, unit) {
+  const aff = getPlanMilstdAffiliation(unit.affiliation);
+  const file = spec.fullFrame ? `${spec.icon}_${aff.fullFrameSuffix}.svg` : `${spec.icon}.svg`;
+  return `Appendices/${spec.folder}/${file}`;
+}
+
+function buildPlanMilstdModLayer(spec, key) {
+  const file = spec[key];
+  if (!file) return null;
+  return `Appendices/${spec.folder}/mod${key === "mod1" ? "1" : "2"}/${file}.svg`;
+}
+
+function buildPlanMilstdEchelonFile(unit) {
+  const echelon = PLAN_MILSTD_ECHELONS[unit.size];
+  if (!echelon) return null;
+  const aff = getPlanMilstdAffiliation(unit.affiliation);
+  return `Echelon/${aff.identityCode}${echelon.group}${echelon.code}.svg`;
+}
+
+function buildPlanMilstdHqFile(unit) {
+  const spec = getPlanMilstdSpec(unit.type);
+  if (!spec.hq) return null;
+  const aff = getPlanMilstdAffiliation(unit.affiliation);
+  const dim = getPlanMilstdDimensionCode(spec.dimension);
+  return `HQTFFD/${aff.identityCode}${dim}2.svg`;
+}
+
+function collectPlanMilstdAssetFiles() {
+  const files = new Set();
+  Object.values(PLAN_MILSTD_TYPE_SPECS).forEach((spec) => {
+    const dimensionCode = getPlanMilstdDimensionCode(spec.dimension);
+    Object.values(PLAN_MILSTD_AFFILIATIONS).forEach((aff) => {
+      files.add(`Frames/0_${aff.identityCode}${dimensionCode}_0.svg`);
+      if (spec.fullFrame) files.add(`Appendices/${spec.folder}/${spec.icon}_${aff.fullFrameSuffix}.svg`);
+      if (spec.hq) files.add(`HQTFFD/${aff.identityCode}${dimensionCode}2.svg`);
+    });
+    if (!spec.fullFrame) files.add(`Appendices/${spec.folder}/${spec.icon}.svg`);
+    const mod1 = buildPlanMilstdModLayer(spec, "mod1");
+    const mod2 = buildPlanMilstdModLayer(spec, "mod2");
+    if (mod1) files.add(mod1);
+    if (mod2) files.add(mod2);
+  });
+  Object.values(PLAN_MILSTD_ECHELONS).forEach((echelon) => {
+    Object.values(PLAN_MILSTD_AFFILIATIONS).forEach((aff) => {
+      files.add(`Echelon/${aff.identityCode}${echelon.group}${echelon.code}.svg`);
+    });
+  });
+  return [...files];
+}
+
+async function ensurePlanMilstdAssetsLoaded() {
+  if (_planMilstdAssetsPromise) return _planMilstdAssetsPromise;
+  const files = collectPlanMilstdAssetFiles();
+  _planMilstdAssetsPromise = Promise.all(files.map(async (file) => {
+    if (PLAN_MILSTD_ASSET_CACHE.has(file)) return;
+    const response = await fetch(`./images/milstd/${file}`);
+    if (!response.ok) throw new Error(`MILSTD asset missing: ${file}`);
+    PLAN_MILSTD_ASSET_CACHE.set(file, await response.text());
+  })).catch((error) => {
+    console.warn("[plan] MILSTD asset load failed:", error);
+    _planMilstdAssetsPromise = null;
+    throw error;
+  });
+  return _planMilstdAssetsPromise;
+}
+
+function getPlanMilstdLayerMarkup(file) {
+  const raw = PLAN_MILSTD_ASSET_CACHE.get(file);
+  if (!raw) return "";
+  const match = raw.match(/<svg[^>]*>([\s\S]*?)<\/svg>/i);
+  let markup = match ? match[1] : raw;
+  if (file.startsWith("Frames/")) {
+    markup = markup.replace(/<text\b[^>]*>[\s\S]*?<\/text>/gi, "");
+  }
+  return markup
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/gi, "")
+    .replace(/<desc\b[^>]*>[\s\S]*?<\/desc>/gi, "");
+}
+
+function milstd2525Svg(unit) {
+  const spec = getPlanMilstdSpec(unit.type);
+  const layers = [
+    buildPlanMilstdFrameFile(unit),
+    buildPlanMilstdIconLayer(spec, unit),
+    buildPlanMilstdModLayer(spec, "mod1"),
+    buildPlanMilstdModLayer(spec, "mod2"),
+    buildPlanMilstdEchelonFile(unit),
+    buildPlanMilstdHqFile(unit),
+  ].filter(Boolean);
+  const markup = layers.map((file) => getPlanMilstdLayerMarkup(file)).filter(Boolean).join("");
+  if (!markup) return ms2525Svg(unit);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 230 420 560" width="56" height="56" class="ms2525-icon milstd2525-icon">${markup}</svg>`;
+}
 
 const MIL_COLORS = {
   friendly: { frame: "#006bb6", bg: "#aad4f5", text: "#003566" },
@@ -20525,6 +20824,16 @@ function initPlanViewIfNeeded() {
     addToUnit({ label, designator: des, affiliation: aff, type, size, x: cx + jitter(), y: cy + jitter() });
     document.getElementById("toUnitDesignator").value = "";
   });
+  document.getElementById("toRendererMilstdBtn")?.addEventListener("click", () => {
+    setPlanRendererMode(PLAN_RENDERER_MILSTD).catch((error) => {
+      console.warn("[plan] failed to switch renderer:", error);
+    });
+  });
+  document.getElementById("toRendererAigenBtn")?.addEventListener("click", () => {
+    setPlanRendererMode(PLAN_RENDERER_AIGEN).catch((error) => {
+      console.warn("[plan] failed to switch renderer:", error);
+    });
+  });
   document.getElementById("toAutoLayoutBtn")?.addEventListener("click", toAutoLayout);
   document.getElementById("toFitViewBtn")?.addEventListener("click", toFitView);
   document.getElementById("toClearAllBtn")?.addEventListener("click", () => {
@@ -20532,6 +20841,7 @@ function initPlanViewIfNeeded() {
     _toState.units = [];
     _toState.links = [];
     renderToView();
+    markPlanStateDirty();
   });
   document.getElementById("toZoomInBtn")?.addEventListener("click",  () => setToZoom(_toState.zoom * 1.2));
   document.getElementById("toZoomOutBtn")?.addEventListener("click", () => setToZoom(_toState.zoom / 1.2));
@@ -20555,6 +20865,11 @@ function initPlanViewIfNeeded() {
       _toState.panning = true;
       _toState.panStart = { x: e.clientX - _toState.panX, y: e.clientY - _toState.panY };
       hideToContextMenu();
+      // Click on empty canvas clears selection (unless Ctrl held)
+      if (!e.ctrlKey && !e.metaKey) {
+        _toState.selectedUnits.clear();
+        document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
+      }
     }
   });
   document.addEventListener("mousemove", (e) => {
@@ -20568,58 +20883,111 @@ function initPlanViewIfNeeded() {
       const d = _toState.dragging;
       const dx = (e.clientX - d.startX) / _toState.zoom;
       const dy = (e.clientY - d.startY) / _toState.zoom;
-      const unit = _toState.units.find(u => u.id === d.unitId);
-      if (unit) {
-        unit.x = d.origX + dx;
-        unit.y = d.origY + dy;
+      // Move all selected units together
+      for (const [id, orig] of d.origPositions) {
+        const unit = _toState.units.find(u => u.id === id);
+        if (!unit) continue;
+        unit.x = orig.x + dx;
+        unit.y = orig.y + dy;
         const el = document.querySelector(`.to-unit[data-id="${unit.id}"]`);
         if (el) { el.style.left = unit.x + "px"; el.style.top = unit.y + "px"; }
-        renderToEdges();
       }
+      renderToEdges();
     }
   });
   document.addEventListener("mouseup", () => {
+    const hadDrag = Boolean(_toState.dragging);
     _toState.panning = false;
     _toState.dragging = null;
+    if (hadDrag) markPlanStateDirty();
   });
 
-  // ── Context menu ──
+  // ── Context menu actions ──
+  document.getElementById("toCtxRename")?.addEventListener("click", () => {
+    const id = [..._toState.selectedUnits][0];
+    if (!id) return;
+    hideToContextMenu();
+    startToRename(id);
+  });
+  document.getElementById("toCtxDuplicate")?.addEventListener("click", () => {
+    if (!_toState.selectedUnits.size) return;
+    const OFFSET = 80;
+    const newIds = [];
+    for (const id of _toState.selectedUnits) {
+      const src = _toState.units.find(u => u.id === id);
+      if (!src) continue;
+      const copy = { ...src, id: _toState.nextId++, x: src.x + OFFSET, y: src.y + OFFSET };
+      _toState.units.push(copy);
+      newIds.push(copy.id);
+    }
+    _toState.selectedUnits = new Set(newIds);
+    hideToContextMenu();
+    renderToView();
+    markPlanStateDirty();
+  });
   document.getElementById("toCtxLinkParent")?.addEventListener("click", () => {
-    if (!_toState.selectedUnit) return;
-    _toState.linkMode = { type: "parent", fromId: _toState.selectedUnit };
+    const id = [..._toState.selectedUnits][0];
+    if (!id) return;
+    _toState.linkMode = { type: "parent", fromId: id };
     const banner = document.getElementById("toLinkBanner");
     const msg    = document.getElementById("toLinkBannerMsg");
-    if (msg) msg.textContent = "Click another unit to set it as PARENT of the selected unit";
+    if (msg) msg.textContent = "Click another unit to set it as PARENT";
     if (banner) banner.classList.remove("hidden");
     hideToContextMenu();
   });
   document.getElementById("toCtxLinkChild")?.addEventListener("click", () => {
-    if (!_toState.selectedUnit) return;
-    _toState.linkMode = { type: "child", fromId: _toState.selectedUnit };
+    const id = [..._toState.selectedUnits][0];
+    if (!id) return;
+    _toState.linkMode = { type: "child", fromId: id };
     const banner = document.getElementById("toLinkBanner");
     const msg    = document.getElementById("toLinkBannerMsg");
-    if (msg) msg.textContent = "Click another unit to set it as CHILD of the selected unit";
+    if (msg) msg.textContent = "Click another unit to set it as CHILD";
     if (banner) banner.classList.remove("hidden");
     hideToContextMenu();
   });
   document.getElementById("toCtxDelete")?.addEventListener("click", () => {
-    if (!_toState.selectedUnit) return;
-    _toState.units = _toState.units.filter(u => u.id !== _toState.selectedUnit);
-    _toState.links = _toState.links.filter(l => l.parentId !== _toState.selectedUnit && l.childId !== _toState.selectedUnit);
-    _toState.selectedUnit = null;
+    if (!_toState.selectedUnits.size) return;
+    const ids = _toState.selectedUnits;
+    _toState.units = _toState.units.filter(u => !ids.has(u.id));
+    _toState.links = _toState.links.filter(l => !ids.has(l.parentId) && !ids.has(l.childId));
+    _toState.selectedUnits.clear();
     hideToContextMenu();
     renderToView();
+    markPlanStateDirty();
   });
   document.getElementById("toLinkCancelBtn")?.addEventListener("click", cancelToLink);
 
   canvas.addEventListener("click", () => { hideToContextMenu(); });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { hideToContextMenu(); cancelToLink(); }
+    // Delete/Backspace removes selected units
+    if ((e.key === "Delete" || e.key === "Backspace") &&
+        _toState.selectedUnits.size &&
+        document.activeElement?.tagName !== "INPUT" &&
+        document.activeElement?.tagName !== "TEXTAREA") {
+      const ids = _toState.selectedUnits;
+      _toState.units = _toState.units.filter(u => !ids.has(u.id));
+      _toState.links = _toState.links.filter(l => !ids.has(l.parentId) && !ids.has(l.childId));
+      _toState.selectedUnits.clear();
+      renderToView();
+      markPlanStateDirty();
+    }
   });
 
   // ── AI form ──
   wireViewAiForm("planAiForm", "planAiInput", "planAiSendBtn", "planAiClearBtn", "planAiMessages", buildPlanAiContext);
 
+  syncPlanRendererToggle();
+  if (_toState.renderer === PLAN_RENDERER_MILSTD) {
+    ensurePlanMilstdAssetsLoaded()
+      .then(() => {
+        if (_toState.renderer === PLAN_RENDERER_MILSTD) {
+          renderToView();
+          if (isToPickerOpen()) renderToPickerCanvas();
+        }
+      })
+      .catch((error) => console.warn("[plan] MILSTD preload failed:", error));
+  }
   renderToView();
 }
 
@@ -20627,6 +20995,7 @@ function addToUnit(props) {
   const unit = { id: _toState.nextId++, ...props };
   _toState.units.push(unit);
   renderToView();
+  markPlanStateDirty();
   return unit;
 }
 
@@ -20643,27 +21012,49 @@ function renderToUnit(unit) {
   if (!world) return;
   const el = document.createElement("div");
   el.className = "to-unit";
-  if (_toState.selectedUnit === unit.id) el.classList.add("selected");
+  if (_toState.selectedUnits.has(unit.id)) el.classList.add("selected");
   el.dataset.id = unit.id;
   el.style.left = unit.x + "px";
   el.style.top  = unit.y + "px";
   el.innerHTML = `
-    <span class="to-unit-icon">${ms2525Svg(unit)}</span>
+    <span class="to-unit-icon">${getPlanUnitSvg(unit)}</span>
     <span class="to-unit-label">${esc(unit.label)}</span>
     <span class="to-unit-size-badge">${esc(UNIT_SIZE_SYMBOLS[unit.size] || "")} ${esc(unit.size || "")}</span>
   `;
 
-  // Drag to move
+  // Mousedown: select + start drag
   el.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     e.stopPropagation();
-    _toState.dragging = { unitId: unit.id, startX: e.clientX, startY: e.clientY, origX: unit.x, origY: unit.y };
-    _toState.selectedUnit = unit.id;
-    document.querySelectorAll(".to-unit").forEach(u => u.classList.remove("selected"));
-    el.classList.add("selected");
+
+    // Ctrl/Meta: toggle this unit in/out of selection
+    if (e.ctrlKey || e.metaKey) {
+      if (_toState.selectedUnits.has(unit.id)) {
+        _toState.selectedUnits.delete(unit.id);
+        el.classList.remove("selected");
+      } else {
+        _toState.selectedUnits.add(unit.id);
+        el.classList.add("selected");
+      }
+    } else {
+      // Plain click: if unit not already in selection, replace selection
+      if (!_toState.selectedUnits.has(unit.id)) {
+        _toState.selectedUnits.clear();
+        document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
+        _toState.selectedUnits.add(unit.id);
+        el.classList.add("selected");
+      }
+      // Either way, start drag for all selected units
+      const origPositions = new Map();
+      for (const id of _toState.selectedUnits) {
+        const u = _toState.units.find(x => x.id === id);
+        if (u) origPositions.set(id, { x: u.x, y: u.y });
+      }
+      _toState.dragging = { startX: e.clientX, startY: e.clientY, origPositions };
+    }
   });
 
-  // Click to pick link target
+  // Click: link mode or plain selection
   el.addEventListener("click", (e) => {
     e.stopPropagation();
     if (_toState.linkMode) {
@@ -20676,22 +21067,81 @@ function renderToUnit(unit) {
       cancelToLink();
       renderToEdges();
       toAutoLayout();
+      markPlanStateDirty();
       return;
     }
-    _toState.selectedUnit = unit.id;
+    // Ctrl+click handled in mousedown; plain click with no drag just ensures selection
+    if (!e.ctrlKey && !e.metaKey) {
+      _toState.selectedUnits.clear();
+      document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
+      _toState.selectedUnits.add(unit.id);
+      el.classList.add("selected");
+    }
+  });
+
+  // Double-click: rename inline
+  el.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    startToRename(unit.id);
   });
 
   // Right-click context menu
   el.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    _toState.selectedUnit = unit.id;
-    document.querySelectorAll(".to-unit").forEach(u => u.classList.remove("selected"));
-    el.classList.add("selected");
+    // If right-clicking on an unselected unit, select only it
+    if (!_toState.selectedUnits.has(unit.id)) {
+      _toState.selectedUnits.clear();
+      document.querySelectorAll(".to-unit.selected").forEach(u => u.classList.remove("selected"));
+      _toState.selectedUnits.add(unit.id);
+      el.classList.add("selected");
+    }
+    // Update selection label in context menu
+    const labelEl = document.getElementById("toCtxSelectionLabel");
+    if (labelEl) {
+      const count = _toState.selectedUnits.size;
+      labelEl.textContent = count > 1 ? `${count} units selected` : unit.label;
+    }
     showToContextMenu(e.clientX, e.clientY);
   });
 
   world.appendChild(el);
+}
+
+function startToRename(id) {
+  const unit = _toState.units.find(u => u.id === id);
+  if (!unit) return;
+  const el = document.querySelector(`.to-unit[data-id="${id}"]`);
+  if (!el) return;
+  const labelEl = el.querySelector(".to-unit-label");
+  if (!labelEl) return;
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = unit.label;
+  input.className = "to-unit-rename-input";
+  input.style.cssText = "width:90px;font-size:11px;padding:1px 4px;border:1px solid var(--accent-blue);border-radius:3px;background:var(--surface-2);color:var(--text-primary);outline:none;";
+
+  labelEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const commit = () => {
+    const newLabel = input.value.trim() || unit.label;
+    unit.label = newLabel;
+    const span = document.createElement("span");
+    span.className = "to-unit-label";
+    span.textContent = newLabel;
+    input.replaceWith(span);
+    markPlanStateDirty();
+  };
+
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+    if (e.key === "Escape") { input.value = unit.label; input.blur(); }
+    e.stopPropagation();
+  });
 }
 
 function showToContextMenu(x, y) {
@@ -20809,6 +21259,7 @@ function toAutoLayout() {
     if (el) { el.style.left = u.x + "px"; el.style.top = u.y + "px"; }
   });
   renderToEdges();
+  markPlanStateDirty();
 }
 
 function toFitView() {

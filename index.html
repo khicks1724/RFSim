@@ -36,7 +36,7 @@
     href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
   >
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260424-01">
-  <link rel="stylesheet" href="./styles.css?v=20260429-32">
+  <link rel="stylesheet" href="./styles.css?v=20260429-34">
 </head>
 <body>
   <div id="authScreen" class="auth-screen hidden" aria-hidden="true">
@@ -700,6 +700,10 @@
         <!-- Top toolbar -->
         <div class="to-toolbar">
           <div class="to-toolbar-section">
+            <div class="to-renderer-toggle" role="group" aria-label="PLAN icon renderer">
+              <button id="toRendererMilstdBtn" class="to-renderer-btn" type="button" aria-pressed="false">MILSTD</button>
+              <button id="toRendererAigenBtn" class="to-renderer-btn active" type="button" aria-pressed="true">AIGEN</button>
+            </div>
             <span class="to-toolbar-label">Add Unit</span>
             <select id="toAffiliation" class="to-select" title="Affiliation">
               <option value="friendly">Friendly</option>
@@ -807,11 +811,14 @@
           </div>
           <!-- Context menu -->
           <div id="toContextMenu" class="to-context-menu hidden">
+            <div id="toCtxSelectionLabel" class="to-ctx-selection-label"></div>
+            <button class="to-ctx-item" id="toCtxRename" type="button">Rename</button>
+            <button class="to-ctx-item" id="toCtxDuplicate" type="button">Duplicate</button>
+            <hr class="to-ctx-divider">
             <button class="to-ctx-item" id="toCtxLinkParent" type="button">Link Parent</button>
             <button class="to-ctx-item" id="toCtxLinkChild" type="button">Link Child</button>
             <hr class="to-ctx-divider">
-            <button class="to-ctx-item" id="toCtxEdit" type="button">Edit Unit</button>
-            <button class="to-ctx-item to-ctx-danger" id="toCtxDelete" type="button">Delete Unit</button>
+            <button class="to-ctx-item to-ctx-danger" id="toCtxDelete" type="button">Delete</button>
           </div>
           <!-- Link-pending banner -->
           <div id="toLinkBanner" class="to-link-banner hidden">
@@ -2500,7 +2507,7 @@
   <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
   <script src="./app-config.js"></script>
-  <script type="module" src="./app.js?v=20260429-86"></script>
+  <script type="module" src="./app.js?v=20260429-88"></script>
   <script>
   (function () {
     const canvas = document.getElementById('authWaterfall');
