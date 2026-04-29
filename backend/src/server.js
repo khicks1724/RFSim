@@ -911,6 +911,33 @@ app.post("/api/analytics/event", authRequired, rateLimit("analytics"), async (re
   }
 });
 
+app.delete("/api/admin/user/:userId", authRequired, adminRequired, async (request, response) => {
+  const { userId } = request.params;
+  if (!userId || typeof userId !== "string" || userId.length > 64) {
+    return response.status(400).json({ error: "Invalid user ID." });
+  }
+  // Prevent admins from deleting themselves
+  if (userId === String(request.user.sub)) {
+    return response.status(400).json({ error: "Cannot delete your own account." });
+  }
+  try {
+    const existing = await query("SELECT id, full_name, email FROM app_user WHERE id = $1", [userId]);
+    if (!existing.rows.length) {
+      return response.status(404).json({ error: "User not found." });
+    }
+    const user = existing.rows[0];
+    // Cascade: delete related data first to avoid FK violations
+    await query("DELETE FROM user_ai_config WHERE owner_user_id = $1", [userId]);
+    await query("DELETE FROM project WHERE owner_user_id = $1", [userId]);
+    await query("DELETE FROM app_user WHERE id = $1", [userId]);
+    console.log(`[admin] Deleted user id=${userId} email=${user.email} by admin id=${request.user.sub}`);
+    return response.json({ ok: true, deleted: { id: userId, email: user.email, full_name: user.full_name } });
+  } catch (error) {
+    console.error("[admin] delete user error:", error.message);
+    return response.status(500).json({ error: error.message });
+  }
+});
+
 app.get("/api/admin/analytics", authRequired, adminRequired, async (_request, response) => {
   try {
     const tableAvailability = await query(`

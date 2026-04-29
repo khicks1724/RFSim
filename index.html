@@ -36,7 +36,7 @@
     href="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Widgets/widgets.css"
   >
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260424-01">
-  <link rel="stylesheet" href="./styles.css?v=20260425-27">
+  <link rel="stylesheet" href="./styles.css?v=20260429-29">
 </head>
 <body>
   <div id="authScreen" class="auth-screen hidden" aria-hidden="true">
@@ -80,13 +80,14 @@
         </div>
       </div>
       <div class="status-strip">
-        <div class="status-chip panel-mode-chip" aria-label="Panel mode">
-          <span>Mode</span>
-          <button id="panelModeBtn" class="panel-mode-toggle" type="button" role="switch" aria-checked="false" aria-label="Toggle planning mode">
-            <span class="panel-mode-label panel-mode-label-edit">Edit</span>
-            <span class="panel-mode-thumb" aria-hidden="true"></span>
-            <span class="panel-mode-label panel-mode-label-plan">Plan</span>
-          </button>
+        <div class="view-mode-chip" aria-label="View mode">
+          <div id="viewModeToggle" class="view-mode-toggle" data-active="map" role="tablist" aria-label="Select view">
+            <span class="view-mode-thumb" id="viewModeThumb" aria-hidden="true"></span>
+            <button class="view-mode-tab" data-view="plan" role="tab" aria-selected="false" type="button">PLAN</button>
+            <button class="view-mode-tab active" data-view="map" role="tab" aria-selected="true" type="button">MAP</button>
+            <button class="view-mode-tab" data-view="topology" role="tab" aria-selected="false" type="button">TOPOLOGY</button>
+            <button class="view-mode-tab" data-view="analyze" role="tab" aria-selected="false" type="button">ANALYZE</button>
+          </div>
         </div>
         <div class="workspace-menu-shell">
           <button id="workspaceMenuBtn" class="status-chip status-chip-button workspace-menu-button" type="button" aria-label="Open workspace menu" aria-expanded="false">
@@ -376,6 +377,7 @@
       </div>
     </header>
 
+    <div class="app-content">
     <div class="workspace-shell">
       <aside id="controlPanel" class="control-panel">
         <div class="control-panel-top">
@@ -689,7 +691,321 @@
         </form>
       </aside>
     </div>
-  </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PLAN VIEW — Military Table of Organization Builder
+    ═══════════════════════════════════════════════════════ -->
+    <div id="planView" class="view-panel hidden">
+      <div class="to-builder">
+        <!-- Top toolbar -->
+        <div class="to-toolbar">
+          <div class="to-toolbar-section">
+            <span class="to-toolbar-label">Add Unit</span>
+            <select id="toAffiliation" class="to-select" title="Affiliation">
+              <option value="friendly">Friendly</option>
+              <option value="hostile">Hostile</option>
+              <option value="neutral">Neutral</option>
+              <option value="unknown">Unknown</option>
+            </select>
+            <select id="toUnitType" class="to-select" title="Unit Type">
+              <optgroup label="Ground — Infantry">
+                <option value="infantry">Infantry</option>
+                <option value="light_infantry">Light Infantry</option>
+                <option value="mechanized_infantry">Mechanized Infantry</option>
+                <option value="airborne_infantry">Airborne Infantry</option>
+                <option value="ranger">Ranger</option>
+                <option value="special_forces">Special Forces</option>
+                <option value="marine_infantry">Marine Infantry</option>
+                <option value="recon">Reconnaissance</option>
+              </optgroup>
+              <optgroup label="Ground — Armor &amp; Support">
+                <option value="armor">Armor</option>
+                <option value="armored_cavalry">Armored Cavalry</option>
+                <option value="artillery">Artillery / Field Artillery</option>
+                <option value="air_defense">Air Defense Artillery</option>
+                <option value="engineer">Engineer</option>
+                <option value="signal">Signal</option>
+                <option value="military_intelligence">Military Intelligence</option>
+                <option value="military_police">Military Police</option>
+                <option value="medical">Medical</option>
+                <option value="logistics">Logistics / Supply</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="chemical">Chemical, Biological, Radiological, Nuclear</option>
+                <option value="finance">Finance</option>
+                <option value="adjutant_general">Adjutant General</option>
+                <option value="chaplain">Chaplain</option>
+                <option value="judge_advocate">Judge Advocate</option>
+                <option value="civil_affairs">Civil Affairs</option>
+                <option value="psyop">Psychological Operations</option>
+                <option value="ew">Electronic Warfare</option>
+                <option value="cyber">Cyber</option>
+                <option value="space">Space</option>
+                <option value="headquarters">Headquarters</option>
+              </optgroup>
+              <optgroup label="Aviation — Fixed Wing">
+                <option value="aviation_fixed">Fixed Wing Aviation</option>
+                <option value="fighter">Fighter</option>
+                <option value="bomber">Bomber</option>
+                <option value="attack_fixed">Attack (Fixed Wing)</option>
+                <option value="transport_fixed">Transport (Fixed Wing)</option>
+                <option value="isr_fixed">ISR (Fixed Wing)</option>
+                <option value="tanker">Tanker</option>
+                <option value="uav_fixed">UAV / UAS (Fixed Wing)</option>
+              </optgroup>
+              <optgroup label="Aviation — Rotary Wing">
+                <option value="aviation_rotary">Rotary Wing Aviation</option>
+                <option value="attack_helo">Attack Helicopter</option>
+                <option value="utility_helo">Utility Helicopter</option>
+                <option value="recon_helo">Recon Helicopter</option>
+                <option value="medevac">MEDEVAC</option>
+                <option value="uav_rotary">UAV / UAS (Rotary)</option>
+              </optgroup>
+              <optgroup label="Naval">
+                <option value="naval_surface">Naval Surface</option>
+                <option value="submarine">Submarine</option>
+                <option value="naval_aviation">Naval Aviation</option>
+                <option value="amphibious">Amphibious</option>
+                <option value="mine_warfare">Mine Warfare</option>
+                <option value="coast_guard">Coast Guard</option>
+              </optgroup>
+            </select>
+            <select id="toUnitSize" class="to-select" title="Unit Size">
+              <option value="team">Team (2-4)</option>
+              <option value="fireteam">Fire Team (4)</option>
+              <option value="squad">Squad (8-13)</option>
+              <option value="section">Section (16-40)</option>
+              <option value="platoon">Platoon (16-44)</option>
+              <option value="company">Company / Battery / Troop (80-250)</option>
+              <option value="battalion">Battalion / Squadron (300-1,000)</option>
+              <option value="regiment">Regiment / Group (1,000-3,000)</option>
+              <option value="brigade">Brigade / Brigade Combat Team (3,000-5,000)</option>
+              <option value="division">Division (10,000-20,000)</option>
+              <option value="corps">Corps (20,000-60,000)</option>
+              <option value="army">Army (50,000+)</option>
+              <option value="army_group">Army Group</option>
+              <option value="theater">Theater / Region</option>
+            </select>
+            <input id="toUnitDesignator" type="text" class="to-input" placeholder="Designator (e.g. 1/7 Mar)" maxlength="32">
+            <button id="toAddUnitBtn" class="primary-button small" type="button">+ Add Unit</button>
+          </div>
+          <div class="to-toolbar-section to-toolbar-section-right">
+            <button id="toAutoLayoutBtn" class="ghost-button small" type="button" title="Auto-arrange linked units">Auto Layout</button>
+            <button id="toFitViewBtn" class="ghost-button small" type="button" title="Fit all units in view">Fit View</button>
+            <button id="toClearAllBtn" class="ghost-button small danger-button" type="button" title="Clear all units">Clear All</button>
+            <div class="to-zoom-controls">
+              <button id="toZoomInBtn" class="ghost-button small icon-button" type="button" title="Zoom in">+</button>
+              <button id="toZoomOutBtn" class="ghost-button small icon-button" type="button" title="Zoom out">−</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas + AI sidebar -->
+        <div class="to-main">
+        <div id="toCanvas" class="to-canvas" tabindex="0">
+          <div id="toWorld" class="to-world">
+            <!-- Units rendered here by JS -->
+          </div>
+          <!-- Context menu -->
+          <div id="toContextMenu" class="to-context-menu hidden">
+            <button class="to-ctx-item" id="toCtxLinkParent" type="button">Link Parent</button>
+            <button class="to-ctx-item" id="toCtxLinkChild" type="button">Link Child</button>
+            <hr class="to-ctx-divider">
+            <button class="to-ctx-item" id="toCtxEdit" type="button">Edit Unit</button>
+            <button class="to-ctx-item to-ctx-danger" id="toCtxDelete" type="button">Delete Unit</button>
+          </div>
+          <!-- Link-pending banner -->
+          <div id="toLinkBanner" class="to-link-banner hidden">
+            <span id="toLinkBannerMsg">Click a unit to link as parent</span>
+            <button id="toLinkCancelBtn" class="ghost-button small" type="button">Cancel</button>
+          </div>
+          <!-- SVG overlay for edges -->
+          <svg id="toEdgeSvg" class="to-edge-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+
+        </div><!-- /to-main row (canvas side) -->
+        <!-- AI Panel (reused within plan view) -->
+        <div id="planAiPanel" class="plan-ai-panel">
+          <div class="plan-ai-header">
+            <strong>AI Agent</strong>
+            <span class="eyebrow">TO &amp; Organization Assistant</span>
+          </div>
+          <div id="planAiMessages" class="ai-chat-messages plan-ai-messages">
+            <article class="ai-chat-message ai-chat-message-system">
+              <strong>Assistant</strong>
+              <p>Describe your scenario and I'll help you build out the table of organization — units, hierarchy, assignments, and more.</p>
+            </article>
+          </div>
+          <form id="planAiForm" class="ai-chat-form plan-ai-form">
+            <div class="ai-input-wrap">
+              <textarea id="planAiInput" rows="3" placeholder="Describe units, hierarchy, or ask for TO suggestions…" disabled></textarea>
+            </div>
+            <div class="button-row ai-chat-actions">
+              <button id="planAiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
+              <button id="planAiClearBtn" class="ghost-button small" type="button">Clear</button>
+            </div>
+          </form>
+        </div>
+        </div><!-- /to-main -->
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         TOPOLOGY VIEW — Network Link Quality
+    ═══════════════════════════════════════════════════════ -->
+    <div id="topologyView" class="view-panel hidden">
+      <div class="topo-shell">
+        <div class="topo-toolbar">
+          <div class="topo-toolbar-section">
+            <span class="to-toolbar-label">Filter</span>
+            <select id="topoFilterFreq" class="to-select">
+              <option value="all">All Frequencies</option>
+            </select>
+            <select id="topoFilterNet" class="to-select">
+              <option value="all">All Net IDs</option>
+            </select>
+          </div>
+          <div class="to-toolbar-section to-toolbar-section-right">
+            <button id="topoRefreshBtn" class="ghost-button small" type="button">Refresh</button>
+            <button id="topoFitBtn" class="ghost-button small" type="button">Fit View</button>
+          </div>
+        </div>
+        <div class="topo-main">
+          <div id="topoCanvas" class="topo-canvas" tabindex="0">
+            <svg id="topoSvg" class="topo-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+            <div id="topoNodes" class="topo-nodes"></div>
+            <div id="topoEmptyMsg" class="topo-empty-msg">
+              <span>No emitters placed on the map yet.</span>
+              <span class="fine-print">Place radio emitters in the MAP view to see topology links here.</span>
+            </div>
+            <!-- Link detail popup -->
+            <div id="topoLinkPopup" class="topo-link-popup hidden">
+              <div class="topo-link-popup-header">
+                <strong id="topoLinkPopupTitle">Link Detail</strong>
+                <button id="topoLinkPopupClose" class="icon-button" type="button">&#10005;</button>
+              </div>
+              <div id="topoLinkPopupBody" class="topo-link-popup-body"></div>
+            </div>
+          </div>
+          <!-- Topology AI panel -->
+          <div id="topoAiPanel" class="plan-ai-panel topo-ai-panel">
+            <div class="plan-ai-header">
+              <strong>AI Agent</strong>
+              <span class="eyebrow">Link Quality Analyst</span>
+            </div>
+            <div id="topoAiMessages" class="ai-chat-messages plan-ai-messages">
+              <article class="ai-chat-message ai-chat-message-system">
+                <strong>Assistant</strong>
+                <p>Ask me about link quality, coverage gaps, terrain interference, or how to improve specific radio paths.</p>
+              </article>
+            </div>
+            <form id="topoAiForm" class="ai-chat-form plan-ai-form">
+              <div class="ai-input-wrap">
+                <textarea id="topoAiInput" rows="3" placeholder="Ask about link quality, coverage, or interference…" disabled></textarea>
+              </div>
+              <div class="button-row ai-chat-actions">
+                <button id="topoAiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
+                <button id="topoAiClearBtn" class="ghost-button small" type="button">Clear</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         ANALYZE VIEW — RF Analytics Dashboard
+    ═══════════════════════════════════════════════════════ -->
+    <div id="analyzeView" class="view-panel hidden">
+      <div class="analyze-shell">
+        <div class="analyze-toolbar">
+          <div class="to-toolbar-section">
+            <span class="to-toolbar-label">Analysis</span>
+            <button id="analyzeRefreshBtn" class="ghost-button small" type="button">Refresh Analysis</button>
+          </div>
+        </div>
+        <div class="analyze-main">
+          <div class="analyze-panels">
+            <!-- Insight cards grid -->
+            <div class="analyze-grid" id="analyzeGrid">
+              <div class="analyze-card" id="analyzeCardCoverage">
+                <div class="analyze-card-header">
+                  <strong>Emitter Coverage Summary</strong>
+                  <span class="eyebrow" id="analyzeCoverageCount">0 emitters</span>
+                </div>
+                <div id="analyzeCoverageBody" class="analyze-card-body">
+                  <div class="analyze-placeholder">No emitters placed yet.</div>
+                </div>
+              </div>
+              <div class="analyze-card" id="analyzeCardFreq">
+                <div class="analyze-card-header">
+                  <strong>RF Configuration</strong>
+                  <span class="eyebrow">Frequency &amp; Bandwidth Distribution</span>
+                </div>
+                <div id="analyzeFreqBody" class="analyze-card-body">
+                  <canvas id="analyzeFreqChart" class="analyze-chart-canvas"></canvas>
+                  <div class="analyze-placeholder hidden" id="analyzeFreqPlaceholder">No emitter frequency data.</div>
+                </div>
+              </div>
+              <div class="analyze-card" id="analyzeCardTerrain">
+                <div class="analyze-card-header">
+                  <strong>Terrain Placement Quality</strong>
+                  <span class="eyebrow">Elevation &amp; Terrain Context</span>
+                </div>
+                <div id="analyzeTerrainBody" class="analyze-card-body">
+                  <div id="analyzeTerrainList" class="analyze-terrain-list"></div>
+                  <div class="analyze-placeholder" id="analyzeTerrainPlaceholder">No emitters to evaluate.</div>
+                </div>
+              </div>
+              <div class="analyze-card analyze-card-wide" id="analyzeCardConflicts">
+                <div class="analyze-card-header">
+                  <strong>Spectrum Conflicts &amp; Interference Risk</strong>
+                  <span class="eyebrow">Overlapping frequencies within mutual range</span>
+                </div>
+                <div id="analyzeConflictsBody" class="analyze-card-body">
+                  <div id="analyzeConflictsList" class="analyze-conflicts-list"></div>
+                  <div class="analyze-placeholder" id="analyzeConflictsPlaceholder">No conflicts detected.</div>
+                </div>
+              </div>
+              <div class="analyze-card analyze-card-wide" id="analyzeCardWaveform">
+                <div class="analyze-card-header">
+                  <strong>Waveform &amp; Antenna Summary</strong>
+                  <span class="eyebrow">Configuration breakdown by emitter</span>
+                </div>
+                <div id="analyzeWaveformBody" class="analyze-card-body">
+                  <div id="analyzeWaveformTable" class="analyze-table-wrap"></div>
+                  <div class="analyze-placeholder" id="analyzeWaveformPlaceholder">No emitter configuration data.</div>
+                </div>
+              </div>
+            </div>
+            <!-- Analyze AI panel -->
+            <div id="analyzeAiPanel" class="plan-ai-panel analyze-ai-panel">
+              <div class="plan-ai-header">
+                <strong>AI Agent</strong>
+                <span class="eyebrow">RF Analysis Assistant</span>
+              </div>
+              <div id="analyzeAiMessages" class="ai-chat-messages plan-ai-messages">
+                <article class="ai-chat-message ai-chat-message-system">
+                  <strong>Assistant</strong>
+                  <p>Ask me to interpret emitter coverage, identify conflicts, suggest frequency deconfliction, or explain terrain impacts on RF propagation.</p>
+                </article>
+              </div>
+              <form id="analyzeAiForm" class="ai-chat-form plan-ai-form">
+                <div class="ai-input-wrap">
+                  <textarea id="analyzeAiInput" rows="3" placeholder="Ask about RF configuration, conflicts, terrain impact…" disabled></textarea>
+                </div>
+                <div class="button-row ai-chat-actions">
+                  <button id="analyzeAiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
+                  <button id="analyzeAiClearBtn" class="ghost-button small" type="button">Clear</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- /app-content -->
+  </div><!-- /app-shell -->
 
   <div id="mapContentsMenu" class="map-contents-menu hidden" aria-label="Map contents actions">
     <button type="button" class="ghost-button small hidden" data-map-content-action="edit-bulk" id="mcMenuEditBulk">Edit Selected</button>
@@ -1964,6 +2280,7 @@
                 <th data-col="favorite_provider">Top Provider</th>
                 <th data-col="top_intent">Top Intent</th>
                 <th data-col="last_seen">Last Seen</th>
+                <th></th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -2160,7 +2477,7 @@
   <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.124/Build/Cesium/Cesium.js"></script>
   <script src="./app-config.js"></script>
-  <script type="module" src="./app.js?v=20260428-61"></script>
+  <script type="module" src="./app.js?v=20260429-74"></script>
   <script>
   (function () {
     const canvas = document.getElementById('authWaterfall');

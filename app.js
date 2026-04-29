@@ -1007,6 +1007,12 @@ const dom = {
   panelDivider: document.querySelector("#panelDivider"),
   controlPanelSectionDivider: document.querySelector("#controlPanelSectionDivider"),
   panelModeBtn: document.querySelector("#panelModeBtn"),
+  viewModeToggle: document.querySelector("#viewModeToggle"),
+  viewModeThumb: document.querySelector("#viewModeThumb"),
+  workspaceShell: document.querySelector(".workspace-shell"),
+  planView: document.querySelector("#planView"),
+  topologyView: document.querySelector("#topologyView"),
+  analyzeView: document.querySelector("#analyzeView"),
   aiPanelDivider: document.querySelector("#aiPanelDivider"),
   imageryMenuBtn: document.querySelector("#imageryMenuBtn"),
   imageryMenu: document.querySelector("#imageryMenu"),
@@ -1427,6 +1433,7 @@ const state = {
     aiResizeActive: false,
     aiPanelWidth: 400,
     panelMode: "edit",
+    currentView: "map",
     lastPlacementEventKey: "",
     suppressImportedRelocateClick: false,
   },
@@ -3455,7 +3462,8 @@ function initMap() {
 
 function wireEvents() {
   dom.collapsePanelBtn.addEventListener("click", togglePanelCollapse);
-  dom.panelModeBtn.addEventListener("click", togglePanelMode);
+  if (dom.panelModeBtn) dom.panelModeBtn.addEventListener("click", togglePanelMode);
+  initViewModeToggle();
   dom.mcSelectBtn.addEventListener("click", toggleMcSelectMode);
   dom.undoBannerBtn.addEventListener("click", performUndo);
   dom.undoBannerDismiss.addEventListener("click", dismissUndoBanner);
@@ -4947,7 +4955,114 @@ function togglePanelMode() {
 function applyPanelMode() {
   const isPlan = state.ui.panelMode === "plan";
   dom.controlPanel.classList.toggle("panel-mode-edit", !isPlan);
-  dom.panelModeBtn.setAttribute("aria-checked", String(isPlan));
+  if (dom.panelModeBtn) dom.panelModeBtn.setAttribute("aria-checked", String(isPlan));
+}
+
+/* ─── Multi-view switching ───────────────────────────────── */
+const VIEW_ORDER = ["plan", "map", "topology", "analyze"];
+
+function getViewEl(view) {
+  if (view === "map") return dom.workspaceShell;
+  if (view === "plan") return dom.planView;
+  if (view === "topology") return dom.topologyView;
+  if (view === "analyze") return dom.analyzeView;
+  return null;
+}
+
+function switchView(view, skipAnimation) {
+  const prev = state.ui.currentView;
+  if (prev === view) return;
+
+  const prevEl = getViewEl(prev);
+  const nextEl = getViewEl(view);
+  if (!nextEl) return;
+
+  // Determine slide direction: higher index = slide right→left (to the right)
+  const prevIdx = VIEW_ORDER.indexOf(prev);
+  const nextIdx = VIEW_ORDER.indexOf(view);
+  const goingRight = nextIdx > prevIdx; // user moves forward → new view enters from right
+
+  state.ui.currentView = view;
+
+  // Update toggle UI immediately
+  if (dom.viewModeToggle) {
+    dom.viewModeToggle.querySelectorAll(".view-mode-tab").forEach(tab => {
+      tab.classList.toggle("active", tab.dataset.view === view);
+      tab.setAttribute("aria-selected", String(tab.dataset.view === view));
+    });
+    dom.viewModeToggle.setAttribute("data-active", view);
+  }
+
+  if (skipAnimation || !prevEl) {
+    // No animation — just show/hide
+    if (prevEl) { prevEl.classList.add("hidden"); prevEl.style.transform = ""; prevEl.style.opacity = ""; }
+    nextEl.classList.remove("hidden");
+    nextEl.style.transform = "";
+    nextEl.style.opacity = "";
+    afterSwitchView(view);
+    return;
+  }
+
+  // Slide out the current view
+  prevEl.style.transition = "transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.22s ease";
+  prevEl.style.transform = goingRight ? "translateX(-100%)" : "translateX(100%)";
+  prevEl.style.opacity = "0";
+  prevEl.style.pointerEvents = "none";
+
+  // Position the incoming view off-screen
+  nextEl.classList.remove("hidden");
+  nextEl.style.transition = "none";
+  nextEl.style.transform = goingRight ? "translateX(100%)" : "translateX(-100%)";
+  nextEl.style.opacity = "0";
+
+  // Force reflow, then animate in
+  nextEl.getBoundingClientRect();
+  nextEl.style.transition = "transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.22s ease";
+  nextEl.style.transform = "translateX(0)";
+  nextEl.style.opacity = "1";
+
+  const cleanup = () => {
+    prevEl.classList.add("hidden");
+    prevEl.style.transform = "";
+    prevEl.style.opacity = "";
+    prevEl.style.transition = "";
+    prevEl.style.pointerEvents = "";
+    nextEl.style.transform = "";
+    nextEl.style.opacity = "";
+    nextEl.style.transition = "";
+    afterSwitchView(view);
+  };
+
+  nextEl.addEventListener("transitionend", cleanup, { once: true });
+}
+
+function afterSwitchView(view) {
+  if (view === "topology") renderTopologyView();
+  if (view === "analyze")  renderAnalyzeView();
+  if (view === "plan")     initPlanViewIfNeeded();
+}
+
+function initViewModeToggle() {
+  if (!dom.viewModeToggle) return;
+  dom.viewModeToggle.addEventListener("click", (e) => {
+    const tab = e.target.closest(".view-mode-tab");
+    if (!tab) return;
+    switchView(tab.dataset.view);
+  });
+  // Start on MAP view — no animation on first load
+  state.ui.currentView = "map";
+  if (dom.workspaceShell) dom.workspaceShell.classList.remove("hidden");
+  if (dom.planView)     dom.planView.classList.add("hidden");
+  if (dom.topologyView) dom.topologyView.classList.add("hidden");
+  if (dom.analyzeView)  dom.analyzeView.classList.add("hidden");
+  if (dom.viewModeToggle) {
+    dom.viewModeToggle.querySelectorAll(".view-mode-tab").forEach(tab => {
+      const isMap = tab.dataset.view === "map";
+      tab.classList.toggle("active", isMap);
+      tab.setAttribute("aria-selected", String(isMap));
+    });
+    dom.viewModeToggle.setAttribute("data-active", "map");
+  }
 }
 
 function endPanelResize() {
@@ -5546,8 +5661,26 @@ function clearAiChat() {
   renderAiEmptyState();
 }
 
+function sanitizeAiHtmlToMarkdown(text) {
+  if (!text) return text;
+  // Convert common HTML tags the AI sometimes emits into their markdown equivalents,
+  // then strip any remaining raw tags so they don't render as literal escaped text.
+  return text
+    .replace(/<strong>([\s\S]*?)<\/strong>/gi, "**$1**")
+    .replace(/<b>([\s\S]*?)<\/b>/gi, "**$1**")
+    .replace(/<em>([\s\S]*?)<\/em>/gi, "*$1*")
+    .replace(/<i>([\s\S]*?)<\/i>/gi, "*$1*")
+    .replace(/<code>([\s\S]*?)<\/code>/gi, "`$1`")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/?(p|div|span|h[1-6]|li|ul|ol|tr|td|th|thead|tbody|table)[^>]*>/gi, "")
+    .replace(/<[^>]+>/g, ""); // strip any remaining tags
+}
+
 function renderMarkdown(text) {
   if (!text) return "";
+
+  // Normalize any raw HTML tags the AI may have emitted into markdown equivalents
+  text = sanitizeAiHtmlToMarkdown(text);
 
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -9344,7 +9477,7 @@ function enrichAiCoordinates(text) {
 
 function enrichAiResponseWithLinks(text, placedAssets = []) {
   if (!text) return text;
-  let result = text;
+  let result = sanitizeAiHtmlToMarkdown(text);
 
   // Enrich coordinates first so they don't get mangled by name-link replacements
   result = enrichAiCoordinates(result);
@@ -19640,9 +19773,22 @@ function renderAnalyticsOverview() {
   fillTable("analyticsOverviewUsersTable", users, ["username", "last_seen", "login_count", "ai_request_count", "total_tokens", "top_intent"]);
 }
 
+async function adminDeleteUser(userId, displayName) {
+  if (!confirm(`Delete user "${displayName}"?\n\nThis removes their account, projects, and AI config. This cannot be undone.`)) return;
+  try {
+    await apiFetch(`/admin/user/${encodeURIComponent(userId)}`, { method: "DELETE" });
+    // Refresh analytics data to reflect deletion
+    await fetchAndRenderAnalytics();
+  } catch (err) {
+    alert(`Delete failed: ${err.message}`);
+  }
+}
+
 function renderAnalyticsUsers() {
+  const sourceUsers = _analytics.data?.users ?? [];
   const rows = sortRows(
-    filterAnalyticsRows((_analytics.data?.users ?? []).map((u) => ({
+    filterAnalyticsRows(sourceUsers.map((u) => ({
+      _userId: u.id,
       username: u.username ?? "",
       email: u.email ?? "",
       created_at: { text: formatAnalyticsDate(u.created_at), sortValue: u.created_at || "" },
@@ -19658,7 +19804,48 @@ function renderAnalyticsUsers() {
     _analytics.sortCol || "last_seen",
     _analytics.sortDir
   );
-  fillTable("analyticsUsersTable", rows, ["username", "email", "created_at", "login_count", "visit_count", "project_count", "ai_request_count", "total_tokens", "favorite_provider", "top_intent", "last_seen"]);
+
+  const cols = ["username", "email", "created_at", "login_count", "visit_count", "project_count", "ai_request_count", "total_tokens", "favorite_provider", "top_intent", "last_seen"];
+  const tbody = document.querySelector("#analyticsUsersTable tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = cols.length + 1;
+    td.textContent = "No users";
+    td.style.cssText = "color:var(--muted);text-align:center;padding:16px";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  const currentUserId = state.session.user?.id ?? null;
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    for (const col of cols) {
+      const td = document.createElement("td");
+      const cell = row[col];
+      if (cell && typeof cell === "object") {
+        td.textContent = cell.text ?? "";
+        if (cell.title) td.title = cell.title;
+      } else {
+        td.textContent = cell === null || cell === undefined ? "" : cell;
+      }
+      tr.appendChild(td);
+    }
+    // Delete button column — not shown for the current admin's own account
+    const actionTd = document.createElement("td");
+    if (row._userId && row._userId !== currentUserId) {
+      const btn = document.createElement("button");
+      btn.className = "ghost-button small analytics-delete-user-btn";
+      btn.textContent = "Delete";
+      btn.title = `Delete user ${row.username}`;
+      btn.addEventListener("click", () => adminDeleteUser(row._userId, row.username || row.email));
+      actionTd.appendChild(btn);
+    }
+    tr.appendChild(actionTd);
+    tbody.appendChild(tr);
+  }
 }
 
 function renderAnalyticsAiUsage() {
@@ -19882,6 +20069,1030 @@ function initAnalytics() {
     }
   });
   updateSortSelect("overview");
+}
+
+/* Module-level HTML escape helper used by new view renderers */
+function esc(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PLAN VIEW — Military Table of Organization Builder
+═══════════════════════════════════════════════════════════════ */
+const _toState = {
+  units: [],       // { id, label, designator, affiliation, type, size, x, y }
+  links: [],       // { parentId, childId }
+  nextId: 1,
+  zoom: 1,
+  panX: 0,
+  panY: 0,
+  dragging: null,  // { unitId, startX, startY, origX, origY }
+  panning: false,
+  panStart: null,
+  selectedUnit: null,
+  linkMode: null,  // null | { type: "parent"|"child", fromId }
+  _initialized: false,
+};
+
+const MIL_COLORS = {
+  friendly: { frame: "#006bb6", bg: "#aad4f5", text: "#003566" },
+  hostile:  { frame: "#c80000", bg: "#ff9999", text: "#5c0000" },
+  neutral:  { frame: "#00875a", bg: "#bff0c4", text: "#00391c" },
+  unknown:  { frame: "#ffe600", bg: "#fffaa0", text: "#4d4200" },
+};
+
+const UNIT_SIZE_SYMBOLS = {
+  team:      "·",
+  fireteam:  "··",
+  squad:     "···",
+  section:   "I",
+  platoon:   "II",
+  company:   "III",
+  battalion: "X",
+  regiment:  "XX",
+  brigade:   "XXX",
+  division:  "XXXX",
+  corps:     "XXXXX",
+  army:      "XXXXXX",
+  army_group:"XXXXXXX",
+  theater:   "XXXXXXXX",
+};
+
+const UNIT_TYPE_SYMBOLS = {
+  infantry:            "⊞",
+  light_infantry:      "⊟",
+  mechanized_infantry: "⊡",
+  airborne_infantry:   "⊠",
+  ranger:              "∩",
+  special_forces:      "✕",
+  marine_infantry:     "⊞",
+  recon:               "◎",
+  armor:               "⬭",
+  armored_cavalry:     "◑",
+  artillery:           "○",
+  air_defense:         "⌒",
+  engineer:            "▬",
+  signal:              "⌇",
+  military_intelligence:"?",
+  military_police:     "↑",
+  medical:             "✚",
+  logistics:           "⊔",
+  maintenance:         "⚙",
+  chemical:            "☣",
+  headquarters:        "⬡",
+  ew:                  "∿",
+  cyber:               "⌬",
+  finance:             "$",
+  aviation_fixed:      "▲",
+  fighter:             "▲",
+  bomber:              "▲",
+  attack_fixed:        "▲",
+  transport_fixed:     "▲",
+  isr_fixed:           "▲",
+  tanker:              "▲",
+  uav_fixed:           "⟁",
+  aviation_rotary:     "✦",
+  attack_helo:         "✦",
+  utility_helo:        "✦",
+  recon_helo:          "✦",
+  medevac:             "✚",
+  uav_rotary:          "⟁",
+  naval_surface:       "⬛",
+  submarine:           "⬛",
+  naval_aviation:      "▲",
+  amphibious:          "⬛",
+  mine_warfare:        "⬛",
+  coast_guard:         "⬛",
+  default:             "□",
+};
+
+function ms2525Svg(unit) {
+  const col = MIL_COLORS[unit.affiliation] || MIL_COLORS.unknown;
+  const sym = UNIT_TYPE_SYMBOLS[unit.type] || UNIT_TYPE_SYMBOLS.default;
+  const sizeSym = UNIT_SIZE_SYMBOLS[unit.size] || "";
+  const isAir = unit.type && (unit.type.includes("fixed") || unit.type.includes("rotary") ||
+    ["fighter","bomber","attack_fixed","transport_fixed","isr_fixed","tanker","uav_fixed",
+     "attack_helo","utility_helo","recon_helo","medevac","uav_rotary","naval_aviation"].includes(unit.type));
+  const frameShape = isAir
+    ? `<ellipse cx="28" cy="28" rx="24" ry="20" fill="${col.bg}" stroke="${col.frame}" stroke-width="2.5"/>`
+    : `<rect x="4" y="8" width="48" height="40" rx="2" fill="${col.bg}" stroke="${col.frame}" stroke-width="2.5"/>`;
+  const hostile = unit.affiliation === "hostile";
+  const hostile_marks = hostile
+    ? `<line x1="4" y1="8" x2="52" y2="48" stroke="${col.frame}" stroke-width="1.5"/>
+       <line x1="52" y1="8" x2="4" y2="48" stroke="${col.frame}" stroke-width="1.5"/>`
+    : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" width="56" height="56" class="ms2525-icon">
+    ${frameShape}
+    ${hostile_marks}
+    <text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
+      font-size="16" font-weight="bold" fill="${col.text}" font-family="monospace">${sym}</text>
+    <text x="28" y="6" text-anchor="middle" dominant-baseline="middle"
+      font-size="8" font-weight="bold" fill="${col.frame}" font-family="monospace">${sizeSym}</text>
+  </svg>`;
+}
+
+function initPlanViewIfNeeded() {
+  if (_toState._initialized) return;
+  _toState._initialized = true;
+
+  const canvas = document.getElementById("toCanvas");
+  const world  = document.getElementById("toWorld");
+  const edgeSvg = document.getElementById("toEdgeSvg");
+  if (!canvas || !world) return;
+
+  // ── Wire toolbar buttons ──
+  document.getElementById("toAddUnitBtn")?.addEventListener("click", () => {
+    const aff  = document.getElementById("toAffiliation")?.value || "friendly";
+    const type = document.getElementById("toUnitType")?.value || "infantry";
+    const size = document.getElementById("toUnitSize")?.value || "battalion";
+    const des  = (document.getElementById("toUnitDesignator")?.value || "").trim();
+    const label = des || `${size.charAt(0).toUpperCase() + size.slice(1)} ${type.replace(/_/g," ")}`;
+    const cx = canvas.clientWidth  / 2 - _toState.panX / _toState.zoom;
+    const cy = canvas.clientHeight / 2 - _toState.panY / _toState.zoom;
+    const jitter = () => (Math.random() - 0.5) * 120;
+    addToUnit({ label, designator: des, affiliation: aff, type, size, x: cx + jitter(), y: cy + jitter() });
+    document.getElementById("toUnitDesignator").value = "";
+  });
+  document.getElementById("toAutoLayoutBtn")?.addEventListener("click", toAutoLayout);
+  document.getElementById("toFitViewBtn")?.addEventListener("click", toFitView);
+  document.getElementById("toClearAllBtn")?.addEventListener("click", () => {
+    if (!confirm("Clear all units?")) return;
+    _toState.units = [];
+    _toState.links = [];
+    renderToView();
+  });
+  document.getElementById("toZoomInBtn")?.addEventListener("click",  () => setToZoom(_toState.zoom * 1.2));
+  document.getElementById("toZoomOutBtn")?.addEventListener("click", () => setToZoom(_toState.zoom / 1.2));
+
+  // ── Pan / zoom on canvas ──
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const newZoom = Math.max(0.2, Math.min(4, _toState.zoom * factor));
+    _toState.panX = mx - (mx - _toState.panX) * (newZoom / _toState.zoom);
+    _toState.panY = my - (my - _toState.panY) * (newZoom / _toState.zoom);
+    _toState.zoom = newZoom;
+    applyToTransform();
+  }, { passive: false });
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.target === canvas || e.target === world || e.target === edgeSvg) {
+      _toState.panning = true;
+      _toState.panStart = { x: e.clientX - _toState.panX, y: e.clientY - _toState.panY };
+      hideToContextMenu();
+    }
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (_toState.panning) {
+      _toState.panX = e.clientX - _toState.panStart.x;
+      _toState.panY = e.clientY - _toState.panStart.y;
+      applyToTransform();
+      return;
+    }
+    if (_toState.dragging) {
+      const d = _toState.dragging;
+      const dx = (e.clientX - d.startX) / _toState.zoom;
+      const dy = (e.clientY - d.startY) / _toState.zoom;
+      const unit = _toState.units.find(u => u.id === d.unitId);
+      if (unit) {
+        unit.x = d.origX + dx;
+        unit.y = d.origY + dy;
+        const el = document.querySelector(`.to-unit[data-id="${unit.id}"]`);
+        if (el) { el.style.left = unit.x + "px"; el.style.top = unit.y + "px"; }
+        renderToEdges();
+      }
+    }
+  });
+  document.addEventListener("mouseup", () => {
+    _toState.panning = false;
+    _toState.dragging = null;
+  });
+
+  // ── Context menu ──
+  document.getElementById("toCtxLinkParent")?.addEventListener("click", () => {
+    if (!_toState.selectedUnit) return;
+    _toState.linkMode = { type: "parent", fromId: _toState.selectedUnit };
+    const banner = document.getElementById("toLinkBanner");
+    const msg    = document.getElementById("toLinkBannerMsg");
+    if (msg) msg.textContent = "Click another unit to set it as PARENT of the selected unit";
+    if (banner) banner.classList.remove("hidden");
+    hideToContextMenu();
+  });
+  document.getElementById("toCtxLinkChild")?.addEventListener("click", () => {
+    if (!_toState.selectedUnit) return;
+    _toState.linkMode = { type: "child", fromId: _toState.selectedUnit };
+    const banner = document.getElementById("toLinkBanner");
+    const msg    = document.getElementById("toLinkBannerMsg");
+    if (msg) msg.textContent = "Click another unit to set it as CHILD of the selected unit";
+    if (banner) banner.classList.remove("hidden");
+    hideToContextMenu();
+  });
+  document.getElementById("toCtxDelete")?.addEventListener("click", () => {
+    if (!_toState.selectedUnit) return;
+    _toState.units = _toState.units.filter(u => u.id !== _toState.selectedUnit);
+    _toState.links = _toState.links.filter(l => l.parentId !== _toState.selectedUnit && l.childId !== _toState.selectedUnit);
+    _toState.selectedUnit = null;
+    hideToContextMenu();
+    renderToView();
+  });
+  document.getElementById("toLinkCancelBtn")?.addEventListener("click", cancelToLink);
+
+  canvas.addEventListener("click", () => { hideToContextMenu(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { hideToContextMenu(); cancelToLink(); }
+  });
+
+  // ── AI form ──
+  wireViewAiForm("planAiForm", "planAiInput", "planAiSendBtn", "planAiClearBtn", "planAiMessages", buildPlanAiContext);
+
+  renderToView();
+}
+
+function addToUnit(props) {
+  const unit = { id: _toState.nextId++, ...props };
+  _toState.units.push(unit);
+  renderToView();
+  return unit;
+}
+
+function renderToView() {
+  const world = document.getElementById("toWorld");
+  if (!world) return;
+  world.innerHTML = "";
+  for (const unit of _toState.units) renderToUnit(unit);
+  renderToEdges();
+}
+
+function renderToUnit(unit) {
+  const world = document.getElementById("toWorld");
+  if (!world) return;
+  const el = document.createElement("div");
+  el.className = "to-unit";
+  if (_toState.selectedUnit === unit.id) el.classList.add("selected");
+  el.dataset.id = unit.id;
+  el.style.left = unit.x + "px";
+  el.style.top  = unit.y + "px";
+  el.innerHTML = `
+    <span class="to-unit-icon">${ms2525Svg(unit)}</span>
+    <span class="to-unit-label">${esc(unit.label)}</span>
+    <span class="to-unit-size-badge">${esc(UNIT_SIZE_SYMBOLS[unit.size] || "")} ${esc(unit.size || "")}</span>
+  `;
+
+  // Drag to move
+  el.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    _toState.dragging = { unitId: unit.id, startX: e.clientX, startY: e.clientY, origX: unit.x, origY: unit.y };
+    _toState.selectedUnit = unit.id;
+    document.querySelectorAll(".to-unit").forEach(u => u.classList.remove("selected"));
+    el.classList.add("selected");
+  });
+
+  // Click to pick link target
+  el.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (_toState.linkMode) {
+      const { type, fromId } = _toState.linkMode;
+      if (unit.id === fromId) { cancelToLink(); return; }
+      const parentId = type === "parent" ? unit.id : fromId;
+      const childId  = type === "child"  ? unit.id : fromId;
+      const exists = _toState.links.some(l => l.parentId === parentId && l.childId === childId);
+      if (!exists) _toState.links.push({ parentId, childId });
+      cancelToLink();
+      renderToEdges();
+      toAutoLayout();
+      return;
+    }
+    _toState.selectedUnit = unit.id;
+  });
+
+  // Right-click context menu
+  el.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _toState.selectedUnit = unit.id;
+    document.querySelectorAll(".to-unit").forEach(u => u.classList.remove("selected"));
+    el.classList.add("selected");
+    showToContextMenu(e.clientX, e.clientY);
+  });
+
+  world.appendChild(el);
+}
+
+function showToContextMenu(x, y) {
+  const menu = document.getElementById("toContextMenu");
+  if (!menu) return;
+  menu.style.left = x + "px";
+  menu.style.top  = y + "px";
+  menu.classList.remove("hidden");
+}
+function hideToContextMenu() {
+  document.getElementById("toContextMenu")?.classList.add("hidden");
+}
+function cancelToLink() {
+  _toState.linkMode = null;
+  document.getElementById("toLinkBanner")?.classList.add("hidden");
+}
+
+function renderToEdges() {
+  const svg = document.getElementById("toEdgeSvg");
+  if (!svg) return;
+  svg.innerHTML = "";
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+  marker.setAttribute("id", "toArrow");
+  marker.setAttribute("markerWidth", "8");
+  marker.setAttribute("markerHeight", "8");
+  marker.setAttribute("refX", "4");
+  marker.setAttribute("refY", "3");
+  marker.setAttribute("orient", "auto");
+  marker.innerHTML = `<path d="M0,0 L0,6 L6,3 z" fill="var(--border-strong)"/>`;
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  for (const link of _toState.links) {
+    const parent = _toState.units.find(u => u.id === link.parentId);
+    const child  = _toState.units.find(u => u.id === link.childId);
+    if (!parent || !child) continue;
+    const px = parent.x * _toState.zoom + _toState.panX;
+    const py = parent.y * _toState.zoom + _toState.panY;
+    const cx2 = child.x * _toState.zoom + _toState.panX;
+    const cy2 = child.y * _toState.zoom + _toState.panY;
+    const midX = (px + cx2) / 2;
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    line.setAttribute("d", `M${px},${py} C${midX},${py} ${midX},${cy2} ${cx2},${cy2}`);
+    line.setAttribute("stroke", "var(--border-strong)");
+    line.setAttribute("stroke-width", "1.5");
+    line.setAttribute("fill", "none");
+    line.setAttribute("marker-end", "url(#toArrow)");
+    svg.appendChild(line);
+  }
+}
+
+function applyToTransform() {
+  const world = document.getElementById("toWorld");
+  if (world) world.style.transform = `translate(${_toState.panX}px,${_toState.panY}px) scale(${_toState.zoom})`;
+  renderToEdges();
+}
+
+function setToZoom(z) {
+  _toState.zoom = Math.max(0.2, Math.min(4, z));
+  applyToTransform();
+}
+
+function toAutoLayout() {
+  if (!_toState.links.length || !_toState.units.length) return;
+
+  // Build adjacency: find roots (nodes with no parent)
+  const childSet = new Set(_toState.links.map(l => l.childId));
+  const roots = _toState.units.filter(u => !childSet.has(u.id));
+  if (!roots.length) return;
+
+  const H_GAP = 130;
+  const V_GAP = 140;
+
+  function subtreeWidth(id, depth) {
+    const children = _toState.links.filter(l => l.parentId === id).map(l => l.childId);
+    if (!children.length) return H_GAP;
+    return Math.max(H_GAP, children.reduce((sum, cid) => sum + subtreeWidth(cid, depth + 1), 0));
+  }
+
+  function layout(id, x, y) {
+    const unit = _toState.units.find(u => u.id === id);
+    if (!unit) return;
+    unit.x = x;
+    unit.y = y;
+    const children = _toState.links.filter(l => l.parentId === id).map(l => l.childId);
+    const totalW = children.reduce((sum, cid) => sum + subtreeWidth(cid, 0), 0);
+    let cx = x - totalW / 2;
+    for (const cid of children) {
+      const w = subtreeWidth(cid, 0);
+      layout(cid, cx + w / 2, y + V_GAP);
+      cx += w;
+    }
+  }
+
+  let startX = 200;
+  for (const root of roots) {
+    const w = subtreeWidth(root.id, 0);
+    layout(root.id, startX + w / 2, 120);
+    startX += w + H_GAP;
+  }
+
+  // Re-render positions
+  _toState.units.forEach(u => {
+    const el = document.querySelector(`.to-unit[data-id="${u.id}"]`);
+    if (el) { el.style.left = u.x + "px"; el.style.top = u.y + "px"; }
+  });
+  renderToEdges();
+}
+
+function toFitView() {
+  if (!_toState.units.length) return;
+  const canvas = document.getElementById("toCanvas");
+  if (!canvas) return;
+  const xs = _toState.units.map(u => u.x);
+  const ys = _toState.units.map(u => u.y);
+  const minX = Math.min(...xs) - 80;
+  const maxX = Math.max(...xs) + 80;
+  const minY = Math.min(...ys) - 80;
+  const maxY = Math.max(...ys) + 80;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  const scaleX = w / (maxX - minX);
+  const scaleY = h / (maxY - minY);
+  _toState.zoom = Math.max(0.2, Math.min(2, Math.min(scaleX, scaleY) * 0.9));
+  _toState.panX = w / 2 - ((minX + maxX) / 2) * _toState.zoom;
+  _toState.panY = h / 2 - ((minY + maxY) / 2) * _toState.zoom;
+  applyToTransform();
+}
+
+function buildPlanAiContext() {
+  return JSON.stringify({
+    view: "plan",
+    units: _toState.units.map(u => ({
+      id: u.id, label: u.label, affiliation: u.affiliation, type: u.type, size: u.size,
+    })),
+    links: _toState.links,
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOPOLOGY VIEW — Network Link Quality
+═══════════════════════════════════════════════════════════════ */
+function renderTopologyView() {
+  const svg    = document.getElementById("topoSvg");
+  const nodes  = document.getElementById("topoNodes");
+  const empty  = document.getElementById("topoEmptyMsg");
+  if (!svg || !nodes) return;
+
+  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
+  if (!emitters.length) {
+    if (empty) empty.classList.remove("hidden");
+    svg.innerHTML = "";
+    nodes.innerHTML = "";
+    wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
+    return;
+  }
+  if (empty) empty.classList.add("hidden");
+
+  // Layout: arrange nodes in a circle
+  const canvas = document.getElementById("topoCanvas");
+  const W = canvas?.clientWidth  || 800;
+  const H = canvas?.clientHeight || 600;
+  const cx = W / 2;
+  const cy = H / 2;
+  const r  = Math.min(W, H) * 0.36;
+
+  const positions = emitters.map((em, i) => {
+    const angle = (2 * Math.PI * i) / emitters.length - Math.PI / 2;
+    return { em, x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  });
+
+  // Build links between emitters sharing freq band or net_id
+  const links = [];
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      const a = positions[i].em;
+      const b = positions[j].em;
+      const quality = assessLinkQuality(a, b);
+      links.push({ i, j, quality });
+    }
+  }
+
+  // Render SVG links
+  svg.innerHTML = "";
+  const tooltip = getOrCreateTopoTooltip();
+  for (const lnk of links) {
+    const pa = positions[lnk.i];
+    const pb = positions[lnk.j];
+    const cls = linkQualityClass(lnk.quality.score);
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", pa.x); line.setAttribute("y1", pa.y);
+    line.setAttribute("x2", pb.x); line.setAttribute("y2", pb.y);
+    line.setAttribute("stroke-width", "2.5");
+    line.setAttribute("class", `topo-link ${cls}`);
+    line.addEventListener("mousemove", (e) => {
+      tooltip.style.display = "block";
+      tooltip.style.left = (e.clientX + 12) + "px";
+      tooltip.style.top  = (e.clientY - 8) + "px";
+      tooltip.textContent = `${pa.em.name || pa.em.id} ↔ ${pb.em.name || pb.em.id}: ${lnk.quality.label}`;
+    });
+    line.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+    line.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showTopoLinkDetail(pa.em, pb.em, lnk.quality);
+    });
+    svg.appendChild(line);
+  }
+
+  // Render nodes
+  nodes.innerHTML = "";
+  for (const { em, x, y } of positions) {
+    const nd = document.createElement("div");
+    nd.className = "topo-node";
+    nd.style.left = x + "px";
+    nd.style.top  = y + "px";
+    const freqMhz = ((em.freq || em.frequency || 0) / 1e6).toFixed(3);
+    nd.innerHTML = `
+      <div class="topo-node-icon" title="${esc(em.name || em.id)}">📡</div>
+      <div class="topo-node-label">${esc(em.name || em.id || "Emitter")}<br><span style="color:var(--muted);font-size:0.58rem">${freqMhz} MHz</span></div>
+    `;
+    nodes.appendChild(nd);
+  }
+
+  // Wire pan/zoom
+  wireTopoCanvasPanZoom();
+  wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
+}
+
+function assessLinkQuality(a, b) {
+  let score = 100;
+  const reasons = [];
+
+  // Same frequency band check
+  const freqA = a.freq || a.frequency || 0;
+  const freqB = b.freq || b.frequency || 0;
+  const bandA = freqBand(freqA);
+  const bandB = freqBand(freqB);
+  if (bandA !== bandB) {
+    score -= 60;
+    reasons.push(`Different frequency bands (${bandA} vs ${bandB}) — cross-band communication requires additional bridging equipment.`);
+  } else {
+    reasons.push(`Same frequency band (${bandA}) — compatible radios.`);
+  }
+
+  // Net ID match
+  const netA = a.netId || a.net_id || null;
+  const netB = b.netId || b.net_id || null;
+  if (netA && netB) {
+    if (netA === netB) {
+      score += 10;
+      reasons.push(`Matching Net ID (${netA}) — same radio net.`);
+    } else {
+      score -= 20;
+      reasons.push(`Different Net IDs (${netA} vs ${netB}) — separate nets; interoperability depends on gateway.`);
+    }
+  }
+
+  // Waveform match
+  const wfA = (a.waveform || "").toUpperCase();
+  const wfB = (b.waveform || "").toUpperCase();
+  if (wfA && wfB) {
+    if (wfA === wfB) {
+      reasons.push(`Matching waveform (${wfA}).`);
+    } else {
+      score -= 25;
+      reasons.push(`Waveform mismatch (${wfA} vs ${wfB}) — cannot communicate without gateway.`);
+    }
+  }
+
+  // Distance-based attenuation estimate (if lat/lng available)
+  if (a.lat && a.lng && b.lat && b.lng) {
+    const dist = haversineKm(a.lat, a.lng, b.lat, b.lng);
+    const txPower = a.power || a.txPower || 5; // watts
+    const eirpDbm = 10 * Math.log10(txPower * 1000);
+    // Free-space path loss estimate at mid-frequency
+    const fMhz = ((freqA + freqB) / 2) / 1e6 || 100;
+    const fspl = 20 * Math.log10(dist) + 20 * Math.log10(fMhz) + 32.44;
+    const rssi = eirpDbm - fspl;
+    if (dist > 0) {
+      if (rssi < -110) {
+        score -= 40;
+        reasons.push(`Estimated RSSI ${rssi.toFixed(0)} dBm at ${dist.toFixed(1)} km — below typical sensitivity threshold. Consider higher-gain antennas or relays.`);
+      } else if (rssi < -90) {
+        score -= 15;
+        reasons.push(`Estimated RSSI ${rssi.toFixed(0)} dBm at ${dist.toFixed(1)} km — marginal signal; reliability depends on terrain and antenna orientation.`);
+      } else {
+        reasons.push(`Estimated RSSI ${rssi.toFixed(0)} dBm at ${dist.toFixed(1)} km — adequate signal strength.`);
+      }
+    }
+    // Terrain obstruction hint
+    const elevDiff = Math.abs((a.elevation || a.elev || 0) - (b.elevation || b.elev || 0));
+    if (elevDiff > 300) {
+      score -= 20;
+      reasons.push(`Significant elevation difference (${elevDiff.toFixed(0)} m) — terrain masking likely. Consider NLOS waveform or relay placement on high ground.`);
+    }
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const label = score >= 80 ? "Excellent" : score >= 60 ? "Good" : score >= 40 ? "Fair" : score >= 20 ? "Poor" : "No Link";
+  return { score, label, reasons };
+}
+
+function freqBand(hz) {
+  const mhz = hz / 1e6;
+  if (mhz < 3)    return "HF-Low";
+  if (mhz < 30)   return "HF";
+  if (mhz < 300)  return "VHF";
+  if (mhz < 3000) return "UHF";
+  if (mhz < 30000)return "SHF";
+  return "EHF";
+}
+
+function linkQualityClass(score) {
+  if (score >= 80) return "topo-link-excellent";
+  if (score >= 60) return "topo-link-good";
+  if (score >= 40) return "topo-link-fair";
+  if (score >= 20) return "topo-link-poor";
+  return "topo-link-none";
+}
+
+function showTopoLinkDetail(a, b, quality) {
+  const popup = document.getElementById("topoLinkPopup");
+  const title = document.getElementById("topoLinkPopupTitle");
+  const body  = document.getElementById("topoLinkPopupBody");
+  if (!popup || !body) return;
+  const nameA = a.name || a.id || "Emitter A";
+  const nameB = b.name || b.id || "Emitter B";
+  if (title) title.textContent = `${nameA} ↔ ${nameB}`;
+  const scoreColor = quality.score >= 80 ? "#10b981" : quality.score >= 60 ? "#34d399" :
+                     quality.score >= 40 ? "#f59e0b" : quality.score >= 20 ? "#f97316" : "#ef4444";
+  body.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px">
+      <div style="font-size:1.4rem;font-weight:700;color:${scoreColor}">${quality.score}</div>
+      <div><strong style="color:${scoreColor}">${quality.label}</strong><br><span style="color:var(--muted);font-size:0.7rem">Link Quality Score (0–100)</span></div>
+    </div>
+    <ul style="margin:0;padding:0 0 0 16px;font-size:0.75rem;line-height:1.6">
+      ${quality.reasons.map(r => `<li>${esc(r)}</li>`).join("")}
+    </ul>
+  `;
+  popup.classList.remove("hidden");
+  document.getElementById("topoLinkPopupClose")?.addEventListener("click", () => popup.classList.add("hidden"), { once: true });
+}
+
+function getOrCreateTopoTooltip() {
+  let t = document.getElementById("_topoTooltip");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "_topoTooltip";
+    t.className = "topo-link-tooltip";
+    t.style.display = "none";
+    document.body.appendChild(t);
+  }
+  return t;
+}
+
+let _topoCanvasWired = false;
+function wireTopoCanvasPanZoom() {
+  if (_topoCanvasWired) return;
+  _topoCanvasWired = true;
+  const canvas = document.getElementById("topoCanvas");
+  if (!canvas) return;
+  let panning = false, panStart = null, panOffset = { x: 0, y: 0 };
+  let zoom = 1;
+  const getWorld = () => ({ nodes: document.getElementById("topoNodes"), svg: document.getElementById("topoSvg") });
+  const applyTransform = () => {
+    const { nodes, svg } = getWorld();
+    const t = `translate(${panOffset.x}px,${panOffset.y}px) scale(${zoom})`;
+    if (nodes) nodes.style.transform = t;
+    if (svg) svg.style.transform = t;
+  };
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.target === canvas || e.target.closest(".topo-svg")) {
+      panning = true;
+      panStart = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+    }
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!panning) return;
+    panOffset.x = e.clientX - panStart.x;
+    panOffset.y = e.clientY - panStart.y;
+    applyTransform();
+  });
+  document.addEventListener("mouseup", () => { panning = false; });
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    zoom = Math.max(0.3, Math.min(3, zoom * factor));
+    applyTransform();
+  }, { passive: false });
+  document.getElementById("topoFitBtn")?.addEventListener("click", () => {
+    panOffset = { x: 0, y: 0 }; zoom = 1; applyTransform();
+  });
+  document.getElementById("topoRefreshBtn")?.addEventListener("click", () => {
+    _topoCanvasWired = false;
+    renderTopologyView();
+  });
+}
+
+function buildTopoAiContext() {
+  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
+  return JSON.stringify({
+    view: "topology",
+    emitterCount: emitters.length,
+    emitters: emitters.slice(0, 30).map(e => ({
+      id: e.id, name: e.name, freq: e.freq || e.frequency, waveform: e.waveform,
+      netId: e.netId || e.net_id, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
+    })),
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ANALYZE VIEW — RF Analytics Dashboard
+═══════════════════════════════════════════════════════════════ */
+function renderAnalyzeView() {
+  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
+  renderAnalyzeCoverage(emitters);
+  renderAnalyzeFreq(emitters);
+  renderAnalyzeTerrain(emitters);
+  renderAnalyzeConflicts(emitters);
+  renderAnalyzeWaveform(emitters);
+  document.getElementById("analyzeRefreshBtn")?.addEventListener("click", renderAnalyzeView, { once: true });
+  wireViewAiForm("analyzeAiForm", "analyzeAiInput", "analyzeAiSendBtn", "analyzeAiClearBtn", "analyzeAiMessages", buildAnalyzeAiContext);
+}
+
+function renderAnalyzeCoverage(emitters) {
+  const count = document.getElementById("analyzeCoverageCount");
+  const body  = document.getElementById("analyzeCoverageBody");
+  if (count) count.textContent = `${emitters.length} emitter${emitters.length !== 1 ? "s" : ""}`;
+  if (!body) return;
+  if (!emitters.length) { body.innerHTML = `<div class="analyze-placeholder">No emitters placed yet.</div>`; return; }
+  const byAff = {};
+  for (const e of emitters) {
+    const aff = e.affiliation || "unknown";
+    byAff[aff] = (byAff[aff] || 0) + 1;
+  }
+  const rows = Object.entries(byAff).map(([aff, cnt]) =>
+    `<div class="analyze-terrain-item"><span>${esc(aff)}</span><span>${cnt} emitter${cnt !== 1 ? "s" : ""}</span></div>`
+  ).join("");
+  const powers = emitters.filter(e => e.power || e.txPower).map(e => e.power || e.txPower);
+  const avgPow = powers.length ? (powers.reduce((a,b)=>a+b,0)/powers.length).toFixed(1) : "N/A";
+  body.innerHTML = `
+    <div class="analyze-terrain-list">${rows}</div>
+    <div style="margin-top:10px;font-size:0.72rem;color:var(--muted)">Avg TX Power: <strong style="color:var(--text)">${avgPow}${powers.length ? " W" : ""}</strong></div>
+  `;
+}
+
+function renderAnalyzeFreq(emitters) {
+  const body  = document.getElementById("analyzeFreqBody");
+  const ph    = document.getElementById("analyzeFreqPlaceholder");
+  if (!body) return;
+  if (!emitters.length) {
+    if (ph) ph.classList.remove("hidden");
+    return;
+  }
+  if (ph) ph.classList.add("hidden");
+  const bands = {};
+  for (const e of emitters) {
+    const band = freqBand(e.freq || e.frequency || 0);
+    bands[band] = (bands[band] || 0) + 1;
+  }
+  const entries = Object.entries(bands).sort((a,b) => b[1]-a[1]);
+  const barColors = ["#3b82f6","#6366f1","#10b981","#f59e0b","#f97316","#ef4444"];
+  const max = Math.max(...entries.map(e=>e[1]));
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:0.72rem">
+      ${entries.map(([band, cnt], i) => `
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:52px;color:var(--muted);text-align:right;flex-shrink:0">${band}</span>
+          <div style="flex:1;background:var(--bg-input);border-radius:3px;overflow:hidden;height:14px">
+            <div style="width:${(cnt/max*100).toFixed(0)}%;background:${barColors[i%barColors.length]};height:100%;border-radius:3px;transition:width 0.4s"></div>
+          </div>
+          <span style="width:20px;text-align:left;color:var(--text)">${cnt}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAnalyzeTerrain(emitters) {
+  const list = document.getElementById("analyzeTerrainList");
+  const ph   = document.getElementById("analyzeTerrainPlaceholder");
+  if (!list) return;
+  if (!emitters.length) { if (ph) ph.style.display = ""; return; }
+  if (ph) ph.style.display = "none";
+  list.innerHTML = emitters.slice(0, 20).map(e => {
+    const elev = e.elevation || e.elev || 0;
+    let grade, cls;
+    if (elev > 600)      { grade = "High Ground"; cls = "good"; }
+    else if (elev > 200) { grade = "Mid Terrain"; cls = "fair"; }
+    else                 { grade = "Low Ground";  cls = "poor"; }
+    return `
+      <div class="analyze-terrain-item">
+        <span>${esc(e.name || e.id || "Emitter")}</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="color:var(--muted);font-size:0.65rem">${elev.toFixed(0)} m MSL</span>
+          <span class="analyze-terrain-badge ${cls}">${grade}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderAnalyzeConflicts(emitters) {
+  const list = document.getElementById("analyzeConflictsList");
+  const ph   = document.getElementById("analyzeConflictsPlaceholder");
+  if (!list) return;
+  const conflicts = [];
+  for (let i = 0; i < emitters.length; i++) {
+    for (let j = i + 1; j < emitters.length; j++) {
+      const a = emitters[i], b = emitters[j];
+      const fa = a.freq || a.frequency || 0;
+      const fb = b.freq || b.frequency || 0;
+      const bwa = a.bandwidth || 0;
+      const bwb = b.bandwidth || 0;
+      const overlap = Math.min(fa + bwa/2, fb + bwb/2) - Math.max(fa - bwa/2, fb - bwb/2);
+      if (overlap > 0 || Math.abs(fa - fb) < 5e3) {
+        const severity = overlap > 0 ? "high" : "medium";
+        conflicts.push({
+          a: a.name || a.id, b: b.name || b.id,
+          desc: overlap > 0
+            ? `Overlapping spectrum by ${(overlap/1e3).toFixed(1)} kHz — active interference risk.`
+            : `Frequencies within 5 kHz — co-channel interference possible under strong signal conditions.`,
+          severity,
+        });
+      }
+    }
+  }
+  if (!conflicts.length) {
+    if (ph) ph.style.display = "";
+    list.innerHTML = "";
+    return;
+  }
+  if (ph) ph.style.display = "none";
+  list.innerHTML = conflicts.slice(0, 20).map(c => `
+    <div class="analyze-conflict-item">
+      <div class="analyze-conflict-dot ${c.severity === "high" ? "high" : ""}"></div>
+      <div>
+        <strong style="font-size:0.72rem">${esc(c.a)} ↔ ${esc(c.b)}</strong><br>
+        <span style="color:var(--muted)">${esc(c.desc)}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderAnalyzeWaveform(emitters) {
+  const wrap = document.getElementById("analyzeWaveformTable");
+  const ph   = document.getElementById("analyzeWaveformPlaceholder");
+  if (!wrap) return;
+  if (!emitters.length) { if (ph) ph.style.display = ""; return; }
+  if (ph) ph.style.display = "none";
+  const rows = emitters.slice(0, 30).map(e => {
+    const freqMhz = ((e.freq || e.frequency || 0) / 1e6).toFixed(3);
+    const bwKhz   = ((e.bandwidth || 0) / 1e3).toFixed(1);
+    return `<tr>
+      <td>${esc(e.name || e.id || "—")}</td>
+      <td>${freqMhz} MHz</td>
+      <td>${bwKhz ? bwKhz + " kHz" : "—"}</td>
+      <td>${esc(e.waveform || "—")}</td>
+      <td>${esc(e.antenna || e.antennaType || "—")}</td>
+      <td>${e.power || e.txPower ? (e.power || e.txPower) + " W" : "—"}</td>
+    </tr>`;
+  }).join("");
+  wrap.innerHTML = `
+    <table>
+      <thead><tr><th>Name</th><th>Freq</th><th>BW</th><th>Waveform</th><th>Antenna</th><th>TX Pwr</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function buildAnalyzeAiContext() {
+  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
+  return JSON.stringify({
+    view: "analyze",
+    emitterCount: emitters.length,
+    emitters: emitters.slice(0, 40).map(e => ({
+      id: e.id, name: e.name, freq: e.freq || e.frequency, bandwidth: e.bandwidth,
+      waveform: e.waveform, antenna: e.antenna || e.antennaType,
+      power: e.power || e.txPower, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
+    })),
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Shared AI form wiring for secondary views
+═══════════════════════════════════════════════════════════════ */
+const _viewAiWired = new Set();
+function wireViewAiForm(formId, inputId, sendId, clearId, messagesId, contextFn) {
+  if (_viewAiWired.has(formId)) return;
+  const form     = document.getElementById(formId);
+  const input    = document.getElementById(inputId);
+  const sendBtn  = document.getElementById(sendId);
+  const clearBtn = document.getElementById(clearId);
+  const msgs     = document.getElementById(messagesId);
+  if (!form || !input || !msgs) return;
+  _viewAiWired.add(formId);
+
+  // Enable input when AI is configured
+  const checkAi = () => {
+    const hasProvider = !!(state.ui?.aiProvider || localStorage.getItem("ai_api_key") || localStorage.getItem("ai_provider_url"));
+    input.disabled = !hasProvider;
+    if (sendBtn) sendBtn.disabled = !hasProvider;
+  };
+  checkAi();
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    appendViewAiMessage(msgs, "user", text);
+    input.value = "";
+    appendViewAiMessage(msgs, "assistant", "Thinking…", "pending");
+    const context = contextFn ? contextFn() : "{}";
+    try {
+      const reply = await callViewAi(text, context);
+      const pending = msgs.querySelector(".ai-chat-message.pending");
+      if (pending) pending.remove();
+      appendViewAiMessage(msgs, "assistant", reply);
+    } catch (err) {
+      const pending = msgs.querySelector(".ai-chat-message.pending");
+      if (pending) pending.remove();
+      appendViewAiMessage(msgs, "assistant", `Error: ${err.message}`);
+    }
+  });
+
+  clearBtn?.addEventListener("click", () => {
+    msgs.innerHTML = "";
+  });
+}
+
+function appendViewAiMessage(container, role, text, extraClass) {
+  const el = document.createElement("article");
+  el.className = `ai-chat-message ai-chat-message-${role === "user" ? "user" : "system"}${extraClass ? " " + extraClass : ""}`;
+  const label = document.createElement("strong");
+  label.textContent = role === "user" ? "You" : "Assistant";
+  const body = document.createElement("div");
+  body.className = "ai-chat-message-body";
+  body.innerHTML = renderMarkdown(text);
+  el.appendChild(label);
+  el.appendChild(body);
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function callViewAi(userMessage, contextJson) {
+  // Reuse the same provider logic as the main AI chat
+  const providerUrl = state.ui?.aiProviderUrl || localStorage.getItem("ai_provider_url") || "";
+  const apiKey      = state.ui?.aiApiKey      || localStorage.getItem("ai_api_key")      || "";
+  const model       = state.ui?.aiModel       || localStorage.getItem("ai_model")        || "claude-sonnet-4-6";
+
+  const systemPrompt = `You are an expert military RF communications and operations planning assistant embedded in RF Planner.
+The user is working in a specialized view. Here is the current scenario context (JSON):
+${contextJson}
+Be concise, technical, and actionable. Format responses with markdown where helpful.`;
+
+  if (providerUrl.includes("anthropic") || providerUrl.includes("claude") || model.includes("claude")) {
+    const payload = {
+      model,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    };
+    const resp = await fetch(providerUrl || "https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error(`AI error ${resp.status}`);
+    const data = await resp.json();
+    return data.content?.[0]?.text || "(no response)";
+  }
+
+  // Generic OpenAI-compatible endpoint
+  const payload = {
+    model,
+    max_tokens: 1024,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user",   content: userMessage },
+    ],
+  };
+  const resp = await fetch(providerUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(`AI error ${resp.status}`);
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || data.content?.[0]?.text || "(no response)";
+}
+
+/* Helper — haversine km (may already exist; guard against redeclaration) */
+if (typeof haversineKm === "undefined") {
+  // eslint-disable-next-line no-unused-vars
+  var haversineKm = function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  };
 }
 
 init().catch((error) => {
