@@ -2461,11 +2461,14 @@ async function onWorkspaceLogin(credentials = null) {
   persistSessionStorage();
   await loadProjectList();
   await loadServerAiProviderSettings();
-  await bootstrapWorkspaceData();
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Signed in as ${payload.user.email}.`);
   fireAnalyticsEvent({ event_type: "visit" });
+  bootstrapWorkspaceData().catch((error) => {
+    console.error("[workspace] bootstrap failed after login:", error);
+    setStatus(`Workspace load warning: ${error.message}`, true);
+  });
 }
 
 async function onWorkspaceRegister(credentials = null) {
@@ -2487,10 +2490,13 @@ async function onWorkspaceRegister(credentials = null) {
   persistSessionStorage();
   await loadProjectList();
   await loadServerAiProviderSettings();
-  await bootstrapWorkspaceData();
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Account created for ${payload.user.email}.`);
+  bootstrapWorkspaceData().catch((error) => {
+    console.error("[workspace] bootstrap failed after register:", error);
+    setStatus(`Workspace load warning: ${error.message}`, true);
+  });
 }
 
 function onWorkspaceSignOut() {

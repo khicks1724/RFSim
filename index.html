@@ -2516,57 +2516,34 @@
     const canvas = document.getElementById('authWaterfall');
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const SCROLL_SPEED = 0.35;
-    const NOISE_LEVEL = 0.13;
-    const ROW_TIME_STEP = 0.02;
-    const MAX_INTERNAL_WIDTH = 960;
-    const MAX_INTERNAL_HEIGHT = 540;
+    const NOISE_LEVEL = 0.22;
     let emitters = [];
-    let width = 0;
-    let height = 0;
     let scrollAccumulator = 0;
     let time = 0;
     let rafId = null;
-    let lastFrameTime = 0;
-    let rowImageData = null;
-    const scrollBuffer = document.createElement('canvas');
-    const scrollCtx = scrollBuffer.getContext('2d', { alpha: false, desynchronized: true });
     let started = false;
     let visible = document.visibilityState !== 'hidden';
 
-    function getRenderScale() {
-      const widthScale = Math.min(1, MAX_INTERNAL_WIDTH / Math.max(window.innerWidth, 1));
-      const heightScale = Math.min(1, MAX_INTERNAL_HEIGHT / Math.max(window.innerHeight, 1));
-      return Math.min(widthScale, heightScale);
-    }
-
     function resizeCanvas() {
-      const scale = getRenderScale();
-      width = Math.max(320, Math.round(window.innerWidth * scale));
-      height = Math.max(180, Math.round(window.innerHeight * scale));
-      canvas.width = width;
-      canvas.height = height;
-      canvas.style.width = window.innerWidth + 'px';
-      canvas.style.height = window.innerHeight + 'px';
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
       initEmitters();
-      rowImageData = ctx.createImageData(width, 1);
-      scrollBuffer.width = width;
-      scrollBuffer.height = height;
       scrollAccumulator = 0;
       ctx.fillStyle = 'rgb(8, 0, 20)';
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       prefillCanvas();
     }
 
     function initEmitters() {
       emitters = [];
-      const count = Math.max(3, Math.floor(width / 180));
+      const count = Math.floor(canvas.width / 105);
       for (let i = 0; i < count; i++) {
         emitters.push({
-          x: Math.random() * width,
+          x: Math.random() * canvas.width,
           width: 8 + Math.random() * 40,
           power: 0.4 + Math.random() * 0.6,
           drift: (Math.random() - 0.5) * 0.1,
@@ -2597,16 +2574,16 @@
     }
 
     function generateRow(t) {
-      const row = new Float32Array(width);
+      const row = new Float32Array(canvas.width);
       for (let x = 0; x < row.length; x++) {
         const grain = Math.random() * NOISE_LEVEL;
-        const smooth = (smoothNoise(x, t) * 0.5 + 0.5) * 0.06;
+        const smooth = (smoothNoise(x, t) * 0.5 + 0.5) * 0.12;
         row[x] = grain + smooth;
       }
       emitters.forEach(e => {
         e.x += e.drift;
-        if (e.x < 0) e.x = width;
-        if (e.x > width) e.x = 0;
+        if (e.x < 0) e.x = canvas.width;
+        if (e.x > canvas.width) e.x = 0;
         e.variationPhase += e.variationSpeed;
         const powerMod = Math.sin(e.variationPhase) * 0.5 + 0.5;
         const center = Math.floor(e.x);
@@ -2620,8 +2597,8 @@
           }
         }
       });
-      if (Math.random() < 0.01) {
-        const start = Math.floor(Math.random() * width);
+      if (Math.random() < 0.025) {
+        const start = Math.floor(Math.random() * canvas.width);
         const w = 40 + Math.random() * 120;
         for (let i = 0; i < w; i++) {
           const idx = start + i;
@@ -2631,57 +2608,51 @@
       return row;
     }
 
-    function putRow(row, y) {
-      if (!rowImageData || rowImageData.width !== width) {
-        rowImageData = ctx.createImageData(width, 1);
-      }
-      const img = rowImageData;
-      for (let x = 0; x < width; x++) {
-        const [r, g, b] = getColor(row[x]);
-        const i = x * 4;
-        img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
-      }
-      ctx.putImageData(img, 0, y);
-    }
-
-    function stepWaterfall(rows) {
-      for (let step = 0; step < rows; step++) {
-        time += ROW_TIME_STEP;
-        scrollCtx.clearRect(0, 0, width, height);
-        scrollCtx.drawImage(canvas, 0, 0, width, height);
-        ctx.drawImage(scrollBuffer, 0, 0, width, height, 0, 1, width, height);
-        putRow(generateRow(time), 0);
-      }
-    }
-
-    function prefill() {
-      rafId = null;
-      if (!started || !visible) return;
-      prefillCanvas();
-      lastFrameTime = performance.now();
-      queueFrame();
-    }
-
-    function draw(now) {
+    function draw() {
       rafId = null;
       if (!started || !visible) return;
 
-      const elapsed = Math.min(48, Math.max(8, now - (lastFrameTime || now)));
-      lastFrameTime = now;
-      scrollAccumulator += SCROLL_SPEED * (elapsed / 16.6667);
-      const steps = Math.min(3, Math.floor(scrollAccumulator));
-      if (steps > 0) {
+      scrollAccumulator += SCROLL_SPEED;
+      time += 0.02;
+
+      if (scrollAccumulator >= 1) {
+        const steps = Math.floor(scrollAccumulator);
         scrollAccumulator -= steps;
-        stepWaterfall(steps);
+        for (let step = 0; step < steps; step++) {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          ctx.putImageData(imageData, 0, 1);
+
+          const row = generateRow(time);
+          const img = ctx.createImageData(canvas.width, 1);
+          for (let x = 0; x < canvas.width; x++) {
+            const [r, g, b] = getColor(row[x]);
+            const i = x * 4;
+            img.data[i] = r;
+            img.data[i + 1] = g;
+            img.data[i + 2] = b;
+            img.data[i + 3] = 255;
+          }
+          ctx.putImageData(img, 0, 0);
+        }
       }
 
       queueFrame();
     }
 
     function prefillCanvas() {
-      for (let y = height - 1; y >= 0; y--) {
-        time += ROW_TIME_STEP;
-        putRow(generateRow(time), y);
+      for (let y = canvas.height - 1; y >= 0; y--) {
+        time += 0.02;
+        const row = generateRow(time);
+        const img = ctx.createImageData(canvas.width, 1);
+        for (let x = 0; x < canvas.width; x++) {
+          const [r, g, b] = getColor(row[x]);
+          const i = x * 4;
+          img.data[i] = r;
+          img.data[i + 1] = g;
+          img.data[i + 2] = b;
+          img.data[i + 3] = 255;
+        }
+        ctx.putImageData(img, 0, y);
       }
     }
 
@@ -2709,7 +2680,7 @@
       if (!started) {
         started = true;
         resizeCanvas();
-        rafId = requestAnimationFrame(prefill);
+        queueFrame();
         return;
       }
       queueFrame();
@@ -2726,7 +2697,7 @@
       if (!started) return;
       stop();
       resizeCanvas();
-      rafId = requestAnimationFrame(prefill);
+      queueFrame();
     });
 
     document.addEventListener('visibilitychange', () => {
