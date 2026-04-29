@@ -13217,6 +13217,8 @@ function clearMapContentsSearch() {
   if (dom.mapContentsSearchInput) {
     dom.mapContentsSearchInput.value = "";
   }
+  clearTimeout(_mapContentsSearchDebounceTimer);
+  invalidateMapContentsSearchIndex();
   updateMapContentsSearchUi();
   renderMapContents();
 }
@@ -13561,6 +13563,35 @@ function buildMapContentRow(entry, isChild = false) {
   return row;
 }
 
+// Pre-built search index: rebuilt when items change, reused across keystrokes.
+// Each entry stores a pre-normalized searchable string for O(1) lookup per item.
+let _mapContentsSearchIndex = null;
+let _mapContentsSearchIndexStamp = -1;
+
+function invalidateMapContentsSearchIndex() {
+  _mapContentsSearchIndex = null;
+}
+
+function getMapContentsSearchIndex(entries) {
+  // Rebuild if entries count changed or explicitly invalidated
+  const stamp = entries.length;
+  if (_mapContentsSearchIndex && _mapContentsSearchIndexStamp === stamp) {
+    return _mapContentsSearchIndex;
+  }
+  const index = new Map();
+  for (const entry of entries) {
+    const ancestorNames = getMapContentAncestorNames(entry.id);
+    const combined = normalizeMapContentsSearchText(
+      [entry.name, entry.subtitle, ...ancestorNames].filter(Boolean).join(" ")
+    );
+    const acronym = buildSearchAcronym(combined);
+    index.set(entry.id, { combined, acronym });
+  }
+  _mapContentsSearchIndex = index;
+  _mapContentsSearchIndexStamp = stamp;
+  return index;
+}
+
 function renderMapContents() {
   if (!dom.mapContentsList) {
     console.error("[renderMapContents] dom.mapContentsList is null — element not found");
@@ -13592,6 +13623,9 @@ function renderMapContents() {
   const orderToUse = state.mapContentOrder.length ? state.mapContentOrder : entryIds;
   const searchMatchCache = new Map();
 
+  // Use pre-built index for fast string matching — avoids re-normalizing per keystroke
+  const searchIndex = searchActive ? getMapContentsSearchIndex(entries) : null;
+
   const hasExistingParentContainer = (contentId) => {
     if (folderIds.has(contentId)) {
       const parentFolderId = getFolderParentContentId(contentId);
@@ -13602,15 +13636,15 @@ function renderMapContents() {
   };
 
   const entrySelfMatchesSearch = (entryId) => {
-    const entry = entryMap.get(entryId);
-    if (!entry) {
-      return false;
-    }
-    return smartMapContentsMatch(searchQuery, [
-      entry.name,
-      entry.subtitle,
-      ...getMapContentAncestorNames(entryId),
-    ]);
+    if (!searchIndex) return true;
+    const indexed = searchIndex.get(entryId);
+    if (!indexed) return false;
+    const tokens = normalizeMapContentsSearchText(searchQuery).split(" ").filter(Boolean);
+    return tokens.every((token) =>
+      indexed.combined.includes(token) ||
+      indexed.acronym.includes(token) ||
+      isSubsequenceMatch(token, indexed.combined)
+    );
   };
 
   const entryMatchesSearch = (entryId) => {
@@ -13681,7 +13715,16 @@ function renderMapContents() {
     return !getMapContentFolderId(contentId);
   });
 
-  topLevelIds.forEach((contentId) => renderBranch(contentId, dom.mapContentsList));
+  const SEARCH_RENDER_LIMIT = 150;
+  if (searchActive && topLevelIds.length > SEARCH_RENDER_LIMIT) {
+    topLevelIds.slice(0, SEARCH_RENDER_LIMIT).forEach((contentId) => renderBranch(contentId, dom.mapContentsList));
+    const overflow = document.createElement("div");
+    overflow.className = "map-contents-search-overflow";
+    overflow.textContent = `Showing first ${SEARCH_RENDER_LIMIT} of ${topLevelIds.length} matches — refine your search to narrow results.`;
+    dom.mapContentsList.appendChild(overflow);
+  } else {
+    topLevelIds.forEach((contentId) => renderBranch(contentId, dom.mapContentsList));
+  }
 
   // Safety net: render any entries that slipped through (e.g. order/ID mismatch from old saves)
   entries.forEach((entry) => {

@@ -1071,6 +1071,13 @@ body.panel-collapsed .control-panel {
   background: var(--bg-input);
 }
 
+.map-contents-search-overflow {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: 0.70rem;
+  opacity: 0.55;
+  font-style: italic;
+}
 .map-contents-empty {
   padding: 10px 10px;
   color: var(--text-muted);
