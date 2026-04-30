@@ -642,7 +642,7 @@ const RADIO_LIBRARY = {
     programs: {
       "starlink-standard": {
         label: "Starlink Standard (Ku-band)",
-        rf: { frequencyMHz: 13500, bandwidthKHz: 250000, modulation: "OFDM", waveform: "Starlink-Ku", duplex: "full-duplex", channelSpacingKHz: 250000 },
+        rf: { frequencyMHz: 13500, bandwidthKHz: 250000, modulation: "OFDM", waveform: "Link 182", duplex: "full-duplex", channelSpacingKHz: 250000 },
         tx: { powerW: 40, dutyCycle: 1, papr: 8, spectralEfficiency: 8 },
         rx: { sensitivityDbm: -90, noiseFigDb: 3, requiredSnrDb: 10, acrDb: 40, bdrDb: 60 },
         antenna: { type: "phased_array", gainDbi: 38, pattern: "steerable", polarization: "circular", heightM: 0.6, cableLossDb: 0.5, systemLossDb: 2 },
@@ -651,7 +651,7 @@ const RADIO_LIBRARY = {
       },
       "starshield-ka": {
         label: "Starshield (Ka-band — Gov/Mil)",
-        rf: { frequencyMHz: 29500, bandwidthKHz: 500000, modulation: "OFDM", waveform: "Starshield-Ka", duplex: "full-duplex", channelSpacingKHz: 500000 },
+        rf: { frequencyMHz: 29500, bandwidthKHz: 500000, modulation: "OFDM", waveform: "Link 182", duplex: "full-duplex", channelSpacingKHz: 500000 },
         tx: { powerW: 60, dutyCycle: 1, papr: 8, spectralEfficiency: 10 },
         rx: { sensitivityDbm: -88, noiseFigDb: 2.5, requiredSnrDb: 10, acrDb: 45, bdrDb: 65 },
         antenna: { type: "phased_array", gainDbi: 42, pattern: "steerable", polarization: "circular", heightM: 0.6, cableLossDb: 0.5, systemLossDb: 2 },
@@ -21541,6 +21541,7 @@ async function renderTopologyView() {
     keyA: lnk.a.key,
     keyB: lnk.b.key,
     quality: lnk.quality,
+    typeClass: linkTypeClass(lnk.a.em, lnk.b.em),
     nameA: lnk.a.unit?.label || lnk.a.em.name || lnk.a.em.id,
     nameB: lnk.b.unit?.label || lnk.b.em.name || lnk.b.em.id,
     emA: lnk.a.em,
@@ -21631,7 +21632,7 @@ async function assessLinkQuality(a, b) {
   }
 
   // SATCOM/BLOS waveforms bypass terrain and distance limits
-  const SATCOM_WF = ["MUOS", "STARSHIELD", "INMARSAT", "VIASAT", "BLOS", "SATCOM", "WGS", "AEHF"];
+  const SATCOM_WF = ["MUOS", "STARSHIELD", "INMARSAT", "VIASAT", "BLOS", "SATCOM", "WGS", "AEHF", "LINK 182"];
   const isSatcom = SATCOM_WF.includes(wfA) || SATCOM_WF.includes(wfB)
     || a.ext?.satcomEnabled || b.ext?.satcomEnabled;
   if (isSatcom) {
@@ -21746,6 +21747,23 @@ function linkQualityClass(score) {
   return "topo-link-none";
 }
 
+// Returns a CSS class encoding the link medium type (dash pattern)
+function linkTypeClass(emA, emB) {
+  const wfA = (emA?.ext?.waveform || emA?.waveform || "").toUpperCase();
+  const wfB = (emB?.ext?.waveform || emB?.waveform || "").toUpperCase();
+  const SATCOM_WF = ["MUOS", "STARSHIELD", "INMARSAT", "VIASAT", "BLOS", "SATCOM", "WGS", "AEHF", "LINK 182"];
+  const MANET_WF  = ["SRW", "ANW2", "WAVE", "MESH", "MANET", "WIFI", "802.11", "TRELLISWARE"];
+  if (SATCOM_WF.some(w => wfA.includes(w) || wfB.includes(w))
+      || emA?.ext?.satcomEnabled || emB?.ext?.satcomEnabled) return "topo-link-type-satcom";
+  if (MANET_WF.some(w => wfA.includes(w) || wfB.includes(w))
+      || emA?.ext?.isManet || emB?.ext?.isManet) return "topo-link-type-mesh";
+  const fMhz = ((emA?.frequencyMHz || 0) + (emB?.frequencyMHz || 0)) / 2;
+  if (fMhz >= 300)  return "topo-link-type-uhf";
+  if (fMhz >= 30)   return "topo-link-type-vhf";
+  if (fMhz >= 3)    return "topo-link-type-hf";
+  return "topo-link-type-vhf"; // fallback
+}
+
 function showTopoLinkDetail(a, b, quality, nameA, nameB) {
   const popup = document.getElementById("topoLinkPopup");
   const title = document.getElementById("topoLinkPopupTitle");
@@ -21818,7 +21836,7 @@ function redrawTopoLinks() {
     line.setAttribute("x1", pa.x); line.setAttribute("y1", pa.y);
     line.setAttribute("x2", pb.x); line.setAttribute("y2", pb.y);
     line.setAttribute("stroke-width", "2.5");
-    line.setAttribute("class", `topo-link ${cls}`);
+    line.setAttribute("class", `topo-link ${cls} ${lnk.typeClass || ""}`);
     line.addEventListener("mousemove", (e) => {
       tooltip.style.display = "block";
       tooltip.style.left = (e.clientX + 12) + "px";

@@ -6465,13 +6465,27 @@ body.emitter-modal-open {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Topo link quality colors (gradient via stroke)
+   Topo link quality colors
 ═══════════════════════════════════════════════════════════════ */
 .topo-link-excellent { stroke: #10b981; }
 .topo-link-good      { stroke: #34d399; }
 .topo-link-fair      { stroke: #f59e0b; }
 .topo-link-poor      { stroke: #f97316; }
-.topo-link-none      { stroke: #ef4444; stroke-dasharray: 5,4; }
+.topo-link-none      { stroke: #ef4444; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Topo link type — dash patterns by medium
+   VHF  : solid line (ground-wave / LOS)
+   UHF  : long dash  (LOS, shorter range)
+   HF   : dash-dot   (NVIS / sky-wave)
+   SATCOM: dot chain  (overhead relay)
+   MESH : double-dash (multi-hop fabric)
+═══════════════════════════════════════════════════════════════ */
+.topo-link-type-vhf    { stroke-dasharray: none; stroke-width: 2.5; }
+.topo-link-type-uhf    { stroke-dasharray: 12,5; stroke-width: 2.5; }
+.topo-link-type-hf     { stroke-dasharray: 10,4,2,4; stroke-width: 2; }
+.topo-link-type-satcom { stroke-dasharray: 3,5; stroke-width: 2; opacity: 0.85; }
+.topo-link-type-mesh   { stroke-dasharray: 8,3,8,3; stroke-width: 3; }
 
 /* ═══════════════════════════════════════════════════════════════
    TO LINK — emitter identity section
@@ -6664,3 +6678,39 @@ body.emitter-modal-open {
   transform: scale(1.2);
   border-color: rgba(255,255,255,0.6);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Topology link-type legend
+═══════════════════════════════════════════════════════════════ */
+.topo-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(17,19,23,0.82);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  pointer-events: none;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+}
+.topo-legend-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 2px;
+}
+.topo-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.62rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.topo-legend-item svg { flex-shrink: 0; }

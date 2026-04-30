@@ -924,6 +924,34 @@
               <span>No emitters placed on the map yet.</span>
               <span class="fine-print">Place radio emitters in the MAP view to see topology links here.</span>
             </div>
+            <!-- Link type legend -->
+            <div class="topo-legend">
+              <svg width="0" height="0" style="position:absolute">
+                <defs>
+                  <line id="leg-vhf"    x1="0" y1="4" x2="32" y2="4" stroke-width="2.5"/>
+                  <line id="leg-uhf"    x1="0" y1="4" x2="32" y2="4" stroke-width="2.5" stroke-dasharray="12,5"/>
+                  <line id="leg-hf"     x1="0" y1="4" x2="32" y2="4" stroke-width="2"   stroke-dasharray="10,4,2,4"/>
+                  <line id="leg-satcom" x1="0" y1="4" x2="32" y2="4" stroke-width="2"   stroke-dasharray="3,5"/>
+                  <line id="leg-mesh"   x1="0" y1="4" x2="32" y2="4" stroke-width="3"   stroke-dasharray="8,3,8,3"/>
+                </defs>
+              </svg>
+              <span class="topo-legend-title">Link Type</span>
+              <span class="topo-legend-item">
+                <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#94a3b8" stroke-width="2.5"/></svg>VHF
+              </span>
+              <span class="topo-legend-item">
+                <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="12,5"/></svg>UHF
+              </span>
+              <span class="topo-legend-item">
+                <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#94a3b8" stroke-width="2" stroke-dasharray="10,4,2,4"/></svg>HF
+              </span>
+              <span class="topo-legend-item">
+                <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#94a3b8" stroke-width="2" stroke-dasharray="3,5"/></svg>SATCOM
+              </span>
+              <span class="topo-legend-item">
+                <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#94a3b8" stroke-width="3" stroke-dasharray="8,3,8,3"/></svg>MESH
+              </span>
+            </div>
             <!-- Link detail popup -->
             <div id="topoLinkPopup" class="topo-link-popup hidden">
               <div class="topo-link-popup-header">
