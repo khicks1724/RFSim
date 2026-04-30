@@ -22064,6 +22064,197 @@ function linkQualityClass(score) {
   return "topo-link-none";
 }
 
+function linkQualityLabel(score) {
+  if (score >= 85) return "Excellent";
+  if (score >= 65) return "Good";
+  if (score >= 45) return "Moderate";
+  if (score >= 20) return "Poor";
+  return "No Link";
+}
+
+function lerpColorHex(a, b, t) {
+  const aa = a.replace("#", "");
+  const bb = b.replace("#", "");
+  const ar = parseInt(aa.slice(0, 2), 16);
+  const ag = parseInt(aa.slice(2, 4), 16);
+  const ab = parseInt(aa.slice(4, 6), 16);
+  const br = parseInt(bb.slice(0, 2), 16);
+  const bg = parseInt(bb.slice(2, 4), 16);
+  const bbv = parseInt(bb.slice(4, 6), 16);
+  const mix = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, "0");
+  return `#${mix(ar, br)}${mix(ag, bg)}${mix(ab, bbv)}`;
+}
+
+function linkQualityColor(score) {
+  const s = Math.max(0, Math.min(100, Number(score) || 0));
+  if (s <= 20) return lerpColorHex("#ef4444", "#f97316", s / 20);
+  if (s <= 45) return lerpColorHex("#f97316", "#facc15", (s - 20) / 25);
+  return lerpColorHex("#facc15", "#22c55e", (s - 45) / 55);
+}
+
+function linkQualityClass(score) {
+  if (score >= 85) return "topo-link-excellent";
+  if (score >= 65) return "topo-link-good";
+  if (score >= 45) return "topo-link-fair";
+  if (score >= 20) return "topo-link-poor";
+  return "topo-link-none";
+}
+
+async function assessLinkQuality(a, b) {
+  let score = 100;
+  const reasons = [];
+  const freqMHzA = Number(a.frequencyMHz) || 0;
+  const freqMHzB = Number(b.frequencyMHz) || 0;
+  const fMhz = (freqMHzA > 0 && freqMHzB > 0) ? (freqMHzA + freqMHzB) / 2 : Math.max(freqMHzA, freqMHzB, 100);
+  const bandA = freqBand(freqMHzA * 1e6);
+  const bandB = freqBand(freqMHzB * 1e6);
+  const wfA = (a.ext?.waveform || a.waveform || "").toUpperCase();
+  const wfB = (b.ext?.waveform || b.waveform || "").toUpperCase();
+  const netA = a.netId || a.net_id || null;
+  const netB = b.netId || b.net_id || null;
+  const bwA = Number(a.bandwidthKHz ?? a.ext?.bandwidthKHz) || 25;
+  const bwB = Number(b.bandwidthKHz ?? b.ext?.bandwidthKHz) || 25;
+  const h1 = Number.isFinite(a.antennaHeightM) ? a.antennaHeightM : 2;
+  const h2 = Number.isFinite(b.antennaHeightM) ? b.antennaHeightM : 2;
+  const deltaMHz = Math.abs(freqMHzA - freqMHzB);
+  const channelTolMHz = Math.max(0.025, Math.max(bwA, bwB) / 1000);
+  const SATCOM_WF = ["MUOS", "STARSHIELD", "INMARSAT", "VIASAT", "BLOS", "SATCOM", "WGS", "AEHF", "LINK 182"];
+  const isSatcom = SATCOM_WF.some((wf) => wfA.includes(wf) || wfB.includes(wf))
+    || a.ext?.satcomEnabled || b.ext?.satcomEnabled;
+
+  if (bandA !== bandB) {
+    score -= 55;
+    reasons.push(`Different frequency bands (${bandA} vs ${bandB}) — direct comms are unlikely without a gateway.`);
+  } else {
+    reasons.push(`Same frequency band (${bandA}) — radios are operating in a compatible band.`);
+  }
+
+  if (wfA && wfB) {
+    if (wfA === wfB) reasons.push(`Matching waveform (${wfA}).`);
+    else {
+      score -= 35;
+      reasons.push(`Waveform mismatch (${wfA} vs ${wfB}) — incompatible air interface without a bridge.`);
+    }
+  }
+
+  if (netA && netB) {
+    if (netA === netB) {
+      score += 6;
+      reasons.push(`Matching Net ID (${netA}) — same logical net.`);
+    } else {
+      score -= 12;
+      reasons.push(`Different Net IDs (${netA} vs ${netB}) — separate configured nets.`);
+    }
+  }
+
+  if (!isSatcom) {
+    if (deltaMHz > channelTolMHz) {
+      score -= 45;
+      reasons.push(`Frequency separation ${deltaMHz.toFixed(3)} MHz exceeds channel tolerance (${channelTolMHz.toFixed(3)} MHz).`);
+    } else if (deltaMHz > 0.001) {
+      score -= 4;
+      reasons.push(`Small frequency offset (${deltaMHz.toFixed(3)} MHz) reduces tuning overlap.`);
+    } else {
+      reasons.push(`Frequency alignment is tight (${freqMHzA.toFixed(3)} / ${freqMHzB.toFixed(3)} MHz).`);
+    }
+  } else {
+    reasons.push("SATCOM/BLOS path detected — surface distance and horizontal terrain mask are not the primary limiters.");
+  }
+
+  if (!(a.lat && a.lon && b.lat && b.lon)) {
+    score = Math.max(0, Math.min(100, score));
+    return { score, label: linkQualityLabel(score), reasons, terrain: null, isSatcom };
+  }
+
+  const distKm = haversineKm(a.lat, a.lon, b.lat, b.lon);
+  const distM = Math.max(distKm * 1000, 1);
+  const fspl = fsplDb(fMhz, distM);
+  const radioHorizonKm = 3.57 * (Math.sqrt(Math.max(h1, 0)) + Math.sqrt(Math.max(h2, 0)));
+  let los = { hasTerrain: false };
+  let terrainPenaltyDb = 0;
+
+  if (!isSatcom) {
+    los = await computeTerrainLosAsync(a.lat, a.lon, h1, b.lat, b.lon, h2);
+    if (los.hasTerrain) {
+      if (los.blocked && los.minClearanceM < 0) {
+        const obstructionM = Math.abs(los.minClearanceM);
+        const wavelengthM = 300 / Math.max(fMhz, 0.1);
+        const v = obstructionM * Math.sqrt((2 / wavelengthM) * (2 / distM));
+        terrainPenaltyDb = v <= -0.78 ? 0 : 6.9 + 20 * Math.log10(Math.sqrt((v - 0.1) ** 2 + 1) + v - 0.1);
+        terrainPenaltyDb = Math.min(terrainPenaltyDb, 45);
+        score -= terrainPenaltyDb >= 30 ? 42 : terrainPenaltyDb >= 18 ? 28 : 14;
+        reasons.push(`Terrain blocked (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${obstructionM.toFixed(0)} m obstruction, ~${terrainPenaltyDb.toFixed(1)} dB diffraction penalty.`);
+      } else {
+        const clr = Number.isFinite(los.minClearanceM) ? `${los.minClearanceM.toFixed(0)} m clearance` : "clear";
+        reasons.push(`Terrain LOS clear (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${clr}.`);
+      }
+    } else {
+      reasons.push("No terrain data available — terrain effects omitted from the estimate.");
+    }
+
+    if (distKm > radioHorizonKm) {
+      const overHorizonKm = distKm - radioHorizonKm;
+      const penalty = Math.min(26, 8 + overHorizonKm * 1.2);
+      score -= penalty;
+      reasons.push(`Path length ${distKm.toFixed(1)} km exceeds radio horizon ${radioHorizonKm.toFixed(1)} km by ${overHorizonKm.toFixed(1)} km.`);
+    } else {
+      reasons.push(`Path length ${distKm.toFixed(1)} km remains inside the nominal radio horizon (${radioHorizonKm.toFixed(1)} km).`);
+    }
+  }
+
+  function estimateOneWayBudget(tx, rx) {
+    const txPowerW = Math.max(Number(tx.powerW) || 0, 0.1);
+    const txGainDbi = Number.isFinite(tx.antennaGainDbi) ? tx.antennaGainDbi : 2.15;
+    const rxGainDbi = Number.isFinite(rx.antennaGainDbi) ? rx.antennaGainDbi : 2.15;
+    const txLossDb = Number.isFinite(tx.systemLossDb) ? tx.systemLossDb : 3;
+    const rxLossDb = Number.isFinite(rx.systemLossDb) ? rx.systemLossDb : 3;
+    const rxSensDbm = Number.isFinite(rx.receiverSensitivityDbm) ? rx.receiverSensitivityDbm : -107;
+    const eirpDbm = wattsToDbm(txPowerW) + txGainDbi - txLossDb;
+    const pathLossDb = isSatcom ? 0 : fspl + terrainPenaltyDb;
+    const rssiDbm = eirpDbm + rxGainDbi - pathLossDb - rxLossDb;
+    const marginDb = rssiDbm - rxSensDbm;
+    return { eirpDbm, rssiDbm, marginDb, rxSensDbm, pathLossDb };
+  }
+
+  const ab = estimateOneWayBudget(a, b);
+  const ba = estimateOneWayBudget(b, a);
+  const worst = ab.marginDb <= ba.marginDb ? ab : ba;
+  const asymmetryDb = Math.abs(ab.marginDb - ba.marginDb);
+
+  if (worst.marginDb < 0) {
+    score -= Math.min(60, 18 + Math.abs(worst.marginDb) * 1.8);
+    reasons.push(`Worst-case receive margin is ${worst.marginDb.toFixed(1)} dB — below receiver sensitivity, so the link is effectively down.`);
+  } else if (worst.marginDb < 8) {
+    score -= 28;
+    reasons.push(`Worst-case receive margin is only ${worst.marginDb.toFixed(1)} dB — poor fade tolerance and intermittent performance.`);
+  } else if (worst.marginDb < 18) {
+    score -= 14;
+    reasons.push(`Worst-case receive margin is ${worst.marginDb.toFixed(1)} dB — usable but only moderate reliability.`);
+  } else {
+    reasons.push(`Worst-case receive margin is ${worst.marginDb.toFixed(1)} dB — strong bidirectional link budget.`);
+  }
+
+  if (asymmetryDb > 12) {
+    score -= 8;
+    reasons.push(`Link budget asymmetry is ${asymmetryDb.toFixed(1)} dB between directions, which can hurt duplex reliability.`);
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  return {
+    score,
+    label: linkQualityLabel(score),
+    reasons,
+    terrain: los.hasTerrain ? los : null,
+    distKm,
+    pathLossDb: isSatcom ? null : worst.pathLossDb,
+    rssiDbm: worst.rssiDbm,
+    marginDb: worst.marginDb,
+    forwardMarginDb: ab.marginDb,
+    reverseMarginDb: ba.marginDb,
+    isSatcom,
+  };
+}
+
 // Returns a CSS class encoding the link medium type (dash pattern)
 function linkTypeClass(emA, emB) {
   const wfA = (emA?.ext?.waveform || emA?.waveform || "").toUpperCase();
@@ -22090,8 +22281,7 @@ function showTopoLinkDetail(a, b, quality, nameA, nameB) {
   nameA = nameA || a.name || a.id || "Emitter A";
   nameB = nameB || b.name || b.id || "Emitter B";
   if (title) title.textContent = `${nameA} ↔ ${nameB}`;
-  const scoreColor = quality.score >= 80 ? "#10b981" : quality.score >= 60 ? "#34d399" :
-                     quality.score >= 40 ? "#f59e0b" : quality.score >= 20 ? "#f97316" : "#ef4444";
+  const scoreColor = linkQualityColor(quality.score);
   const t = quality.terrain;
   const terrainBadge = !t ? `<span style="color:var(--muted);font-size:0.65rem">⛰ No terrain data</span>`
     : t.blocked
@@ -22358,6 +22548,7 @@ function redrawTopoLinks() {
       line.setAttribute("y2", end.y);
       line.setAttribute("stroke-width", "2.5");
       line.setAttribute("class", `topo-link ${cls} ${lnk.typeClass || ""}`);
+      line.style.stroke = linkQualityColor(lnk.quality.score);
       line.addEventListener("mousemove", (e) => {
         tooltip.style.display = "block";
         tooltip.style.left = (e.clientX + 12) + "px";
