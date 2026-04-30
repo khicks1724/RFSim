@@ -5820,7 +5820,7 @@ body.emitter-modal-open {
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
-  width: 130px;
+  width: 160px;
   background: transparent;
   border: none;
   box-shadow: none;
@@ -5846,8 +5846,8 @@ body.emitter-modal-open {
 .to-unit.selected .to-unit-card { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; border-radius: 10px; }
 .to-unit.selected .to-unit-icon { outline: none; }
 .to-unit-icon {
-  width: 130px;
-  height: 130px;
+  width: 143px;
+  height: 143px;
   display: block;
   border-radius: 2px;
   pointer-events: none;
@@ -5857,8 +5857,8 @@ body.emitter-modal-open {
 .milstd-stack {
   position: relative;
   display: block;
-  width: 130px;
-  height: 130px;
+  width: 143px;
+  height: 143px;
   pointer-events: none;
   -webkit-user-drag: none;
 }
@@ -5872,7 +5872,7 @@ body.emitter-modal-open {
   -webkit-user-drag: none;
 }
 .to-unit-label {
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   color: #000000;
   text-align: center;
   line-height: 1.2;
@@ -5880,6 +5880,7 @@ body.emitter-modal-open {
   word-break: break-word;
   pointer-events: none;
   font-weight: 700;
+  margin-top: -2px;
 }
 .to-unit-size-badge {
   font-size: 0.6rem;
@@ -6166,15 +6167,15 @@ body.emitter-modal-open {
   min-height: 10px;
 }
 .topo-unit-icon-wrap {
-  width: 80px;
-  height: 80px;
+  width: 112px;
+  height: 112px;
   display: block;
   pointer-events: none;
 }
 .topo-unit-icon-wrap .milstd-stack,
 .topo-unit-icon-wrap svg {
-  width: 80px !important;
-  height: 80px !important;
+  width: 112px !important;
+  height: 112px !important;
 }
 .topo-unit-name {
   font-size: 0.75rem;

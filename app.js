@@ -20297,7 +20297,7 @@ function renderToPickerCanvas() {
 
   // Compute positions using same layout algorithm but write to temp objects
   const tempUnits = JSON.parse(JSON.stringify(_toState.units));
-  const H_GAP = 140, V_GAP = 180;
+  const H_GAP = 190, V_GAP = 230;
 
   function subtreeWidth(id) {
     const children = linkSnap.filter(l => l.parentId === id).map(l => l.childId);
@@ -21323,8 +21323,8 @@ function toAutoLayout() {
   const roots = _toState.units.filter(u => !childSet.has(u.id));
   if (!roots.length) return;
 
-  const H_GAP = 150;
-  const V_GAP = 190;
+  const H_GAP = 190;
+  const V_GAP = 230;
 
   function subtreeWidth(id, depth) {
     const children = _toState.links.filter(l => l.parentId === id).map(l => l.childId);
