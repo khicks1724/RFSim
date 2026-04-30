@@ -21487,33 +21487,38 @@ async function renderTopologyView() {
   }
   if (empty) empty.classList.add("hidden");
 
-  // ── Tree layout ───────────────────────────────────────────────────
-  const NODE_W = 170, NODE_V = 240;
-  const unitPos = new Map(); // key → {x, y}
+  // ── Smart layout ──────────────────────────────────────────────────
+  // Card dimensions (approximate — cards are centered on their position point)
+  const CARD_W = 160, CARD_H = 220, PAD_X = 80, PAD_Y = 80;
+  const SLOT_W = CARD_W + PAD_X, SLOT_H = CARD_H + PAD_Y;
+  const unitPos = new Map(); // key → {x, y}  (visual center)
+  const n = toLinkedUnits.length;
 
-  function subtreeWidth(uid) {
-    const children = _toState.links.filter(l => l.parentId === uid && linkedUnitIds.has(l.childId)).map(l => l.childId);
-    if (!children.length) return NODE_W;
-    return Math.max(NODE_W, children.reduce((s, cid) => s + subtreeWidth(cid), 0));
-  }
-  function layoutUnit(uid, x, y) {
-    unitPos.set(uid, { x, y });
-    const children = _toState.links.filter(l => l.parentId === uid && linkedUnitIds.has(l.childId)).map(l => l.childId);
-    let cx = x - subtreeWidth(uid) / 2;
-    for (const cid of children) {
-      const w = subtreeWidth(cid);
-      layoutUnit(cid, cx + w / 2, y + NODE_V);
-      cx += w;
-    }
-  }
+  if (n === 1) {
+    // Single node — center of viewport
+    unitPos.set(toLinkedUnits[0].id, { x: 400, y: 300 });
 
-  const linkedChildIds = new Set(_toState.links.filter(l => linkedUnitIds.has(l.childId)).map(l => l.childId));
-  const roots = toLinkedUnits.filter(u => !linkedChildIds.has(u.id));
-  let startX = NODE_W;
-  for (const root of roots) {
-    const w = subtreeWidth(root.id);
-    layoutUnit(root.id, startX + w / 2, 100);
-    startX += w + NODE_W * 0.5;
+  } else if (n === 2) {
+    // Side by side
+    unitPos.set(toLinkedUnits[0].id, { x: 300, y: 300 });
+    unitPos.set(toLinkedUnits[1].id, { x: 300 + SLOT_W, y: 300 });
+
+  } else if (n <= 6) {
+    // Circle arrangement — evenly spaced, top-first
+    const R = Math.max(SLOT_W, SLOT_H) * n / (2 * Math.PI) * 1.1;
+    const cx = R + CARD_W, cy = R + CARD_H;
+    toLinkedUnits.forEach((u, i) => {
+      const angle = (2 * Math.PI * i / n) - Math.PI / 2;
+      unitPos.set(u.id, { x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) });
+    });
+
+  } else {
+    // Grid layout — roughly square, left-to-right, top-to-bottom
+    const cols = Math.ceil(Math.sqrt(n));
+    toLinkedUnits.forEach((u, i) => {
+      const col = i % cols, row = Math.floor(i / cols);
+      unitPos.set(u.id, { x: CARD_W / 2 + PAD_X / 2 + col * SLOT_W, y: CARD_H / 2 + PAD_Y / 2 + row * SLOT_H });
+    });
   }
 
   // posEntries: one entry per TO-unit card; emitters sorted lowest freq first
@@ -21629,9 +21634,8 @@ async function renderTopologyView() {
   }
 
   // ── Draw links + wire interaction ─────────────────────────────────
-  // Defer link draw one frame so cards have rendered dimensions for center calculation
   wireTopoCanvasPanZoom();
-  requestAnimationFrame(() => redrawTopoLinks());
+  redrawTopoLinks();
   wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
 }
 
@@ -21861,29 +21865,46 @@ let _topoLinkDescriptors = [];
 
 function redrawTopoLinks() {
   const svg = document.getElementById("topoSvg");
-  const nodes = document.getElementById("topoNodes");
-  if (!svg || !nodes) return;
+  if (!svg) return;
   svg.innerHTML = "";
   const tooltip = getOrCreateTopoTooltip();
 
-  // Node center in world space = stored top-left + half the card's rendered size.
-  // We read the actual DOM element so the offset is always accurate regardless of card height.
-  function nodeCenter(key) {
-    const pos = _topoNodePositions.get(key);
-    if (!pos) return null;
-    const el = nodes.querySelector(`.topo-node[data-key="${CSS.escape(key)}"]`);
-    if (!el) return { x: pos.x, y: pos.y };
-    return { x: pos.x + el.offsetWidth / 2, y: pos.y + el.offsetHeight / 2 };
+  // Count links per node-pair so parallel links can be offset perpendicularly
+  const pairCounts = new Map(); // pairKey → total count
+  const pairIndex  = new Map(); // pairKey → next index
+  for (const lnk of _topoLinkDescriptors) {
+    const k = [lnk.keyA, lnk.keyB].sort().join("|");
+    pairCounts.set(k, (pairCounts.get(k) || 0) + 1);
+    if (!pairIndex.has(k)) pairIndex.set(k, 0);
   }
 
+  const LINK_OFFSET = 10; // px between parallel links
+
   for (const lnk of _topoLinkDescriptors) {
-    const pa = nodeCenter(lnk.keyA);
-    const pb = nodeCenter(lnk.keyB);
+    // Positions are stored as the visual center of each node (CSS transform: translate(-50%,-50%))
+    const pa = _topoNodePositions.get(lnk.keyA);
+    const pb = _topoNodePositions.get(lnk.keyB);
     if (!pa || !pb) continue;
+
+    // Compute perpendicular offset for parallel links between the same pair
+    const pairKey = [lnk.keyA, lnk.keyB].sort().join("|");
+    const total = pairCounts.get(pairKey) || 1;
+    const idx   = pairIndex.get(pairKey);
+    pairIndex.set(pairKey, idx + 1);
+    const offsetMag = total > 1 ? (idx - (total - 1) / 2) * LINK_OFFSET : 0;
+
+    let x1 = pa.x, y1 = pa.y, x2 = pb.x, y2 = pb.y;
+    if (offsetMag !== 0) {
+      const dx = pb.x - pa.x, dy = pb.y - pa.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len * offsetMag, ny = dx / len * offsetMag;
+      x1 += nx; y1 += ny; x2 += nx; y2 += ny;
+    }
+
     const cls = linkQualityClass(lnk.quality.score);
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", pa.x); line.setAttribute("y1", pa.y);
-    line.setAttribute("x2", pb.x); line.setAttribute("y2", pb.y);
+    line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2); line.setAttribute("y2", y2);
     line.setAttribute("stroke-width", "2.5");
     line.setAttribute("class", `topo-link ${cls} ${lnk.typeClass || ""}`);
     line.addEventListener("mousemove", (e) => {
