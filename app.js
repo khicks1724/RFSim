@@ -20454,13 +20454,13 @@ const UNIT_SIZE_SYMBOLS = {
 };
 
 const UNIT_TYPE_SYMBOLS = {
-  infantry:            "⊞",
-  light_infantry:      "⊟",
-  mechanized_infantry: "⊡",
-  airborne_infantry:   "⊠",
+  infantry:            "X",
+  light_infantry:      "X",
+  mechanized_infantry: "X",
+  airborne_infantry:   "X",
   ranger:              "∩",
   special_forces:      "✕",
-  marine_infantry:     "⊞",
+  marine_infantry:     "X",
   recon:               "◎",
   armor:               "⬭",
   armored_cavalry:     "◑",
@@ -20499,6 +20499,11 @@ const UNIT_TYPE_SYMBOLS = {
   mine_warfare:        "⬛",
   coast_guard:         "⬛",
   default:             "□",
+};
+
+const TO_UNIT_TYPE_ALIASES = {
+  ranger: "special_forces",
+  marine_infantry: "infantry",
 };
 
 const MILSTD_FRAME_PATHS = {
@@ -20612,12 +20617,12 @@ const MILSTD_FALLBACK_TEXT = {
 };
 
 function resolveMilstdDomain(unit) {
-  if (!unit?.type) return "ground";
-  if (unit.type === "space") return "space";
-  if (["naval_surface", "naval_aviation", "amphibious", "mine_warfare", "coast_guard"].includes(unit.type)) return "sea_surface";
-  if (unit.type === "submarine") return "subsurface";
-  if (unit.type.includes("fixed") || unit.type.includes("rotary")
-    || ["fighter", "bomber", "attack_fixed", "transport_fixed", "isr_fixed", "tanker", "uav_fixed", "attack_helo", "utility_helo", "recon_helo", "medevac", "uav_rotary"].includes(unit.type)) {
+  const type = normalizeToUnitType(unit?.type);
+  if (type === "space") return "space";
+  if (["naval_surface", "naval_aviation", "amphibious", "mine_warfare", "coast_guard"].includes(type)) return "sea_surface";
+  if (type === "submarine") return "subsurface";
+  if (type.includes("fixed") || type.includes("rotary")
+    || ["fighter", "bomber", "attack_fixed", "transport_fixed", "isr_fixed", "tanker", "uav_fixed", "attack_helo", "utility_helo", "recon_helo", "medevac", "uav_rotary"].includes(type)) {
     return "air";
   }
   return "ground";
@@ -20629,7 +20634,8 @@ function resolveMilstdFramePath(unit) {
 }
 
 function resolveMilstdMainPath(unit) {
-  const asset = MILSTD_MAIN_ASSETS[unit.type];
+  const type = normalizeToUnitType(unit?.type);
+  const asset = MILSTD_MAIN_ASSETS[type];
   if (!asset) return null;
   if (asset.path) return asset.path;
   if (asset.fullFrame && asset.base) {
@@ -20640,12 +20646,89 @@ function resolveMilstdMainPath(unit) {
 }
 
 function getMilstdFallbackText(unit) {
-  return MILSTD_FALLBACK_TEXT[unit.type]
-    || UNIT_TYPE_SYMBOLS[unit.type]
+  const type = normalizeToUnitType(unit?.type);
+  return MILSTD_FALLBACK_TEXT[type]
+    || UNIT_TYPE_SYMBOLS[type]
     || UNIT_TYPE_SYMBOLS.default;
 }
 
+function normalizeToUnitType(type) {
+  return TO_UNIT_TYPE_ALIASES[type] || type || "infantry";
+}
+
+function normalizeToUnit(unit) {
+  if (!unit || typeof unit !== "object") return unit;
+  const normalizedType = normalizeToUnitType(unit.type);
+  if (unit.type !== normalizedType) unit.type = normalizedType;
+  return unit;
+}
+
+function renderToCustomSymbolShapes(type, stroke = "#000000", milstd = false) {
+  const normalizedType = normalizeToUnitType(type);
+  if (!["infantry", "light_infantry", "mechanized_infantry", "airborne_infantry", "armor"].includes(normalizedType)) {
+    return "";
+  }
+  if (milstd) {
+    const xLines = `
+      <line x1="126.5" y1="276" x2="485.5" y2="516" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <line x1="126.5" y1="516" x2="485.5" y2="276" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+    `;
+    const oval = `
+      <path d="M250.552 441c-22.895 0-41.457-19.98-41.457-44.626 0-24.646 18.562-44.624 41.457-44.624" fill="none" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M361.448 351.75c22.896 0 41.457 19.979 41.457 44.624 0 24.645-18.562 44.626-41.457 44.626" fill="none" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <line x1="250.552" y1="351.75" x2="361.448" y2="351.75" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+      <line x1="250.552" y1="441" x2="361.448" y2="441" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/>
+    `;
+    const canopy = `<path d="M228 322c0-32 78-32 78 0c0-32 78-32 78 0" fill="none" stroke="${stroke}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`;
+    switch (normalizedType) {
+      case "infantry":
+      case "light_infantry":
+        return xLines;
+      case "mechanized_infantry":
+        return `${xLines}${oval}`;
+      case "airborne_infantry":
+        return `${xLines}${canopy}`;
+      case "armor":
+        return oval;
+      default:
+        return "";
+    }
+  }
+
+  const xLines = `
+    <line x1="12" y1="16" x2="44" y2="40" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="44" y1="16" x2="12" y2="40" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+  `;
+  const oval = `
+    <path d="M22 34c-3.5 0-6.5-2.8-6.5-6.25S18.5 21.5 22 21.5" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M34 21.5c3.5 0 6.5 2.8 6.5 6.25S37.5 34 34 34" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="22" y1="21.5" x2="34" y2="21.5" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="22" y1="34" x2="34" y2="34" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+  `;
+  const canopy = `<path d="M18 18c0-3.8 10-3.8 10 0c0-3.8 10-3.8 10 0" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`;
+  switch (normalizedType) {
+    case "infantry":
+    case "light_infantry":
+      return xLines;
+    case "mechanized_infantry":
+      return `${xLines}${oval}`;
+    case "airborne_infantry":
+      return `${xLines}${canopy}`;
+    case "armor":
+      return oval;
+    default:
+      return "";
+  }
+}
+
+function renderMilstdCustomLayer(unit) {
+  const symbolShapes = renderToCustomSymbolShapes(unit?.type, "#000000", true);
+  if (!symbolShapes) return "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" class="milstd-layer" aria-hidden="true">${symbolShapes}</svg>`;
+}
+
 function milstd2525Svg(unit) {
+  const milstdCustomLayer = renderMilstdCustomLayer(unit);
   const framePath = resolveMilstdFramePath(unit);
   const mainPath = resolveMilstdMainPath(unit);
   const echelonPath = MILSTD_ECHELON_PATHS[unit.size] || "";
@@ -20659,18 +20742,20 @@ function milstd2525Svg(unit) {
     : "";
   return `<span class="milstd-stack ms2525-icon" aria-hidden="true">
     <img src="${framePath}" class="milstd-layer" alt="">
-    ${mainPath ? `<img src="${mainPath}" class="milstd-layer" alt="">` : fallbackLayer}
+    ${milstdCustomLayer || (mainPath ? `<img src="${mainPath}" class="milstd-layer" alt="">` : fallbackLayer)}
     ${echelonPath ? `<img src="${echelonPath}" class="milstd-layer" alt="">` : ""}
   </span>`;
 }
 
 function ms2525Svg(unit) {
+  const type = normalizeToUnitType(unit?.type);
   const col = MIL_COLORS[unit.affiliation] || MIL_COLORS.unknown;
-  const sym = UNIT_TYPE_SYMBOLS[unit.type] || UNIT_TYPE_SYMBOLS.default;
+  const sym = UNIT_TYPE_SYMBOLS[type] || UNIT_TYPE_SYMBOLS.default;
+  const customSymbolShapes = renderToCustomSymbolShapes(type, col.text, false);
   const sizeSym = UNIT_SIZE_SYMBOLS[unit.size] || "";
-  const isAir = unit.type && (unit.type.includes("fixed") || unit.type.includes("rotary") ||
+  const isAir = type && (type.includes("fixed") || type.includes("rotary") ||
     ["fighter","bomber","attack_fixed","transport_fixed","isr_fixed","tanker","uav_fixed",
-     "attack_helo","utility_helo","recon_helo","medevac","uav_rotary","naval_aviation"].includes(unit.type));
+     "attack_helo","utility_helo","recon_helo","medevac","uav_rotary","naval_aviation"].includes(type));
   const frameShape = isAir
     ? `<ellipse cx="28" cy="28" rx="24" ry="20" fill="${col.bg}" stroke="${col.frame}" stroke-width="2.5"/>`
     : `<rect x="4" y="8" width="48" height="40" rx="2" fill="${col.bg}" stroke="${col.frame}" stroke-width="2.5"/>`;
@@ -20682,8 +20767,8 @@ function ms2525Svg(unit) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" class="ms2525-icon">
     ${frameShape}
     ${hostile_marks}
-    <text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
-      font-size="16" font-weight="bold" fill="${col.text}" font-family="monospace">${sym}</text>
+    ${customSymbolShapes || `<text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
+      font-size="16" font-weight="bold" fill="${col.text}" font-family="monospace">${sym}</text>`}
     <text x="28" y="6" text-anchor="middle" dominant-baseline="middle"
       font-size="8" font-weight="bold" fill="#000000" font-family="monospace">${sizeSym}</text>
   </svg>`;
@@ -20822,13 +20907,18 @@ function initPlanViewIfNeeded() {
     if (!_toState.selectedUnit) return;
     _toState.units = _toState.units.filter(u => u.id !== _toState.selectedUnit);
     _toState.links = _toState.links.filter(l => l.parentId !== _toState.selectedUnit && l.childId !== _toState.selectedUnit);
-    _toState.selectedUnit = null;
+    clearToSelection();
     hideToContextMenu();
     renderToView();
   });
   document.getElementById("toLinkCancelBtn")?.addEventListener("click", cancelToLink);
 
-  canvas.addEventListener("click", () => { hideToContextMenu(); });
+  canvas.addEventListener("click", (e) => {
+    hideToContextMenu();
+    if (e.target === canvas || e.target === world || e.target === edgeSvg) {
+      clearToSelection();
+    }
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { hideToContextMenu(); cancelToLink(); }
   });
@@ -20840,7 +20930,7 @@ function initPlanViewIfNeeded() {
 }
 
 function addToUnit(props) {
-  const unit = { id: _toState.nextId++, ...props };
+  const unit = { id: _toState.nextId++, ...props, type: normalizeToUnitType(props?.type) };
   _toState.units.push(unit);
   renderToView();
   return unit;
@@ -20850,7 +20940,7 @@ function renderToView() {
   const world = document.getElementById("toWorld");
   if (!world) return;
   world.innerHTML = "";
-  for (const unit of _toState.units) renderToUnit(unit);
+  for (const unit of _toState.units) renderToUnit(normalizeToUnit(unit));
   renderToEdges();
 }
 
@@ -20922,6 +21012,11 @@ function hideToContextMenu() {
 function cancelToLink() {
   _toState.linkMode = null;
   document.getElementById("toLinkBanner")?.classList.add("hidden");
+}
+
+function clearToSelection() {
+  _toState.selectedUnit = null;
+  document.querySelectorAll(".to-unit.selected").forEach((el) => el.classList.remove("selected"));
 }
 
 function renderToEdges() {
