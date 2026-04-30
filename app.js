@@ -21574,9 +21574,12 @@ async function renderTopologyView() {
     }
   }
 
-  // Debug: log what emitters we found and what pairs matched
-  console.log("[Topo] posEntries:", posEntries.map(e => ({ key: e.key, unit: e.unit?.label, emitters: e.emitters.map(em => ({ name: em.name, label: em.emitterLabel, freq: em.frequencyMHz, wf: em.ext?.waveform, satcom: em.ext?.satcomEnabled })) })));
-  console.log("[Topo] candidatePairs:", candidatePairs.map(p => ({ a: p.a.unit?.label, b: p.b.unit?.label, emA: p.emA.emitterLabel || p.emA.name, emB: p.emB.emitterLabel || p.emB.name, bucket: p.pairKey })));
+  // Debug overlay
+  { const dbg = document.getElementById("_topoDebug") || (() => { const d = document.createElement("div"); d.id = "_topoDebug"; d.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#0f0;font:11px monospace;padding:6px 12px;border-radius:6px;z-index:9999;max-width:700px;white-space:pre-wrap"; document.body.appendChild(d); return d; })();
+    dbg.textContent = `Topo: ${posEntries.length} units, ${candidatePairs.length} pairs\n` +
+      posEntries.map(e => `  ${e.unit?.label}: ${e.emitters.map(em => `${em.emitterLabel||em.name}@${em.frequencyMHz}MHz wf=${em.ext?.waveform||"?"} satcom=${!!em.ext?.satcomEnabled}`).join(", ")}`).join("\n") +
+      (candidatePairs.length ? "\nPairs:\n" + candidatePairs.map(p => `  ${p.a.unit?.label}↔${p.b.unit?.label}: ${p.emA.emitterLabel||p.emA.name} / ${p.emB.emitterLabel||p.emB.name} [${p.pairKey.split("|")[2]}]`).join("\n") : "\n  NO PAIRS");
+  }
 
   // Assess link quality for all pairs in parallel
   const qualityResults = await Promise.all(
@@ -22197,6 +22200,7 @@ function wireTopoCanvasPanZoom() {
   let dragging = null; // { node, key, startClientX, startClientY, origX, origY } | { panning, startClientX, startClientY }
 
   canvas.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return; // left button only
     const nodeEl = e.target.closest(".topo-node");
     if (nodeEl) {
       e.preventDefault();
@@ -22208,9 +22212,8 @@ function wireTopoCanvasPanZoom() {
       nodeEl.classList.add("topo-dragging");
       return;
     }
-    if (e.target === canvas || e.target.closest(".topo-svg")) {
-      dragging = { panning: true, startClientX: e.clientX - panOffset.x, startClientY: e.clientY - panOffset.y };
-    }
+    // Pan when clicking canvas background (no node hit)
+    dragging = { panning: true, startClientX: e.clientX - panOffset.x, startClientY: e.clientY - panOffset.y };
   }, { signal: sig });
 
   document.addEventListener("mousemove", (e) => {

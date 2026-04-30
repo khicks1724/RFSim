@@ -6095,11 +6095,11 @@ body.emitter-modal-open {
 }
 .topo-canvas:active { cursor: grabbing; }
 .topo-canvas:focus { outline: none; }
-/* SVG lives inside .topo-nodes (the world div) so lines share the same transform */
+/* SVG lives inside .topo-nodes so lines share the same transform */
 .topo-svg {
   position: absolute;
   top: 0; left: 0;
-  width: 0; height: 0;
+  width: 100vw; height: 100vh;
   overflow: visible;
   pointer-events: none;
 }
@@ -6111,12 +6111,18 @@ body.emitter-modal-open {
   stroke-width: 2.5;
   fill: none;
 }
-/* The single world container — gets the pan/zoom transform */
+/* The world container — gets the pan/zoom transform; must fill canvas for hit-testing */
 .topo-nodes {
   position: absolute;
   top: 0; left: 0;
-  width: 0; height: 0;
+  width: 100%;
+  height: 100%;
   transform-origin: 0 0;
+  pointer-events: none;
+}
+/* Re-enable pointer events on nodes themselves */
+.topo-node {
+  pointer-events: auto;
 }
 /* Topology node wrapper */
 .topo-node {
