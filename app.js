@@ -9413,7 +9413,8 @@ function buildLosMatrix(assetsToCheck) {
 }
 
 // Async version of computeTerrainLos — falls back to Cesium Ion terrain sampling
-// when no DTED file is loaded. Samples fewer points (20) to limit API calls.
+// when no DTED file is loaded. Uses distance-scaled sampling so narrow ridges
+// do not get skipped on long or complex paths.
 async function computeTerrainLosAsync(lat1, lon1, h1m, lat2, lon2, h2m) {
   const terrain = getActiveTerrain();
   if (terrain) {
@@ -9425,13 +9426,17 @@ async function computeTerrainLosAsync(lat1, lon1, h1m, lat2, lon2, h2m) {
     return { hasTerrain: false };
   }
 
-  const SAMPLES = 20;
   const EARTH_R = 6371000;
   const Re = (4 / 3) * EARTH_R;
 
   const distM = state.map.distance({ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 });
   if (distM < 10) {
     return { hasTerrain: true, blocked: false, minClearanceM: 9999, distanceM: distM };
+  }
+  const SAMPLES = clamp(Math.ceil(distM / 150), 48, 240);
+  const sampleFractions = [];
+  for (let i = 1; i < SAMPLES; i++) {
+    sampleFractions.push(i / SAMPLES);
   }
 
   // Sample endpoint elevations
@@ -9452,26 +9457,33 @@ async function computeTerrainLosAsync(lat1, lon1, h1m, lat2, lon2, h2m) {
   let blocked = false;
   let sampledAny = false;
 
-  for (let i = 1; i < SAMPLES; i++) {
-    const frac = i / SAMPLES;
-    const lat = lat1 + (lat2 - lat1) * frac;
-    const lon = lon1 + (lon2 - lon1) * frac;
-    const terrainElM = await sampleCesiumTerrainElevation(lat, lon);
-    if (terrainElM === null) continue;
-    sampledAny = true;
+  const CHUNK_SIZE = 12;
+  for (let offset = 0; offset < sampleFractions.length; offset += CHUNK_SIZE) {
+    const chunk = sampleFractions.slice(offset, offset + CHUNK_SIZE);
+    const chunkSamples = await Promise.all(chunk.map(async (frac) => {
+      const lat = lat1 + (lat2 - lat1) * frac;
+      const lon = lon1 + (lon2 - lon1) * frac;
+      const terrainElM = await sampleCesiumTerrainElevation(lat, lon);
+      return { frac, lat, lon, terrainElM };
+    }));
 
-    const losHeightM = msl1 + (msl2 - msl1) * frac;
-    const d = frac * distM;
-    const bulgeCorrectionM = (d * (distM - d)) / (2 * Re);
-    const clearanceM = (losHeightM - bulgeCorrectionM) - terrainElM;
+    for (const sample of chunkSamples) {
+      if (sample.terrainElM === null) continue;
+      sampledAny = true;
 
-    if (clearanceM < minClearanceM) {
-      minClearanceM = clearanceM;
-      worstFrac = frac;
-      worstLat = lat;
-      worstLon = lon;
+      const losHeightM = msl1 + (msl2 - msl1) * sample.frac;
+      const d = sample.frac * distM;
+      const bulgeCorrectionM = (d * (distM - d)) / (2 * Re);
+      const clearanceM = (losHeightM - bulgeCorrectionM) - sample.terrainElM;
+
+      if (clearanceM < minClearanceM) {
+        minClearanceM = clearanceM;
+        worstFrac = sample.frac;
+        worstLat = sample.lat;
+        worstLon = sample.lon;
+      }
+      if (clearanceM < 0) blocked = true;
     }
-    if (clearanceM < 0) blocked = true;
   }
 
   if (!sampledAny) return { hasTerrain: false };
@@ -22270,6 +22282,7 @@ async function assessLinkQuality(a, b) {
   let los = { hasTerrain: false };
   let terrainPenaltyDb = 0;
   let horizonPenaltyDb = 0;
+  let severeBlockedLos = false;
   const weatherDistanceKm = isSatcom ? Math.max(8, Math.min(25, distKm)) : distKm;
   const weatherLossDb = topologyAtmosphericAttenuation(fMhz, state.weather, weatherDistanceKm);
 
@@ -22306,6 +22319,14 @@ async function assessLinkQuality(a, b) {
         }
         terrainPenaltyDb = Math.min(knifeEdgeLossDb + blockedExtraLossDb, isMesh ? 90 : isUhfLike ? 78 : isVhfLike ? 62 : 45);
         score -= blockedScorePenalty + (fresnelIntrusion >= 1 ? 14 : fresnelIntrusion >= 0.6 ? 9 : 5);
+        severeBlockedLos = (isMesh && (obstructionM >= 25 || fresnelIntrusion >= 1.0 || terrainPenaltyDb >= 40))
+          || (isUhfLike && (obstructionM >= 60 || fresnelIntrusion >= 1.15 || terrainPenaltyDb >= 36))
+          || (isVhfLike && (obstructionM >= 120 || fresnelIntrusion >= 1.6 || terrainPenaltyDb >= 32));
+        if (severeBlockedLos) {
+          terrainPenaltyDb = Math.max(terrainPenaltyDb, isMesh ? 110 : isUhfLike ? 95 : 82);
+          score = Math.min(score, 6);
+          reasons.push("Terrain blockage is severe enough that this ground link should be treated as effectively non-viable, not merely degraded.");
+        }
         reasons.push(`Terrain blocked (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${obstructionM.toFixed(0)} m obstruction, ${fresnelRadiusM.toFixed(1)} m Fresnel radius, ~${terrainPenaltyDb.toFixed(1)} dB excess loss.`);
       } else {
         const clr = Number.isFinite(los.minClearanceM) ? `${los.minClearanceM.toFixed(0)} m clearance` : "clear";
@@ -22370,6 +22391,10 @@ async function assessLinkQuality(a, b) {
   if (asymmetryDb > 12) {
     score -= 8;
     reasons.push(`Link budget asymmetry is ${asymmetryDb.toFixed(1)} dB between directions, which can hurt duplex reliability.`);
+  }
+
+  if (severeBlockedLos) {
+    score = Math.min(score, 3);
   }
 
   score = Math.max(0, Math.min(100, score));
