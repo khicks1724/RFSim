@@ -21406,6 +21406,7 @@ function scheduleTopoRefresh(delayMs = 800) {
 }
 
 async function renderTopologyView() {
+  try {
   const svg   = document.getElementById("topoSvg");
   const nodes = document.getElementById("topoNodes");
   const empty = document.getElementById("topoEmptyMsg");
@@ -21547,15 +21548,21 @@ async function renderTopologyView() {
           const wfA = (emA.ext?.waveform || "").toUpperCase();
           const wfB = (emB.ext?.waveform || "").toUpperCase();
           const satA = isSatcomEmitter(emA), satB = isSatcomEmitter(emB);
-          // SATCOM: match on waveform bucket only (ignore freq — they relay via satellite)
-          // Non-SATCOM: require same frequency and compatible waveform
+          // Match by same radio model (emitterLabel) — strongest signal
+          const labelA = (emA.emitterLabel || "").toUpperCase();
+          const labelB = (emB.emitterLabel || "").toUpperCase();
+          const sameModel = labelA && labelB && labelA === labelB;
           let bucket = null;
-          if (satA && satB && (wfA === wfB || !wfA || !wfB)) {
-            bucket = wfA || wfB || "satcom";
-          } else if (!satA && !satB) {
-            const freqMatch = Math.abs((emA.frequencyMHz || 0) - (emB.frequencyMHz || 0)) < 0.01;
+          if (satA || satB) {
+            // Either is SATCOM — match if waveform or model compatible
+            const wfCompat = !wfA || !wfB || wfA === wfB;
+            if (wfCompat || sameModel) bucket = wfA || wfB || labelA || "satcom";
+          } else {
+            // Non-SATCOM: same model, OR same freq+compatible waveform
+            const freqMatch = Math.abs((emA.frequencyMHz || 0) - (emB.frequencyMHz || 0)) < 1.0;
             const waveformMatch = !wfA || !wfB || wfA === wfB;
-            if (freqMatch && waveformMatch) bucket = wfA || wfB || `freq:${emA.frequencyMHz}`;
+            if (sameModel) bucket = labelA;
+            else if (freqMatch && waveformMatch) bucket = wfA || wfB || `freq:${emA.frequencyMHz}`;
           }
           if (!bucket) continue;
           const pairKey = `${nodeA.key}|${nodeB.key}|${bucket}`;
@@ -21567,8 +21574,14 @@ async function renderTopologyView() {
     }
   }
 
+  // Debug: log what emitters we found and what pairs matched
+  console.log("[Topo] posEntries:", posEntries.map(e => ({ key: e.key, unit: e.unit?.label, emitters: e.emitters.map(em => ({ name: em.name, label: em.emitterLabel, freq: em.frequencyMHz, wf: em.ext?.waveform, satcom: em.ext?.satcomEnabled })) })));
+  console.log("[Topo] candidatePairs:", candidatePairs.map(p => ({ a: p.a.unit?.label, b: p.b.unit?.label, emA: p.emA.emitterLabel || p.emA.name, emB: p.emB.emitterLabel || p.emB.name, bucket: p.pairKey })));
+
   // Assess link quality for all pairs in parallel
-  const qualityResults = await Promise.all(candidatePairs.map(p => assessLinkQuality(p.emA, p.emB)));
+  const qualityResults = await Promise.all(
+    candidatePairs.map(p => assessLinkQuality(p.emA, p.emB).catch(() => ({ score: 50, label: "Unknown", reasons: [], terrain: null })))
+  );
   const linkList = candidatePairs.map((p, idx) => ({ ...p, quality: qualityResults[idx] }));
 
   // ── Populate position + descriptor maps ──────────────────────────
@@ -21635,8 +21648,249 @@ async function renderTopologyView() {
 
   // ── Draw links + wire interaction ─────────────────────────────────
   wireTopoCanvasPanZoom();
+  wireTopoNodeContextMenu();
   redrawTopoLinks();
   wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
+  } catch (err) {
+    console.error("[Topo] renderTopologyView error:", err);
+  }
+}
+
+// ── Topology node right-click context menu + radio popup ─────────────
+let _topoCtxAbort = null;
+
+function wireTopoNodeContextMenu() {
+  if (_topoCtxAbort) _topoCtxAbort.abort();
+  _topoCtxAbort = new AbortController();
+  const sig = _topoCtxAbort.signal;
+
+  const ctxMenu   = document.getElementById("topoNodeCtxMenu");
+  const ctxTitle  = document.getElementById("topoNodeCtxTitle");
+  const ctxList   = document.getElementById("topoNodeCtxList");
+  const radioPopup = document.getElementById("topoRadioPopup");
+  const radioTitle = document.getElementById("topoRadioPopupTitle");
+  const radioEditBtn = document.getElementById("topoRadioEditBtn");
+  const radioLinkBtn = document.getElementById("topoRadioLinkBtn");
+  const radioLinkPanel = document.getElementById("topoRadioLinkPanel");
+  const radioLinkList  = document.getElementById("topoRadioLinkList");
+  if (!ctxMenu || !radioPopup) return;
+
+  let _activeAsset = null;   // emitter asset the popup is for
+  let _activeUnitId = null;  // unit the emitter belongs to
+
+  function hideAll() {
+    ctxMenu.classList.add("hidden");
+    radioPopup.classList.add("hidden");
+    radioLinkPanel.classList.add("hidden");
+    _activeAsset = null;
+    _activeUnitId = null;
+  }
+
+  // Right-click on a topo node card
+  document.getElementById("topoCanvas").addEventListener("contextmenu", (e) => {
+    const nodeEl = e.target.closest(".topo-node");
+    if (!nodeEl) { hideAll(); return; }
+    e.preventDefault();
+    e.stopPropagation();
+    hideAll();
+
+    const unitId = nodeEl.dataset.key;
+    const unit = (_toState.units || []).find(u => u.id === unitId);
+    if (!unit) return;
+    _activeUnitId = unitId;
+
+    // Build emitter list for this unit
+    const emitters = (state.assets || []).filter(a => {
+      if (a.toUnitId === unitId) return true;
+      // name-based fallback
+      const nameKey = (a.name || "").trim().toUpperCase();
+      const unitKey = (unit.label || unit.designator || "").trim().toUpperCase();
+      return nameKey === unitKey;
+    });
+
+    ctxTitle.textContent = unit.label || unit.designator || "Unit Radios";
+    ctxList.innerHTML = emitters.map((em, i) => {
+      const label = em.emitterLabel || em.name || "Radio";
+      const wf    = em.ext?.waveform || "";
+      const freq  = `${(em.frequencyMHz || 0).toFixed(3)} MHz`;
+      const detail = [wf, freq].filter(Boolean).join(" · ");
+      return `<div class="topo-node-ctx-item" data-idx="${i}">
+        <div>
+          <div class="topo-node-ctx-item-name">${esc(label)}</div>
+          <div class="topo-node-ctx-item-detail">${esc(detail)}</div>
+        </div>
+      </div>`;
+    }).join("");
+
+    // Store emitter array on the list for click handler
+    ctxList._emitters = emitters;
+
+    // Position near cursor but keep on screen
+    ctxMenu.style.left = e.clientX + "px";
+    ctxMenu.style.top  = e.clientY + "px";
+    ctxMenu.classList.remove("hidden");
+    requestAnimationFrame(() => {
+      const rect = ctxMenu.getBoundingClientRect();
+      if (rect.right > window.innerWidth)  ctxMenu.style.left = (e.clientX - rect.width)  + "px";
+      if (rect.bottom > window.innerHeight) ctxMenu.style.top = (e.clientY - rect.height) + "px";
+    });
+  }, { signal: sig });
+
+  // Click on an emitter row in context menu → show radio popup
+  ctxList.addEventListener("click", (e) => {
+    const item = e.target.closest(".topo-node-ctx-item");
+    if (!item) return;
+    const idx = parseInt(item.dataset.idx, 10);
+    _activeAsset = ctxList._emitters?.[idx];
+    if (!_activeAsset) return;
+
+    ctxMenu.classList.add("hidden");
+    radioLinkPanel.classList.add("hidden");
+
+    const label = _activeAsset.emitterLabel || _activeAsset.name || "Radio";
+    const wf    = _activeAsset.ext?.waveform || "";
+    radioTitle.textContent = wf ? `${label} — ${wf}` : label;
+
+    // Position popup near center of screen
+    radioPopup.style.left = "50%";
+    radioPopup.style.top  = "50%";
+    radioPopup.style.transform = "translate(-50%, -50%)";
+    radioPopup.classList.remove("hidden");
+  }, { signal: sig });
+
+  // Close button
+  document.getElementById("topoRadioPopupClose")?.addEventListener("click", hideAll, { signal: sig });
+
+  // Edit Radio → open the existing emitter modal
+  radioEditBtn.addEventListener("click", () => {
+    if (!_activeAsset) return;
+    hideAll();
+    state.editingAssetId = _activeAsset.id;
+    setAssetPlacementMode(false);
+    emitterModal.open(_activeAsset);
+    refreshActionButtons();
+    setStatus(`Editing ${_activeAsset.name}.`);
+  }, { signal: sig });
+
+  // Link to Unit Radio → show unit/radio picker
+  radioLinkBtn.addEventListener("click", () => {
+    if (!_activeAsset || !_activeUnitId) return;
+    radioLinkPanel.classList.remove("hidden");
+    radioLinkList.innerHTML = "";
+
+    // Collect all units in same TO hierarchy tree
+    function getAncestors(uid) {
+      const anc = new Set();
+      let cur = uid;
+      for (let d = 0; d < 20; d++) {
+        const lnk = (_toState.links || []).find(l => l.childId === cur);
+        if (!lnk) break;
+        anc.add(lnk.parentId);
+        cur = lnk.parentId;
+      }
+      return anc;
+    }
+    function getDescendants(uid) {
+      const desc = new Set();
+      const q = [uid];
+      while (q.length) {
+        const id = q.shift();
+        for (const l of (_toState.links || [])) {
+          if (l.parentId === id && !desc.has(l.childId)) { desc.add(l.childId); q.push(l.childId); }
+        }
+      }
+      return desc;
+    }
+    const anc = getAncestors(_activeUnitId);
+    anc.add(_activeUnitId);
+    const desc = getDescendants(_activeUnitId);
+    const treeIds = new Set([...anc, ...desc]);
+    // Remove self — can't link to own unit
+    treeIds.delete(_activeUnitId);
+
+    // Build list of units + their emitters
+    const treeUnits = (_toState.units || []).filter(u => treeIds.has(u.id));
+    if (!treeUnits.length) {
+      radioLinkList.innerHTML = `<div style="color:var(--text-muted);font-size:0.78rem;padding:4px 0">No other units in this hierarchy tree.</div>`;
+      return;
+    }
+
+    treeUnits.forEach(unit => {
+      const unitEmitters = (state.assets || []).filter(a => {
+        if (a.toUnitId === unit.id) return true;
+        const nk = (a.name || "").trim().toUpperCase();
+        const uk = (unit.label || unit.designator || "").trim().toUpperCase();
+        return nk === uk;
+      });
+      if (!unitEmitters.length) return;
+
+      const unitHdr = document.createElement("div");
+      unitHdr.className = "topo-radio-link-unit";
+      unitHdr.textContent = unit.label || unit.designator || "Unit";
+      radioLinkList.appendChild(unitHdr);
+
+      unitEmitters.forEach(sourceEm => {
+        const label = sourceEm.emitterLabel || sourceEm.name || "Radio";
+        const wf    = sourceEm.ext?.waveform || "";
+        const freq  = `${(sourceEm.frequencyMHz || 0).toFixed(3)} MHz`;
+        const detail = [wf, freq].filter(Boolean).join(" · ");
+
+        const row = document.createElement("div");
+        row.className = "topo-radio-link-row";
+        row.innerHTML = `<span class="topo-radio-link-row-name">${esc(label)}</span>
+                         <span class="topo-radio-link-row-detail">${esc(detail)}</span>`;
+        row.addEventListener("click", () => {
+          cloneRadioConfig(sourceEm, _activeAsset);
+          hideAll();
+          scheduleTopoRefresh(200);
+        });
+        radioLinkList.appendChild(row);
+      });
+    });
+  }, { signal: sig });
+
+  // Click outside → close everything
+  document.addEventListener("click", (e) => {
+    if (!ctxMenu.classList.contains("hidden") && !ctxMenu.contains(e.target)) ctxMenu.classList.add("hidden");
+    if (!radioPopup.classList.contains("hidden") && !radioPopup.contains(e.target)) hideAll();
+  }, { signal: sig });
+}
+
+// Clone RF config from sourceEmitter onto targetEmitter, preserving name/location
+function cloneRadioConfig(source, target) {
+  const preserve = {
+    id: target.id,
+    name: target.name,
+    lat: target.lat,
+    lon: target.lon,
+    groundElevationM: target.groundElevationM,
+    toUnitId: target.toUnitId,
+    unit: target.unit,
+    version: (target.version ?? 1) + 1,
+    lastModified: (typeof nowIso === "function" ? nowIso() : new Date().toISOString()),
+  };
+
+  // Copy all RF fields from source
+  Object.assign(target, {
+    frequencyMHz: source.frequencyMHz,
+    powerW: source.powerW,
+    antennaHeightM: source.antennaHeightM,
+    antennaGainDbi: source.antennaGainDbi,
+    receiverSensitivityDbm: source.receiverSensitivityDbm,
+    systemLossDb: source.systemLossDb,
+    emitterLabel: source.emitterLabel,
+    type: source.type,
+    icon: source.icon,
+    color: source.color,
+    ext: source.ext ? JSON.parse(JSON.stringify(source.ext)) : {},
+  });
+
+  // Restore identity fields
+  Object.assign(target, preserve);
+
+  updateAssetMarker(target);
+  saveMapState();
+  setStatus(`Cloned ${source.emitterLabel || source.name} config onto ${target.name}.`);
 }
 
 async function assessLinkQuality(a, b) {

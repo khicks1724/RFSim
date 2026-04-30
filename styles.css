@@ -6107,6 +6107,9 @@ body.emitter-modal-open {
 .topo-svg .topo-link {
   pointer-events: stroke;
   cursor: pointer;
+  stroke: #888;
+  stroke-width: 2.5;
+  fill: none;
 }
 /* The single world container — gets the pan/zoom transform */
 .topo-nodes {
@@ -6298,6 +6301,103 @@ body.emitter-modal-open {
   max-width: 200px;
 }
 /* Link detail popup */
+/* ── Topology node context menu ─────────────────────────── */
+.topo-node-ctx {
+  position: fixed;
+  z-index: 2000;
+  background: var(--bg-elevated, #1e2330);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+  min-width: 190px;
+  padding: 6px 0;
+  color: var(--text, #e2e8f0);
+  font-size: 0.82rem;
+}
+.topo-node-ctx.hidden { display: none; }
+.topo-node-ctx-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #64748b);
+  padding: 4px 14px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  margin-bottom: 2px;
+}
+.topo-node-ctx-list { display: flex; flex-direction: column; }
+.topo-node-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.topo-node-ctx-item:hover { background: rgba(255,255,255,0.06); }
+.topo-node-ctx-item-name { font-weight: 600; color: var(--text, #e2e8f0); }
+.topo-node-ctx-item-detail { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+
+/* ── Topology radio action popup ────────────────────────── */
+.topo-radio-popup {
+  position: fixed;
+  z-index: 2100;
+  background: var(--bg-elevated, #1e2330);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  width: 300px;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text, #e2e8f0);
+}
+.topo-radio-popup.hidden { display: none; }
+.topo-radio-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 0.9rem;
+}
+.topo-radio-popup-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+}
+.topo-radio-link-panel { padding: 0 16px 14px; }
+.topo-radio-link-panel.hidden { display: none; }
+.topo-radio-link-label {
+  font-size: 0.72rem;
+  color: var(--text-muted, #64748b);
+  margin-bottom: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.topo-radio-link-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+.topo-radio-link-unit {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted, #94a3b8);
+  padding: 4px 0 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.topo-radio-link-row {
+  display: flex;
+  flex-direction: column;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  transition: background 0.12s, border-color 0.12s;
+}
+.topo-radio-link-row:hover { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); }
+.topo-radio-link-row-name { font-size: 0.8rem; font-weight: 600; color: var(--text, #e2e8f0); }
+.topo-radio-link-row-detail { font-size: 0.7rem; color: var(--text-muted, #64748b); margin-top: 1px; }
+
 .topo-link-popup {
   position: absolute;
   bottom: 24px;

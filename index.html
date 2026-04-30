@@ -952,6 +952,27 @@
                 <svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#94a3b8" stroke-width="3" stroke-dasharray="8,3,8,3"/></svg>MESH
               </span>
             </div>
+            <!-- Node right-click context menu -->
+            <div id="topoNodeCtxMenu" class="topo-node-ctx hidden">
+              <div class="topo-node-ctx-title" id="topoNodeCtxTitle">Unit Radios</div>
+              <div id="topoNodeCtxList" class="topo-node-ctx-list"></div>
+            </div>
+            <!-- Radio action popup (edit / link-to-unit) -->
+            <div id="topoRadioPopup" class="topo-radio-popup hidden">
+              <div class="topo-radio-popup-header">
+                <strong id="topoRadioPopupTitle">Radio Options</strong>
+                <button id="topoRadioPopupClose" class="icon-button" type="button">&#10005;</button>
+              </div>
+              <div class="topo-radio-popup-actions">
+                <button id="topoRadioEditBtn" class="primary-button small" type="button">Edit Radio</button>
+                <button id="topoRadioLinkBtn" class="secondary-button small" type="button">Link to Unit Radio</button>
+              </div>
+              <!-- Link-to-unit panel (shown after clicking Link to Unit Radio) -->
+              <div id="topoRadioLinkPanel" class="topo-radio-link-panel hidden">
+                <div class="topo-radio-link-label">Select a unit radio to clone config from:</div>
+                <div id="topoRadioLinkList" class="topo-radio-link-list"></div>
+              </div>
+            </div>
             <!-- Link detail popup -->
             <div id="topoLinkPopup" class="topo-link-popup hidden">
               <div class="topo-link-popup-header">
