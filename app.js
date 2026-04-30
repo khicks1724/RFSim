@@ -20650,11 +20650,18 @@ function milstd2525Svg(unit) {
   const mainPath = resolveMilstdMainPath(unit);
   const echelonPath = MILSTD_ECHELON_PATHS[unit.size] || "";
   const fallback = !mainPath ? getMilstdFallbackText(unit) : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" class="ms2525-icon milstd-icon" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
-    <image href="${framePath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />
-    ${mainPath ? `<image href="${mainPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : `<text x="306" y="410" text-anchor="middle" font-size="${fallback.length > 2 ? 86 : 112}" class="milstd-fallback-text">${esc(fallback)}</text>`}
-    ${echelonPath ? `<image href="${echelonPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : ""}
-  </svg>`;
+  // Stack SVG files as <img> layers so each renders as crisp vector at any size,
+  // rather than compositing via <image> inside a parent SVG (which rasterizes).
+  const fallbackLayer = !mainPath
+    ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" class="milstd-layer" aria-hidden="true">
+        <text x="306" y="410" text-anchor="middle" font-size="${fallback.length > 2 ? 86 : 112}" class="milstd-fallback-text">${esc(fallback)}</text>
+       </svg>`
+    : "";
+  return `<span class="milstd-stack ms2525-icon" aria-hidden="true">
+    <img src="${framePath}" class="milstd-layer" alt="">
+    ${mainPath ? `<img src="${mainPath}" class="milstd-layer" alt="">` : fallbackLayer}
+    ${echelonPath ? `<img src="${echelonPath}" class="milstd-layer" alt="">` : ""}
+  </span>`;
 }
 
 function ms2525Svg(unit) {
