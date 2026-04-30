@@ -5916,6 +5916,23 @@ body.emitter-modal-open {
   pointer-events: all;
 }
 .to-link-banner.hidden { display: none; }
+.to-edit-modal {
+  width: min(560px, calc(100vw - 32px));
+}
+.to-edit-modal-body {
+  padding: 18px 20px;
+}
+.to-edit-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 720px) {
+  .to-edit-grid {
+    grid-template-columns: 1fr;
+  }
+  .to-edit-grid .emitter-span-2 {
+    grid-column: auto;
+  }
+}
 /* Plan + Topo AI panel (right sidebar) */
 /* ── Secondary view AI panel — collapsible right sidebar ── */
 .plan-ai-panel {

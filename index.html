@@ -701,8 +701,8 @@
         <div class="to-toolbar">
           <div class="to-toolbar-section">
             <div class="to-renderer-toggle" role="group" aria-label="TO icon renderer">
-              <button id="toRendererMilstdBtn" class="to-renderer-option" type="button" data-renderer="milstd" aria-pressed="false">MILSTD</button>
-              <button id="toRendererAigenBtn" class="to-renderer-option is-active" type="button" data-renderer="aigen" aria-pressed="true">AIGEN</button>
+              <button id="toRendererMilstdBtn" class="to-renderer-option is-active" type="button" data-renderer="milstd" aria-pressed="true">MILSTD</button>
+              <button id="toRendererAigenBtn" class="to-renderer-option" type="button" data-renderer="aigen" aria-pressed="false">AIGEN</button>
             </div>
             <span class="to-toolbar-label">Add Unit</span>
             <select id="toAffiliation" class="to-select" title="Affiliation">
@@ -857,6 +857,47 @@
     <!-- ═══════════════════════════════════════════════════════
          TOPOLOGY VIEW — Network Link Quality
     ═══════════════════════════════════════════════════════ -->
+    <div id="toEditModal" class="emitter-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="toEditModalTitle">
+      <div class="emitter-modal to-edit-modal">
+        <div class="emitter-modal-header">
+          <div class="emitter-modal-title-group">
+            <h2 id="toEditModalTitle">Edit Unit</h2>
+          </div>
+          <button id="toEditCloseBtn" class="ghost-button small icon-button" type="button" aria-label="Close">&#10005;</button>
+        </div>
+        <div class="to-edit-modal-body">
+          <div class="emitter-param-grid to-edit-grid">
+            <label class="emitter-span-2">
+              <span>Unit Name</span>
+              <input id="toEditLabel" type="text" maxlength="64" placeholder="Battalion infantry">
+            </label>
+            <label class="emitter-span-2">
+              <span>Designator</span>
+              <input id="toEditDesignator" type="text" maxlength="32" placeholder="V34 CMD">
+            </label>
+            <label>
+              <span>Affiliation</span>
+              <select id="toEditAffiliation"></select>
+            </label>
+            <label>
+              <span>Unit Type</span>
+              <select id="toEditUnitType"></select>
+            </label>
+            <label>
+              <span>Unit Size</span>
+              <select id="toEditUnitSize"></select>
+            </label>
+          </div>
+        </div>
+        <div class="emitter-modal-footer">
+          <div id="toEditValidation" class="emitter-validation"></div>
+          <div class="emitter-footer-actions">
+            <button id="toEditCancelBtn" class="ghost-button" type="button">Cancel</button>
+            <button id="toEditSaveBtn" class="primary-button" type="button">Save Changes</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="topologyView" class="view-panel hidden">
       <div class="topo-shell">
         <div class="topo-toolbar">

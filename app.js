@@ -3949,6 +3949,7 @@ function serializeCurrentMapState() {
     savedAt: nowIso(),
     mapView: { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() },
     assets: state.assets,
+    plan: serializeToPlanState(),
     profiles: state.profiles,
     weather: state.weather,
     settings: state.settings,
@@ -4011,6 +4012,7 @@ function persistMapStateNow() {
         schemaVersion: compactPayload.schemaVersion,
         savedAt: compactPayload.savedAt,
         mapView: compactPayload.mapView,
+        plan: compactPayload.plan,
         mapContentFolders: compactPayload.mapContentFolders,
         mapContentOrder: compactPayload.mapContentOrder,
         mapContentAssignments: compactPayload.mapContentAssignments,
@@ -4073,6 +4075,33 @@ function applySavedMapState(rawSaved) {
   }
   if (saved.settings) {
     state.settings = { ...state.settings, ...saved.settings };
+  }
+  if (saved.plan && typeof saved.plan === "object") {
+    _toState.units = Array.isArray(saved.plan.units)
+      ? saved.plan.units.map((unit) => ({
+          id: unit.id,
+          label: unit.label || "",
+          designator: unit.designator || "",
+          affiliation: unit.affiliation || "friendly",
+          type: normalizeToUnitType(unit.type),
+          size: unit.size || "battalion",
+          x: Number(unit.x) || 0,
+          y: Number(unit.y) || 0,
+        }))
+      : [];
+    _toState.links = Array.isArray(saved.plan.links)
+      ? saved.plan.links
+        .filter((link) => Number.isFinite(link?.parentId) && Number.isFinite(link?.childId))
+        .map((link) => ({ parentId: link.parentId, childId: link.childId }))
+      : [];
+    const maxUnitId = _toState.units.reduce((max, unit) => Math.max(max, Number(unit.id) || 0), 0);
+    _toState.nextId = Math.max(Number(saved.plan.nextId) || 1, maxUnitId + 1);
+    _toState.iconRenderer = saved.plan.iconRenderer === TO_ICON_RENDERERS.AIGEN
+      ? TO_ICON_RENDERERS.AIGEN
+      : TO_ICON_RENDERERS.MILSTD;
+    clearToSelection();
+    closeToEditModal();
+    cancelToLink();
   }
 
   // Restore assets — ensure every record carries version metadata after migration.
@@ -4151,6 +4180,11 @@ function applySavedMapState(rawSaved) {
 
   if (saved.activeTerrainId) {
     state.activeTerrainId = saved.activeTerrainId;
+  }
+
+  if (_toState._initialized) {
+    syncToRendererToggle();
+    renderToView();
   }
 
   // Apply hidden visibility after all layers are added
@@ -20407,14 +20441,15 @@ const _toState = {
   units: [],       // { id, label, designator, affiliation, type, size, x, y }
   links: [],       // { parentId, childId }
   nextId: 1,
-  iconRenderer: "aigen",
+  iconRenderer: "milstd",
   zoom: 1,
   panX: 0,
   panY: 0,
-  dragging: null,  // { unitId, startX, startY, origX, origY }
+  dragging: null,  // { unitId, pointerId, startX, startY, origX, origY, sourceEl }
   panning: false,
   panStart: null,
   selectedUnit: null,
+  editingUnitId: null,
   linkMode: null,  // null | { type: "parent"|"child", fromId }
   _initialized: false,
 };
@@ -20663,6 +20698,41 @@ function normalizeToUnit(unit) {
   return unit;
 }
 
+function formatToUnitLabelPart(value) {
+  return String(value || "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function buildDefaultToUnitLabel(size, type) {
+  const sizeLabel = formatToUnitLabelPart(size);
+  const typeLabel = String(normalizeToUnitType(type) || "infantry").replace(/_/g, " ");
+  return `${sizeLabel} ${typeLabel}`.trim();
+}
+
+function serializeToPlanState() {
+  return {
+    units: _toState.units.map((unit) => ({
+      id: unit.id,
+      label: unit.label || "",
+      designator: unit.designator || "",
+      affiliation: unit.affiliation || "friendly",
+      type: normalizeToUnitType(unit.type),
+      size: unit.size || "battalion",
+      x: Number(unit.x) || 0,
+      y: Number(unit.y) || 0,
+    })),
+    links: _toState.links.map((link) => ({
+      parentId: link.parentId,
+      childId: link.childId,
+    })),
+    nextId: _toState.nextId,
+    iconRenderer: _toState.iconRenderer === TO_ICON_RENDERERS.AIGEN ? TO_ICON_RENDERERS.AIGEN : TO_ICON_RENDERERS.MILSTD,
+  };
+}
+
 function renderToCustomSymbolShapes(type, stroke = "#000000", milstd = false) {
   const normalizedType = normalizeToUnitType(type);
   if (!["infantry", "light_infantry", "mechanized_infantry", "airborne_infantry", "armor"].includes(normalizedType)) {
@@ -20794,6 +20864,7 @@ function setToIconRenderer(renderer) {
   syncToRendererToggle();
   renderToView();
   if (!document.getElementById("toPickerModal")?.classList.contains("hidden")) renderToPickerCanvas();
+  saveMapState();
 }
 
 function wireToRendererToggle() {
@@ -20803,6 +20874,65 @@ function wireToRendererToggle() {
   syncToRendererToggle();
 }
 
+function closeToEditModal() {
+  _toState.editingUnitId = null;
+  document.getElementById("toEditModal")?.classList.add("hidden");
+  document.body.classList.remove("emitter-modal-open");
+  const validation = document.getElementById("toEditValidation");
+  if (validation) validation.textContent = "";
+}
+
+function openToEditModal(unitId = _toState.selectedUnit) {
+  const unit = _toState.units.find((entry) => entry.id === unitId);
+  if (!unit) return;
+  _toState.editingUnitId = unit.id;
+  const labelInput = document.getElementById("toEditLabel");
+  const designatorInput = document.getElementById("toEditDesignator");
+  const affiliationSelect = document.getElementById("toEditAffiliation");
+  const typeSelect = document.getElementById("toEditUnitType");
+  const sizeSelect = document.getElementById("toEditUnitSize");
+  if (!labelInput || !designatorInput || !affiliationSelect || !typeSelect || !sizeSelect) return;
+  labelInput.value = unit.label || "";
+  designatorInput.value = unit.designator || "";
+  affiliationSelect.value = unit.affiliation || "friendly";
+  typeSelect.value = normalizeToUnitType(unit.type);
+  sizeSelect.value = unit.size || "battalion";
+  const validation = document.getElementById("toEditValidation");
+  if (validation) validation.textContent = "";
+  document.getElementById("toEditModal")?.classList.remove("hidden");
+  document.body.classList.add("emitter-modal-open");
+  labelInput.focus();
+  labelInput.select();
+}
+
+function saveToEditModal() {
+  const unit = _toState.units.find((entry) => entry.id === _toState.editingUnitId);
+  if (!unit) {
+    closeToEditModal();
+    return;
+  }
+  const labelInput = document.getElementById("toEditLabel");
+  const designatorInput = document.getElementById("toEditDesignator");
+  const affiliationSelect = document.getElementById("toEditAffiliation");
+  const typeSelect = document.getElementById("toEditUnitType");
+  const sizeSelect = document.getElementById("toEditUnitSize");
+  const validation = document.getElementById("toEditValidation");
+  if (!labelInput || !designatorInput || !affiliationSelect || !typeSelect || !sizeSelect) return;
+  const type = normalizeToUnitType(typeSelect.value);
+  const size = sizeSelect.value || "battalion";
+  const designator = (designatorInput.value || "").trim();
+  const label = (labelInput.value || "").trim() || designator || buildDefaultToUnitLabel(size, type);
+  unit.label = label;
+  unit.designator = designator;
+  unit.affiliation = affiliationSelect.value || "friendly";
+  unit.type = type;
+  unit.size = size;
+  if (validation) validation.textContent = "";
+  closeToEditModal();
+  renderToView();
+  saveMapState();
+}
+
 function initPlanViewIfNeeded() {
   if (_toState._initialized) return;
   _toState._initialized = true;
@@ -20810,7 +20940,16 @@ function initPlanViewIfNeeded() {
   const canvas = document.getElementById("toCanvas");
   const world  = document.getElementById("toWorld");
   const edgeSvg = document.getElementById("toEdgeSvg");
+  const unitAffiliationSelect = document.getElementById("toAffiliation");
+  const unitTypeSelect = document.getElementById("toUnitType");
+  const unitSizeSelect = document.getElementById("toUnitSize");
+  const editAffiliationSelect = document.getElementById("toEditAffiliation");
+  const editTypeSelect = document.getElementById("toEditUnitType");
+  const editSizeSelect = document.getElementById("toEditUnitSize");
   if (!canvas || !world) return;
+  if (unitAffiliationSelect && editAffiliationSelect) editAffiliationSelect.innerHTML = unitAffiliationSelect.innerHTML;
+  if (unitTypeSelect && editTypeSelect) editTypeSelect.innerHTML = unitTypeSelect.innerHTML;
+  if (unitSizeSelect && editSizeSelect) editSizeSelect.innerHTML = unitSizeSelect.innerHTML;
   wireToRendererToggle();
 
   // ── Wire toolbar buttons ──
@@ -20832,7 +20971,10 @@ function initPlanViewIfNeeded() {
     if (!confirm("Clear all units?")) return;
     _toState.units = [];
     _toState.links = [];
+    clearToSelection();
+    closeToEditModal();
     renderToView();
+    saveMapState();
   });
   document.getElementById("toZoomInBtn")?.addEventListener("click",  () => setToZoom(_toState.zoom * 1.2));
   document.getElementById("toZoomOutBtn")?.addEventListener("click", () => setToZoom(_toState.zoom / 1.2));
@@ -20858,14 +21000,14 @@ function initPlanViewIfNeeded() {
       hideToContextMenu();
     }
   });
-  document.addEventListener("mousemove", (e) => {
+  document.addEventListener("pointermove", (e) => {
     if (_toState.panning) {
       _toState.panX = e.clientX - _toState.panStart.x;
       _toState.panY = e.clientY - _toState.panStart.y;
       applyToTransform();
       return;
     }
-    if (_toState.dragging) {
+    if (_toState.dragging && e.pointerId === _toState.dragging.pointerId) {
       const d = _toState.dragging;
       const dx = (e.clientX - d.startX) / _toState.zoom;
       const dy = (e.clientY - d.startY) / _toState.zoom;
@@ -20879,9 +21021,20 @@ function initPlanViewIfNeeded() {
       }
     }
   });
-  document.addEventListener("mouseup", () => {
+  document.addEventListener("pointerup", (e) => {
+    if (_toState.dragging?.pointerId === e.pointerId) {
+      _toState.dragging.sourceEl?.releasePointerCapture?.(e.pointerId);
+      _toState.dragging = null;
+      saveMapState();
+    }
     _toState.panning = false;
-    _toState.dragging = null;
+  });
+  document.addEventListener("pointercancel", (e) => {
+    if (_toState.dragging?.pointerId === e.pointerId) {
+      _toState.dragging.sourceEl?.releasePointerCapture?.(e.pointerId);
+      _toState.dragging = null;
+    }
+    _toState.panning = false;
   });
 
   // ── Context menu ──
@@ -20903,6 +21056,10 @@ function initPlanViewIfNeeded() {
     if (banner) banner.classList.remove("hidden");
     hideToContextMenu();
   });
+  document.getElementById("toCtxEdit")?.addEventListener("click", () => {
+    hideToContextMenu();
+    openToEditModal();
+  });
   document.getElementById("toCtxDelete")?.addEventListener("click", () => {
     if (!_toState.selectedUnit) return;
     _toState.units = _toState.units.filter(u => u.id !== _toState.selectedUnit);
@@ -20910,8 +21067,27 @@ function initPlanViewIfNeeded() {
     clearToSelection();
     hideToContextMenu();
     renderToView();
+    saveMapState();
   });
   document.getElementById("toLinkCancelBtn")?.addEventListener("click", cancelToLink);
+  document.getElementById("toEditCloseBtn")?.addEventListener("click", closeToEditModal);
+  document.getElementById("toEditCancelBtn")?.addEventListener("click", closeToEditModal);
+  document.getElementById("toEditSaveBtn")?.addEventListener("click", saveToEditModal);
+  document.getElementById("toEditModal")?.addEventListener("click", (e) => {
+    if (e.target === document.getElementById("toEditModal")) closeToEditModal();
+  });
+  document.getElementById("toEditLabel")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveToEditModal();
+    }
+  });
+  document.getElementById("toEditDesignator")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveToEditModal();
+    }
+  });
 
   canvas.addEventListener("click", (e) => {
     hideToContextMenu();
@@ -20920,7 +21096,11 @@ function initPlanViewIfNeeded() {
     }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { hideToContextMenu(); cancelToLink(); }
+    if (e.key === "Escape") {
+      hideToContextMenu();
+      cancelToLink();
+      closeToEditModal();
+    }
   });
 
   // ── AI form ──
@@ -20930,9 +21110,14 @@ function initPlanViewIfNeeded() {
 }
 
 function addToUnit(props) {
-  const unit = { id: _toState.nextId++, ...props, type: normalizeToUnitType(props?.type) };
+  const type = normalizeToUnitType(props?.type);
+  const size = props?.size || "battalion";
+  const designator = (props?.designator || "").trim();
+  const label = (props?.label || "").trim() || designator || buildDefaultToUnitLabel(size, type);
+  const unit = { id: _toState.nextId++, ...props, label, designator, size, type };
   _toState.units.push(unit);
   renderToView();
+  saveMapState();
   return unit;
 }
 
@@ -20959,13 +21144,27 @@ function renderToUnit(unit) {
   `;
 
   // Drag to move
-  el.addEventListener("mousedown", (e) => {
+  el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     e.stopPropagation();
-    _toState.dragging = { unitId: unit.id, startX: e.clientX, startY: e.clientY, origX: unit.x, origY: unit.y };
+    hideToContextMenu();
+    closeToEditModal();
     _toState.selectedUnit = unit.id;
     document.querySelectorAll(".to-unit").forEach(u => u.classList.remove("selected"));
     el.classList.add("selected");
+    _toState.dragging = {
+      unitId: unit.id,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: unit.x,
+      origY: unit.y,
+      sourceEl: el,
+    };
+    el.setPointerCapture?.(e.pointerId);
+  });
+  el.addEventListener("lostpointercapture", () => {
+    if (_toState.dragging?.sourceEl === el) _toState.dragging = null;
   });
 
   // Click to pick link target
@@ -20981,6 +21180,7 @@ function renderToUnit(unit) {
       cancelToLink();
       renderToEdges();
       toAutoLayout();
+      saveMapState();
       return;
     }
     _toState.selectedUnit = unit.id;
@@ -21106,6 +21306,7 @@ function toAutoLayout() {
     if (el) { el.style.left = u.x + "px"; el.style.top = u.y + "px"; }
   });
   renderToEdges();
+  saveMapState();
 }
 
 function toFitView() {
