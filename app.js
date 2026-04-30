@@ -21592,10 +21592,12 @@ async function renderTopologyView() {
   }
 
   // Debug overlay
-  { const dbg = document.getElementById("_topoDebug") || (() => { const d = document.createElement("div"); d.id = "_topoDebug"; d.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#0f0;font:11px monospace;padding:6px 12px;border-radius:6px;z-index:9999;max-width:700px;white-space:pre-wrap"; document.body.appendChild(d); return d; })();
+  { const dbg = ensureTopoDebugPanel()?.querySelector("#_topoDebug");
+    if (dbg) {
     dbg.textContent = `Topo: ${posEntries.length} units, ${candidatePairs.length} pairs\n` +
       posEntries.map(e => `  ${e.unit?.label}: ${e.emitters.map(em => `${em.emitterLabel||em.name}@${em.frequencyMHz}MHz wf=${em.ext?.waveform||"?"} satcom=${!!em.ext?.satcomEnabled}`).join(", ")}`).join("\n") +
       (candidatePairs.length ? "\nPairs:\n" + candidatePairs.map(p => `  ${p.a.unit?.label}↔${p.b.unit?.label}: ${p.emA.emitterLabel||p.emA.name} / ${p.emB.emitterLabel||p.emB.name} [${p.pairKey.split("|")[2]}]`).join("\n") : "\n  NO PAIRS");
+    }
   }
 
   // Assess link quality for all pairs in parallel
@@ -22145,6 +22147,53 @@ function getRectRayExitPoint(cx, cy, width, height, angleRad, extra = 0) {
     x: cx + dx * (scale + extra),
     y: cy + dy * (scale + extra),
   };
+}
+
+let _topoDebugCollapsed = false;
+
+function ensureTopoDebugPanel() {
+  const canvas = document.getElementById("topoCanvas");
+  if (!canvas) return null;
+  let panel = document.getElementById("_topoDebugPanel");
+  if (panel && panel.parentElement !== canvas) {
+    panel.remove();
+    panel = null;
+  }
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "_topoDebugPanel";
+    panel.className = "topo-debug-panel";
+    panel.innerHTML = `
+      <div class="topo-debug-header">
+        <span class="topo-debug-title">DEBUG</span>
+        <button id="_topoDebugToggle" class="topo-debug-toggle" type="button" aria-expanded="true" aria-label="Collapse topology debug panel">−</button>
+      </div>
+      <pre id="_topoDebug" class="topo-debug-body"></pre>
+    `;
+    panel.addEventListener("mousedown", (e) => e.stopPropagation());
+    panel.addEventListener("click", (e) => e.stopPropagation());
+    canvas.appendChild(panel);
+    panel.querySelector("#_topoDebugToggle")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _topoDebugCollapsed = !_topoDebugCollapsed;
+      syncTopoDebugPanelState();
+    });
+  }
+  syncTopoDebugPanelState();
+  return panel;
+}
+
+function syncTopoDebugPanelState() {
+  const panel = document.getElementById("_topoDebugPanel");
+  if (!panel) return;
+  panel.classList.toggle("is-collapsed", _topoDebugCollapsed);
+  const toggle = document.getElementById("_topoDebugToggle");
+  if (toggle) {
+    toggle.textContent = _topoDebugCollapsed ? "+" : "−";
+    toggle.setAttribute("aria-expanded", String(!_topoDebugCollapsed));
+    toggle.setAttribute("aria-label", _topoDebugCollapsed ? "Expand topology debug panel" : "Collapse topology debug panel");
+  }
 }
 
 // World-space positions for each node (key → {x,y}), kept in sync during drag

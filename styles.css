@@ -6101,6 +6101,73 @@ body.emitter-modal-open {
 }
 .topo-canvas:active { cursor: grabbing; }
 .topo-canvas:focus { outline: none; }
+.topo-debug-panel {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: min(320px, calc(100% - 20px));
+  max-height: 220px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.88);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+  pointer-events: auto;
+  overflow: hidden;
+}
+.topo-debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 4px 10px;
+  border-bottom: 1px solid rgba(34, 197, 94, 0.18);
+}
+.topo-debug-title {
+  color: #22c55e;
+  font: 600 10px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.14em;
+}
+.topo-debug-toggle {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #86efac;
+  font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+}
+.topo-debug-toggle:hover {
+  background: rgba(21, 128, 61, 0.22);
+  color: #bbf7d0;
+}
+.topo-debug-body {
+  margin: 0;
+  padding: 6px 10px 9px;
+  color: #39ff5a;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+.topo-debug-panel.is-collapsed {
+  width: 30px;
+  max-height: 30px;
+}
+.topo-debug-panel.is-collapsed .topo-debug-header {
+  padding: 4px;
+  border-bottom: none;
+  justify-content: flex-end;
+}
+.topo-debug-panel.is-collapsed .topo-debug-title,
+.topo-debug-panel.is-collapsed .topo-debug-body {
+  display: none;
+}
 /* SVG lives inside .topo-nodes so lines share the same transform */
 .topo-svg {
   position: absolute;
