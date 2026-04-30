@@ -6081,6 +6081,86 @@ body.emitter-modal-open {
   flex-shrink: 0;
   flex-wrap: wrap;
 }
+.topo-toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+.topo-filter-shell {
+  position: relative;
+}
+.topo-filter-trigger {
+  min-width: 148px;
+  max-width: 220px;
+  padding-inline: 8px 24px;
+  text-align: left;
+}
+.topo-filter-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 148px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+  z-index: 20;
+}
+.topo-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.topo-display-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.54);
+}
+.topo-display-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.topo-display-btn.is-active {
+  background: rgba(59, 130, 246, 0.22);
+  color: var(--text, #e2e8f0);
+}
+.topo-toolbar-quality {
+  flex-wrap: wrap;
+}
+.topo-quality-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted, #94a3b8);
+}
+.topo-quality-swatch {
+  width: 18px;
+  height: 4px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.topo-quality-swatch-none { background: #ef4444; }
+.topo-quality-swatch-poor { background: #f97316; }
+.topo-quality-swatch-moderate { background: #facc15; }
+.topo-quality-swatch-excellent { background: #22c55e; }
 .topo-main {
   flex: 1 1 0;
   min-height: 0;
@@ -6257,6 +6337,14 @@ body.emitter-modal-open {
   color: #111;
   text-align: center;
   line-height: 1.2;
+  pointer-events: none;
+}
+.topo-unit-subname {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.15;
   pointer-events: none;
 }
 .topo-unit-emitter {

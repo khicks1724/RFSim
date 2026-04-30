@@ -899,21 +899,38 @@
       </div>
     </div>
     <div id="topologyView" class="view-panel hidden">
-      <div class="topo-shell">
-        <div class="topo-toolbar">
-          <div class="topo-toolbar-section">
-            <span class="to-toolbar-label">Filter</span>
-            <select id="topoFilterFreq" class="to-select">
-              <option value="all">All Frequencies</option>
-            </select>
-            <select id="topoFilterNet" class="to-select">
-              <option value="all">All Net IDs</option>
-            </select>
-          </div>
-          <div class="to-toolbar-section to-toolbar-section-right">
-            <button id="topoRefreshBtn" class="ghost-button small" type="button">Refresh</button>
-            <button id="topoFitBtn" class="ghost-button small" type="button">Fit View</button>
-          </div>
+        <div class="topo-shell">
+          <div class="topo-toolbar">
+            <div class="topo-toolbar-section">
+              <span class="to-toolbar-label">Filter</span>
+              <div class="topo-filter-shell">
+                <button id="topoFilterFreqBtn" class="to-select topo-filter-trigger" type="button" aria-haspopup="true" aria-expanded="false">All Frequencies</button>
+                <div id="topoFilterFreqMenu" class="topo-filter-menu hidden">
+                  <label class="topo-filter-option"><input id="topoBandHF" type="checkbox" value="HF" checked>HF</label>
+                  <label class="topo-filter-option"><input id="topoBandVHF" type="checkbox" value="VHF" checked>VHF</label>
+                  <label class="topo-filter-option"><input id="topoBandUHF" type="checkbox" value="UHF" checked>UHF</label>
+                  <label class="topo-filter-option"><input id="topoBandSATCOM" type="checkbox" value="SATCOM" checked>SATCOM</label>
+                </div>
+              </div>
+            </div>
+            <div class="topo-toolbar-section">
+              <span class="to-toolbar-label">Entities</span>
+              <div id="topoDisplayModeToggle" class="topo-display-toggle" role="tablist" aria-label="Topology entity display mode">
+                <button id="topoDisplayUnitsBtn" class="topo-display-btn is-active" type="button" data-mode="units" role="tab" aria-selected="true">Unit Cards</button>
+                <button id="topoDisplayEmittersBtn" class="topo-display-btn" type="button" data-mode="emitters" role="tab" aria-selected="false">Emitters</button>
+              </div>
+            </div>
+            <div class="topo-toolbar-section topo-toolbar-quality">
+              <span class="to-toolbar-label">Link Quality</span>
+              <span class="topo-quality-legend-item"><span class="topo-quality-swatch topo-quality-swatch-none"></span>No Link</span>
+              <span class="topo-quality-legend-item"><span class="topo-quality-swatch topo-quality-swatch-poor"></span>Poor</span>
+              <span class="topo-quality-legend-item"><span class="topo-quality-swatch topo-quality-swatch-moderate"></span>Moderate</span>
+              <span class="topo-quality-legend-item"><span class="topo-quality-swatch topo-quality-swatch-excellent"></span>Excellent</span>
+            </div>
+            <div class="to-toolbar-section to-toolbar-section-right">
+              <button id="topoRefreshBtn" class="ghost-button small" type="button">Refresh</button>
+              <button id="topoFitBtn" class="ghost-button small" type="button">Fit View</button>
+            </div>
         </div>
         <div class="topo-main">
           <div id="topoCanvas" class="topo-canvas" tabindex="0">
