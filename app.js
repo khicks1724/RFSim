@@ -22176,7 +22176,7 @@ function redrawTopoLinksLegacy() {
     pairGroups.get(k).push(lnk);
   }
 
-  const LINK_SPACING = 18;
+  const LINK_SPACING = 28;
   const EDGE_CLEARANCE = 2;
 
   for (const lnk of _topoLinkDescriptors) {
@@ -22270,6 +22270,8 @@ function redrawTopoLinks() {
     const dy = rightPos.y - leftPos.y;
     const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
     const baseAngle = Math.atan2(dy, dx);
+    const nx = -dy / dist;
+    const ny = dx / dist;
 
     const orderedGroup = group.slice().sort((a, b) => {
       const fa = Math.min(a.emA?.frequencyMHz || 0, a.emB?.frequencyMHz || 0);
@@ -22282,10 +22284,22 @@ function redrawTopoLinks() {
 
     orderedGroup.forEach((lnk, idx) => {
       const offsetPx = (idx - (orderedGroup.length - 1) / 2) * LINK_SPACING;
-      const angleOffset = offsetPx / dist;
-      const angle = baseAngle + angleOffset;
-      const start = getRectRayExitPoint(leftPos.x, leftPos.y, leftMetrics.width, leftMetrics.height, angle, EDGE_CLEARANCE);
-      const end = getRectRayExitPoint(rightPos.x, rightPos.y, rightMetrics.width, rightMetrics.height, angle + Math.PI, EDGE_CLEARANCE);
+      const start = getRectRayExitPoint(
+        leftPos.x + nx * offsetPx,
+        leftPos.y + ny * offsetPx,
+        leftMetrics.width,
+        leftMetrics.height,
+        baseAngle,
+        EDGE_CLEARANCE
+      );
+      const end = getRectRayExitPoint(
+        rightPos.x + nx * offsetPx,
+        rightPos.y + ny * offsetPx,
+        rightMetrics.width,
+        rightMetrics.height,
+        baseAngle + Math.PI,
+        EDGE_CLEARANCE
+      );
 
       const cls = linkQualityClass(lnk.quality.score);
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
