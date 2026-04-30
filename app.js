@@ -20533,20 +20533,19 @@ const MILSTD_FRAME_PATHS = {
 };
 
 const MILSTD_ECHELON_PATHS = {
-  team: "images/milstd/Echelon/111.svg",
-  fireteam: "images/milstd/Echelon/112.svg",
-  squad: "images/milstd/Echelon/113.svg",
-  section: "images/milstd/Echelon/121.svg",
-  platoon: "images/milstd/Echelon/122.svg",
-  company: "images/milstd/Echelon/123.svg",
-  battalion: "images/milstd/Echelon/124.svg",
-  regiment: "images/milstd/Echelon/125.svg",
-  brigade: "images/milstd/Echelon/311.svg",
-  division: "images/milstd/Echelon/312.svg",
-  corps: "images/milstd/Echelon/313.svg",
-  army: "images/milstd/Echelon/314.svg",
-  army_group: "images/milstd/Echelon/315.svg",
-  theater: "images/milstd/Echelon/316.svg",
+  team:      "images/milstd/Echelon/111.svg",
+  squad:     "images/milstd/Echelon/112.svg",
+  section:   "images/milstd/Echelon/113.svg",
+  platoon:   "images/milstd/Echelon/114.svg",
+  company:   "images/milstd/Echelon/115.svg",
+  battalion: "images/milstd/Echelon/116.svg",
+  regiment:  "images/milstd/Echelon/117.svg",
+  brigade:   "images/milstd/Echelon/118.svg",
+  division:  "images/milstd/Echelon/121.svg",
+  corps:     "images/milstd/Echelon/122.svg",
+  army:      "images/milstd/Echelon/123.svg",
+  army_group:"images/milstd/Echelon/124.svg",
+  theater:   "images/milstd/Echelon/125.svg",
 };
 
 const MILSTD_FULL_FRAME_SUFFIX = {
@@ -20651,7 +20650,7 @@ function milstd2525Svg(unit) {
   const mainPath = resolveMilstdMainPath(unit);
   const echelonPath = MILSTD_ECHELON_PATHS[unit.size] || "";
   const fallback = !mainPath ? getMilstdFallbackText(unit) : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" width="80" height="80" class="ms2525-icon milstd-icon" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" class="ms2525-icon milstd-icon" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
     <image href="${framePath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />
     ${mainPath ? `<image href="${mainPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : `<text x="306" y="410" text-anchor="middle" font-size="${fallback.length > 2 ? 86 : 112}" class="milstd-fallback-text">${esc(fallback)}</text>`}
     ${echelonPath ? `<image href="${echelonPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : ""}
@@ -20673,7 +20672,7 @@ function ms2525Svg(unit) {
     ? `<line x1="4" y1="8" x2="52" y2="48" stroke="${col.frame}" stroke-width="1.5"/>
        <line x1="52" y1="8" x2="4" y2="48" stroke="${col.frame}" stroke-width="1.5"/>`
     : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" width="80" height="80" class="ms2525-icon">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" class="ms2525-icon">
     ${frameShape}
     ${hostile_marks}
     <text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
