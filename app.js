@@ -21399,18 +21399,17 @@ async function renderTopologyView() {
   // Only assets that have a frequencyMHz (i.e. are radio emitters)
   const allEmitters = (state.assets || []).filter(a => a.frequencyMHz > 0);
 
-  // Build a map of toUnitId → emitter for TO-linked assets
-  const unitEmitterMap = new Map(); // unitId → asset
+  // Build unitId → [asset, asset, …] (all emitters linked to that TO unit)
+  const unitEmittersMap = new Map(); // unitId → asset[]
   for (const a of allEmitters) {
-    if (a.toUnitId) unitEmitterMap.set(a.toUnitId, a);
+    if (!a.toUnitId) continue;
+    if (!unitEmittersMap.has(a.toUnitId)) unitEmittersMap.set(a.toUnitId, []);
+    unitEmittersMap.get(a.toUnitId).push(a);
   }
 
-  // Collect all TO units that have an emitter attached
-  const linkedUnitIds = new Set(unitEmitterMap.keys());
+  const linkedUnitIds = new Set(unitEmittersMap.keys());
 
-  // Find all TO unit trees that contain at least one linked emitter.
-  // An emitter pair is candidates for a comms link if they are in the same
-  // hierarchy tree (any ancestor/descendant/sibling path).
+  // ── Hierarchy helpers ─────────────────────────────────────────────
   function getAncestors(unitId) {
     const ancestors = new Set();
     let cur = unitId;
@@ -21430,8 +21429,7 @@ async function renderTopologyView() {
       const id = queue.shift();
       for (const l of _toState.links) {
         if (l.parentId === id && !desc.has(l.childId)) {
-          desc.add(l.childId);
-          queue.push(l.childId);
+          desc.add(l.childId); queue.push(l.childId);
         }
       }
     }
@@ -21439,22 +21437,16 @@ async function renderTopologyView() {
   }
 
   function sameTree(idA, idB) {
-    // True if A is ancestor/descendant/sibling of B (same org tree)
     if (idA === idB) return true;
-    const descA = getDescendants(idA);
-    if (descA.has(idB)) return true;
-    const descB = getDescendants(idB);
-    if (descB.has(idA)) return true;
-    // Check shared root
+    if (getDescendants(idA).has(idB)) return true;
+    if (getDescendants(idB).has(idA)) return true;
     const ancA = getAncestors(idA); ancA.add(idA);
     const ancB = getAncestors(idB); ancB.add(idB);
     for (const id of ancA) if (ancB.has(id)) return true;
     return false;
   }
 
-  // Collect nodes to display: TO-linked emitters + standalone emitters
-  // For layout we use a hierarchical tree matching the TO, then append
-  // standalone emitters in a row below.
+  // ── Nodes: one per TO-linked unit + one per standalone emitter ────
   const toLinkedUnits = _toState.units.filter(u => linkedUnitIds.has(u.id));
   const standaloneEmitters = allEmitters.filter(a => !a.toUnitId);
 
@@ -21466,16 +21458,15 @@ async function renderTopologyView() {
   }
   if (empty) empty.classList.add("hidden");
 
-  // ── Tree layout for TO-linked units ──────────────────────────────
-  const NODE_W = 160, NODE_V = 220;
-  const unitPos = new Map(); // unitId → {x, y}
+  // ── Tree layout ───────────────────────────────────────────────────
+  const NODE_W = 170, NODE_V = 240;
+  const unitPos = new Map(); // key → {x, y}
 
   function subtreeWidth(uid) {
     const children = _toState.links.filter(l => l.parentId === uid && linkedUnitIds.has(l.childId)).map(l => l.childId);
     if (!children.length) return NODE_W;
     return Math.max(NODE_W, children.reduce((s, cid) => s + subtreeWidth(cid), 0));
   }
-
   function layoutUnit(uid, x, y) {
     unitPos.set(uid, { x, y });
     const children = _toState.links.filter(l => l.parentId === uid && linkedUnitIds.has(l.childId)).map(l => l.childId);
@@ -21487,10 +21478,8 @@ async function renderTopologyView() {
     }
   }
 
-  // Find root TO units (no parent among linked units)
   const linkedChildIds = new Set(_toState.links.filter(l => linkedUnitIds.has(l.childId)).map(l => l.childId));
   const roots = toLinkedUnits.filter(u => !linkedChildIds.has(u.id));
-
   let startX = NODE_W;
   for (const root of roots) {
     const w = subtreeWidth(root.id);
@@ -21498,102 +21487,114 @@ async function renderTopologyView() {
     startX += w + NODE_W * 0.5;
   }
 
-  // Standalone emitters go in a row at the bottom
   const maxY = unitPos.size ? Math.max(...[...unitPos.values()].map(p => p.y)) + NODE_V : 100;
   standaloneEmitters.forEach((em, i) => {
     unitPos.set("standalone_" + em.id, { x: NODE_W + i * NODE_W, y: maxY });
   });
 
-  // ── Determine link candidates ─────────────────────────────────────
-  // For TO-linked: same hierarchy tree + matching freq+waveform
-  // For standalone: matching freq+waveform with any other emitter
+  // posEntries: one entry per card (TO unit or standalone emitter)
+  // emitters[] = all assets for this card
   const posEntries = [
-    ...toLinkedUnits.map(u => ({ key: u.id, unit: u, em: unitEmitterMap.get(u.id) })),
-    ...standaloneEmitters.map(em => ({ key: "standalone_" + em.id, unit: null, em })),
+    ...toLinkedUnits.map(u => ({ key: u.id, unit: u, emitters: unitEmittersMap.get(u.id) || [] })),
+    ...standaloneEmitters.map(em => ({ key: "standalone_" + em.id, unit: null, emitters: [em] })),
   ];
 
-  // ── Collect candidate pairs (freq+waveform match + same hierarchy tree) ──
-  const candidatePairs = [];
+  // ── Candidate links: per matching emitter pair across unit cards ──
+  // Each link is between a specific emitter in unit A and a specific emitter in unit B
+  // that share freq+waveform. We key links by "waveform bucket" so parallel links
+  // (same type, different unit pairs) are possible, but only one link per
+  // unique (unitA, unitB, emitter-type) combination.
+  const candidatePairs = []; // { a: entry, b: entry, emA: asset, emB: asset }
   for (let i = 0; i < posEntries.length; i++) {
     for (let j = i + 1; j < posEntries.length; j++) {
-      const a = posEntries[i], b = posEntries[j];
-      if (!a.em || !b.em) continue;
-      const freqMatch = Math.abs((a.em.frequencyMHz || 0) - (b.em.frequencyMHz || 0)) < 0.01;
-      const wfA = (a.em.ext?.waveform || "").toUpperCase();
-      const wfB = (b.em.ext?.waveform || "").toUpperCase();
-      const waveformMatch = !wfA || !wfB || wfA === wfB;
-      if (!freqMatch || !waveformMatch) continue;
-      if (a.unit && b.unit && !sameTree(a.unit.id, b.unit.id)) continue;
-      candidatePairs.push({ a, b });
+      const nodeA = posEntries[i], nodeB = posEntries[j];
+      if (nodeA.unit && nodeB.unit && !sameTree(nodeA.unit.id, nodeB.unit.id)) continue;
+      // Find all matched emitter pairs between the two cards
+      const seen = new Set(); // deduplicate by waveform bucket
+      for (const emA of nodeA.emitters) {
+        for (const emB of nodeB.emitters) {
+          const freqMatch = Math.abs((emA.frequencyMHz || 0) - (emB.frequencyMHz || 0)) < 0.01;
+          const wfA = (emA.ext?.waveform || "").toUpperCase();
+          const wfB = (emB.ext?.waveform || "").toUpperCase();
+          const waveformMatch = !wfA || !wfB || wfA === wfB;
+          if (!freqMatch || !waveformMatch) continue;
+          // Deduplicate: one link per unique waveform type between these two nodes
+          const bucket = wfA || wfB || `freq:${emA.frequencyMHz}`;
+          const pairKey = `${nodeA.key}|${nodeB.key}|${bucket}`;
+          if (seen.has(pairKey)) continue;
+          seen.add(pairKey);
+          candidatePairs.push({ a: nodeA, b: nodeB, emA, emB, pairKey });
+        }
+      }
     }
   }
 
-  // Assess link quality for all pairs in parallel (each awaits Cesium terrain)
-  const qualityResults = await Promise.all(candidatePairs.map(p => assessLinkQuality(p.a.em, p.b.em)));
+  // Assess link quality for all pairs in parallel
+  const qualityResults = await Promise.all(candidatePairs.map(p => assessLinkQuality(p.emA, p.emB)));
   const linkList = candidatePairs.map((p, idx) => ({ ...p, quality: qualityResults[idx] }));
 
-  // ── Populate node position map ────────────────────────────────────
+  // ── Populate position + descriptor maps ──────────────────────────
   _topoNodePositions.clear();
   for (const [key, pos] of unitPos) _topoNodePositions.set(key, { ...pos });
 
-  // ── Store link descriptors for live redraw during drag ────────────
   _topoLinkDescriptors = linkList.map(lnk => ({
     keyA: lnk.a.key,
     keyB: lnk.b.key,
     quality: lnk.quality,
-    typeClass: linkTypeClass(lnk.a.em, lnk.b.em),
-    nameA: lnk.a.unit?.label || lnk.a.em.name || lnk.a.em.id,
-    nameB: lnk.b.unit?.label || lnk.b.em.name || lnk.b.em.id,
-    emA: lnk.a.em,
-    emB: lnk.b.em,
+    typeClass: linkTypeClass(lnk.emA, lnk.emB),
+    nameA: lnk.a.unit?.label || lnk.emA.name || lnk.emA.id,
+    nameB: lnk.b.unit?.label || lnk.emB.name || lnk.emB.id,
+    emA: lnk.emA,
+    emB: lnk.emB,
   }));
 
-  // ── Render nodes (inside topoNodes world div) ─────────────────────
-  // Keep SVG as first child; clear everything else
+  // ── Render node cards ─────────────────────────────────────────────
   const svgEl = nodes.querySelector(".topo-svg");
   nodes.innerHTML = "";
   if (svgEl) nodes.appendChild(svgEl);
 
   for (const entry of posEntries) {
     const pos = unitPos.get(entry.key);
-    if (!pos || !entry.em) continue;
-    const em = entry.em;
+    if (!pos || !entry.emitters.length) continue;
     const unit = entry.unit;
+
     const nd = document.createElement("div");
     nd.className = "topo-node topo-node-card";
     nd.dataset.key = entry.key;
     nd.style.left = pos.x + "px";
     nd.style.top  = pos.y + "px";
 
-    const freqLabel = `${(em.frequencyMHz || 0).toFixed(3)} MHz`;
-    const wfLabel   = em.ext?.waveform || "";
-
     const iconHtml = unit
       ? `<div class="topo-unit-icon-wrap">${renderToUnitIcon(unit)}</div>`
-      : `<div class="topo-generic-icon">${EMITTER_ICONS[em.icon] || EMITTER_ICONS.radio}</div>`;
+      : `<div class="topo-generic-icon">${EMITTER_ICONS[entry.emitters[0].icon] || EMITTER_ICONS.radio}</div>`;
 
-    const unitLabel = unit
+    const unitNameHtml = unit
       ? `<div class="topo-unit-name">${esc(unit.label || unit.designator || "Unit")}</div>`
       : "";
+
+    // List each emitter on its own line: name · freq · waveform
+    const emitterListHtml = entry.emitters.map(em => {
+      const wf = em.ext?.waveform || "";
+      const freq = `${(em.frequencyMHz || 0).toFixed(3)} MHz`;
+      return `<div class="topo-em-row">
+        <span class="topo-em-name">${esc(em.name || "Emitter")}</span>
+        <span class="topo-em-detail">${esc(freq)}${wf ? " · " + esc(wf) : ""}</span>
+      </div>`;
+    }).join("");
 
     nd.innerHTML = `
       <div class="topo-unit-card${unit ? "" : " topo-standalone-card"}">
         ${iconHtml}
-        ${unitLabel}
-        <div class="topo-unit-emitter">
-          ${esc(em.name || "Emitter")}
-          <br><span class="topo-unit-freq">${esc(freqLabel)}${wfLabel ? " · " + esc(wfLabel) : ""}</span>
-        </div>
+        ${unitNameHtml}
+        <div class="topo-emitter-list">${emitterListHtml}</div>
       </div>
     `;
 
     nodes.appendChild(nd);
   }
 
-  // ── Draw links (reads from _topoNodePositions) ────────────────────
+  // ── Draw links + wire interaction ─────────────────────────────────
   redrawTopoLinks();
-
-  // ── Wire pan/zoom + node drag ─────────────────────────────────────
   wireTopoCanvasPanZoom();
   wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
 }
