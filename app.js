@@ -1788,10 +1788,21 @@ async function apiFetch(path, options = {}) {
     headers.set("Authorization", `Bearer ${state.session.token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+      signal: options.signal ?? controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") throw new Error("Request timed out.");
+    throw err;
+  }
+  clearTimeout(timeoutId);
 
   if (response.status === 204) {
     return null;
@@ -4093,7 +4104,9 @@ function applySavedMapState(rawSaved) {
           id: saved.id,
           version: saved.version ?? 1,
           lastModified: saved.lastModified ?? nowIso(),
-          name: saved.name,
+          name: looksLikeImportedMetadataBlob(saved.name)
+            ? (extractImportedMetadataName(saved.name) || `${saved.geometryType ?? "Feature"} ${saved.id?.slice(0, 6) ?? ""}`.trim())
+            : saved.name,
           subtitle: saved.subtitle,
           kind: saved.kind,
           geometryType: saved.geometryType,
@@ -4103,7 +4116,10 @@ function applySavedMapState(rawSaved) {
           drawn: saved.drawn ?? false,
           showLabel: typeof saved.showLabel === "boolean"
             ? saved.showLabel
-            : getLabelDefaultForGeometryType(saved.geometryType),
+            // Non-drawn imported items never had showLabel explicitly set before
+            // this fix — default them to false to avoid rendering thousands of
+            // permanent tooltips on large KMZ imports.
+            : (saved.drawn ? getLabelDefaultForGeometryType(saved.geometryType) : false),
           shapeStyle: normalizeImportedShapeStyle(saved.geometryType, saved.shapeStyle),
           markerStyle: normalizeImportedMarkerStyle(saved.markerStyle),
           layer: null,
@@ -4183,7 +4199,10 @@ async function loadMapState() {
 
   if (localState) {
     // Guest path: load KMZ items from IndexedDB (with localStorage legacy fallback).
-    const guestKmzItems = await idbLoadKmzItems(localState.activeProjectId ?? null);
+    // Always use null as the project key here — localStorage may contain a stale
+    // activeProjectId from a previous server-project session, but local browser
+    // state KMZ items are always stored under the null key.
+    const guestKmzItems = await idbLoadKmzItems(null);
     const drawnItems = (localState.importedItems ?? []).filter((i) => i.drawn);
     applySavedMapState({
       ...localState,
@@ -16314,7 +16333,7 @@ function addImportedFeature(feature, folderId, index, options = {}) {
   const markerStyle = normalizeImportedMarkerStyle(feature.markerStyle);
   const item = stampContentRecord({
     id: generateId(),
-    name: resolveImportedFeatureDisplayName(feature, feature.name || `${feature.geometryType} ${index + 1}`),
+    name: resolveImportedFeatureDisplayName(feature, `${feature.geometryType} ${index + 1}`),
     subtitle: `${feature.sourceLabel} | ${feature.geometryType}`,
     kind: `imported-${feature.geometryType.toLowerCase()}`,
     geometryType: feature.geometryType,
@@ -16323,6 +16342,10 @@ function addImportedFeature(feature, folderId, index, options = {}) {
     properties: feature.properties ?? {},
     shapeStyle,
     markerStyle,
+    // Explicitly record showLabel=false at import time so that a page reload
+    // doesn't apply the global point-label default to every imported feature.
+    // Users can toggle labels per-item or in bulk after import.
+    showLabel: false,
     layer: null,
   });
 
