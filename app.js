@@ -20252,7 +20252,7 @@ function renderToPickerCanvas() {
 
   // Compute positions using same layout algorithm but write to temp objects
   const tempUnits = JSON.parse(JSON.stringify(_toState.units));
-  const H_GAP = 120, V_GAP = 130;
+  const H_GAP = 140, V_GAP = 180;
 
   function subtreeWidth(id) {
     const children = linkSnap.filter(l => l.parentId === id).map(l => l.childId);
@@ -21142,6 +21142,11 @@ function renderToUnit(unit) {
     <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
     <span class="to-unit-label">${esc(unit.label)}</span>
   `;
+  el.setAttribute("draggable", "false");
+  el.querySelectorAll("img, svg").forEach((node) => {
+    node.setAttribute("draggable", "false");
+  });
+  el.addEventListener("dragstart", (e) => e.preventDefault());
 
   // Drag to move
   el.addEventListener("pointerdown", (e) => {
@@ -21269,8 +21274,8 @@ function toAutoLayout() {
   const roots = _toState.units.filter(u => !childSet.has(u.id));
   if (!roots.length) return;
 
-  const H_GAP = 130;
-  const V_GAP = 140;
+  const H_GAP = 150;
+  const V_GAP = 190;
 
   function subtreeWidth(id, depth) {
     const children = _toState.links.filter(l => l.parentId === id).map(l => l.childId);
