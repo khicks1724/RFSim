@@ -1038,6 +1038,7 @@ const dom = {
   topoDisplayModeToggle: document.querySelector("#topoDisplayModeToggle"),
   topoDisplayUnitsBtn: document.querySelector("#topoDisplayUnitsBtn"),
   topoDisplayEmittersBtn: document.querySelector("#topoDisplayEmittersBtn"),
+  topoTerrainStatus: document.querySelector("#topoTerrainStatus"),
   analyzeView: document.querySelector("#analyzeView"),
   aiPanelDivider: document.querySelector("#aiPanelDivider"),
   imageryMenuBtn: document.querySelector("#imageryMenuBtn"),
@@ -4655,8 +4656,27 @@ function sampleTerrainElevationForTerrain(lat, lon, terrain) {
   return bilinear(q11, q21, q12, q22, colRatio, rowRatio);
 }
 
+function hasCesiumTerrainToken() {
+  return Boolean((dom.cesiumIonToken?.value || DEFAULT_CESIUM_ION_TOKEN || "").trim());
+}
+
+function getEffectiveCesiumTerrainMode() {
+  const selected = dom.terrainSourceSelect?.value || "ellipsoid";
+  if (selected === "custom") {
+    return dom.customTerrainUrl?.value.trim() ? "custom" : (hasCesiumTerrainToken() ? "cesium-world" : "ellipsoid");
+  }
+  if (selected === "cesium-world") {
+    return hasCesiumTerrainToken() ? "cesium-world" : "ellipsoid";
+  }
+  if (!getActiveTerrain() && hasCesiumTerrainToken()) {
+    return "cesium-world";
+  }
+  return "ellipsoid";
+}
+
 function usesConfiguredCesiumTerrain() {
-  return dom.terrainSourceSelect.value === "cesium-world" || dom.terrainSourceSelect.value === "custom";
+  const mode = getEffectiveCesiumTerrainMode();
+  return mode === "cesium-world" || mode === "custom";
 }
 
 function usesCesiumPhotorealisticTiles() {
@@ -4676,10 +4696,11 @@ function getBuildingMaterialModel() {
 }
 
 function buildCesiumTerrainProviderKey() {
-  if (dom.terrainSourceSelect.value === "cesium-world") {
+  const mode = getEffectiveCesiumTerrainMode();
+  if (mode === "cesium-world") {
     return `world:${dom.cesiumIonToken.value.trim()}`;
   }
-  if (dom.terrainSourceSelect.value === "custom") {
+  if (mode === "custom") {
     return `custom:${dom.customTerrainUrl.value.trim()}`;
   }
   return "ellipsoid";
@@ -4926,6 +4947,9 @@ function onCesiumIonTokenChanged() {
   updateMapOverlayMetrics();
   updateTerrainSummary();
   updateTerrainMenuValue();
+  if (state.ui?.currentView === "topology") {
+    renderTopologyView();
+  }
 }
 
 function onTerrainSourceSettingsChanged() {
@@ -4936,6 +4960,10 @@ function onTerrainSourceSettingsChanged() {
   refreshAllAssetGroundElevations();
   updateMapOverlayMetrics();
   updateTerrainSummary();
+  updateTerrainMenuValue();
+  if (state.ui?.currentView === "topology") {
+    renderTopologyView();
+  }
 }
 
 function onCesium3dVisualSettingsChanged() {
@@ -11620,6 +11648,9 @@ function updateWeatherState() {
     dom.weatherSummary.textContent = "Manual weather profile active.";
   }
   updateWeatherMenuValue();
+  if (state.ui?.currentView === "topology") {
+    renderTopologyView();
+  }
 }
 
 async function fetchWeather() {
@@ -11653,11 +11684,17 @@ async function fetchWeather() {
     syncWeatherInputsFromState();
     dom.weatherSummary.textContent = `Weather from Open-Meteo at ${payload.current.time}.`;
     updateWeatherMenuValue();
+    if (state.ui?.currentView === "topology") {
+      renderTopologyView();
+    }
     setStatus("Weather updated.");
   } catch (error) {
     state.weather.source = "manual";
     dom.weatherSummary.textContent = "Weather fetch failed. Manual values remain active.";
     updateWeatherMenuValue();
+    if (state.ui?.currentView === "topology") {
+      renderTopologyView();
+    }
     setStatus(error.message, true);
   }
 }
@@ -13214,11 +13251,12 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
 }
 
 async function getConfiguredCesiumTerrainProvider() {
-  if (!usesConfiguredCesiumTerrain()) {
+  const mode = getEffectiveCesiumTerrainMode();
+  if (mode !== "cesium-world" && mode !== "custom") {
     return null;
   }
 
-  if (dom.terrainSourceSelect.value === "custom") {
+  if (mode === "custom") {
     const url = dom.customTerrainUrl.value.trim();
     if (!url) {
       throw new Error("Enter a custom terrain URL first.");
@@ -22131,6 +22169,18 @@ function linkQualityClass(score) {
   return "topo-link-none";
 }
 
+function topologyAtmosphericAttenuation(freqMHz, weather, distanceKm) {
+  const freqGHz = Math.max(Number(freqMHz) || 1, 1) / 1000;
+  const humidity = clamp(Number(weather?.humidity) || 0, 0, 100) / 100;
+  const pressureFactor = Math.max(Number(weather?.pressureHpa) || 1013.25, 850) / 1013.25;
+  const tempK = Math.max((Number(weather?.temperatureC) || 20) + 273.15, 200);
+  const tempFactor = 293.15 / tempK;
+  const windNoise = Math.max(Number(weather?.windSpeedMps) || 0, 0) * 0.002;
+  const oxygenLoss = freqGHz * 0.012 * pressureFactor;
+  const waterVaporLoss = freqGHz * humidity * 0.18 * tempFactor;
+  return Math.max(0, (oxygenLoss + waterVaporLoss + windNoise) * Math.max(Number(distanceKm) || 0, 0));
+}
+
 async function assessLinkQuality(a, b) {
   let score = 100;
   const reasons = [];
@@ -22150,8 +22200,14 @@ async function assessLinkQuality(a, b) {
   const deltaMHz = Math.abs(freqMHzA - freqMHzB);
   const channelTolMHz = Math.max(0.025, Math.max(bwA, bwB) / 1000);
   const SATCOM_WF = ["MUOS", "STARSHIELD", "INMARSAT", "VIASAT", "BLOS", "SATCOM", "WGS", "AEHF", "LINK 182"];
+  const MANET_WF = ["SRW", "ANW2", "WAVE", "MESH", "MANET", "WIFI", "802.11", "TRELLISWARE", "MN-MIMO"];
   const isSatcom = SATCOM_WF.some((wf) => wfA.includes(wf) || wfB.includes(wf))
     || a.ext?.satcomEnabled || b.ext?.satcomEnabled;
+  const isMesh = MANET_WF.some((wf) => wfA.includes(wf) || wfB.includes(wf))
+    || a.ext?.isManet || b.ext?.isManet || a.net?.isManet || b.net?.isManet;
+  const isUhfLike = !isSatcom && fMhz >= 300;
+  const isVhfLike = !isSatcom && fMhz >= 30 && fMhz < 300;
+  const isHfLike = !isSatcom && fMhz >= 3 && fMhz < 30;
 
   if (bandA !== bandB) {
     score -= 55;
@@ -22213,18 +22269,44 @@ async function assessLinkQuality(a, b) {
   const radioHorizonKm = 3.57 * (Math.sqrt(Math.max(h1, 0)) + Math.sqrt(Math.max(h2, 0)));
   let los = { hasTerrain: false };
   let terrainPenaltyDb = 0;
+  let horizonPenaltyDb = 0;
+  const weatherDistanceKm = isSatcom ? Math.max(8, Math.min(25, distKm)) : distKm;
+  const weatherLossDb = topologyAtmosphericAttenuation(fMhz, state.weather, weatherDistanceKm);
 
   if (!isSatcom) {
     los = await computeTerrainLosAsync(a.lat, a.lon, h1, b.lat, b.lon, h2);
     if (los.hasTerrain) {
       if (los.blocked && los.minClearanceM < 0) {
         const obstructionM = Math.abs(los.minClearanceM);
+        const obstructionFrac = clamp(Number(los.obstructionFrac) || 0.5, 0.05, 0.95);
+        const d1 = Math.max(distM * obstructionFrac, 1);
+        const d2 = Math.max(distM - d1, 1);
         const wavelengthM = 300 / Math.max(fMhz, 0.1);
-        const v = obstructionM * Math.sqrt((2 / wavelengthM) * (2 / distM));
-        terrainPenaltyDb = v <= -0.78 ? 0 : 6.9 + 20 * Math.log10(Math.sqrt((v - 0.1) ** 2 + 1) + v - 0.1);
-        terrainPenaltyDb = Math.min(terrainPenaltyDb, 45);
-        score -= terrainPenaltyDb >= 30 ? 42 : terrainPenaltyDb >= 18 ? 28 : 14;
-        reasons.push(`Terrain blocked (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${obstructionM.toFixed(0)} m obstruction, ~${terrainPenaltyDb.toFixed(1)} dB diffraction penalty.`);
+        const fresnelRadiusM = Math.sqrt(Math.max((wavelengthM * d1 * d2) / (d1 + d2), 0));
+        const fresnelIntrusion = fresnelRadiusM > 0 ? obstructionM / fresnelRadiusM : 0;
+        const v = obstructionM * Math.sqrt((2 * (d1 + d2)) / Math.max(wavelengthM * d1 * d2, 1e-9));
+        const knifeEdgeLossDb = v <= -0.78 ? 0 : 6.9 + 20 * Math.log10(Math.sqrt((v - 0.1) ** 2 + 1) + v - 0.1);
+        let blockedExtraLossDb = 0;
+        let blockedScorePenalty = 0;
+        if (isMesh) {
+          blockedExtraLossDb = 24 + Math.max(0, fresnelIntrusion - 0.15) * 18;
+          blockedScorePenalty = 40;
+        } else if (isUhfLike) {
+          blockedExtraLossDb = 18 + Math.max(0, fresnelIntrusion - 0.2) * 14;
+          blockedScorePenalty = 32;
+        } else if (isVhfLike) {
+          blockedExtraLossDb = 10 + Math.max(0, fresnelIntrusion - 0.3) * 10;
+          blockedScorePenalty = 24;
+        } else if (isHfLike) {
+          blockedExtraLossDb = 3 + Math.max(0, fresnelIntrusion - 0.5) * 4;
+          blockedScorePenalty = 8;
+        } else {
+          blockedExtraLossDb = 8 + Math.max(0, fresnelIntrusion - 0.3) * 8;
+          blockedScorePenalty = 16;
+        }
+        terrainPenaltyDb = Math.min(knifeEdgeLossDb + blockedExtraLossDb, isMesh ? 90 : isUhfLike ? 78 : isVhfLike ? 62 : 45);
+        score -= blockedScorePenalty + (fresnelIntrusion >= 1 ? 14 : fresnelIntrusion >= 0.6 ? 9 : 5);
+        reasons.push(`Terrain blocked (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${obstructionM.toFixed(0)} m obstruction, ${fresnelRadiusM.toFixed(1)} m Fresnel radius, ~${terrainPenaltyDb.toFixed(1)} dB excess loss.`);
       } else {
         const clr = Number.isFinite(los.minClearanceM) ? `${los.minClearanceM.toFixed(0)} m clearance` : "clear";
         reasons.push(`Terrain LOS clear (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${clr}.`);
@@ -22235,12 +22317,22 @@ async function assessLinkQuality(a, b) {
 
     if (distKm > radioHorizonKm) {
       const overHorizonKm = distKm - radioHorizonKm;
-      const penalty = Math.min(26, 8 + overHorizonKm * 1.2);
-      score -= penalty;
+      const horizonScale = isMesh ? 4 : isUhfLike ? 3 : isVhfLike ? 2.1 : 1.2;
+      const horizonCap = isMesh ? 58 : isUhfLike ? 48 : isVhfLike ? 38 : 26;
+      const scorePenalty = Math.min(horizonCap, (isMesh ? 18 : isUhfLike ? 14 : isVhfLike ? 10 : 8) + overHorizonKm * horizonScale);
+      horizonPenaltyDb = Math.min(horizonCap, (isMesh ? 12 : isUhfLike ? 9 : isVhfLike ? 6 : 3) + overHorizonKm * (horizonScale * 0.8));
+      score -= scorePenalty;
       reasons.push(`Path length ${distKm.toFixed(1)} km exceeds radio horizon ${radioHorizonKm.toFixed(1)} km by ${overHorizonKm.toFixed(1)} km.`);
     } else {
       reasons.push(`Path length ${distKm.toFixed(1)} km remains inside the nominal radio horizon (${radioHorizonKm.toFixed(1)} km).`);
     }
+  }
+
+  if (weatherLossDb > 0.2) {
+    score -= Math.min(12, weatherLossDb * (isSatcom ? 0.75 : 1.2));
+    reasons.push(`Weather profile (${state.weather.source === "open-meteo" ? "live stream" : "manual"}) adds ~${weatherLossDb.toFixed(1)} dB atmospheric loss.`);
+  } else {
+    reasons.push(`Weather profile (${state.weather.source === "open-meteo" ? "live stream" : "manual"}) adds negligible atmospheric loss.`);
   }
 
   function estimateOneWayBudget(tx, rx) {
@@ -22251,7 +22343,7 @@ async function assessLinkQuality(a, b) {
     const rxLossDb = Number.isFinite(rx.systemLossDb) ? rx.systemLossDb : 3;
     const rxSensDbm = Number.isFinite(rx.receiverSensitivityDbm) ? rx.receiverSensitivityDbm : -107;
     const eirpDbm = wattsToDbm(txPowerW) + txGainDbi - txLossDb;
-    const pathLossDb = isSatcom ? 0 : fspl + terrainPenaltyDb;
+    const pathLossDb = (isSatcom ? 0 : fspl + terrainPenaltyDb + horizonPenaltyDb) + weatherLossDb;
     const rssiDbm = eirpDbm + rxGainDbi - pathLossDb - rxLossDb;
     const marginDb = rssiDbm - rxSensDbm;
     return { eirpDbm, rssiDbm, marginDb, rxSensDbm, pathLossDb };
@@ -22476,6 +22568,15 @@ function syncTopologyToolbarUi() {
   dom.topoDisplayUnitsBtn?.setAttribute("aria-selected", String(mode === "units"));
   dom.topoDisplayEmittersBtn?.classList.toggle("is-active", mode === "emitters");
   dom.topoDisplayEmittersBtn?.setAttribute("aria-selected", String(mode === "emitters"));
+  if (dom.topoTerrainStatus) {
+    const terrainLabel = getActiveTerrain()
+      ? "ON · DTED"
+      : usesConfiguredCesiumTerrain()
+        ? "ON · CESIUM"
+        : "OFF";
+    dom.topoTerrainStatus.textContent = terrainLabel;
+    dom.topoTerrainStatus.dataset.state = terrainLabel === "OFF" ? "off" : "on";
+  }
 }
 
 function wireTopologyToolbarControls() {
