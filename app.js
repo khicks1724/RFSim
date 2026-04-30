@@ -20261,7 +20261,7 @@ function renderToPickerCanvas() {
     if (otherLink && otherLink !== _currentEmitterEditId) el.classList.add("has-emitter-link");
 
     el.innerHTML = `
-      <span class="to-unit-icon">${ms2525Svg(unit)}</span>
+      <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
       <span class="to-unit-label">${esc(unit.label)}</span>
       <span class="to-unit-size-badge">${esc(unit.size || "")}</span>
     `;
@@ -20269,32 +20269,23 @@ function renderToPickerCanvas() {
     world.appendChild(el);
   }
 
-  // Draw edges
-  renderPickerEdges(tempUnits, linkSnap, edgeSvg);
-
   // Center the view
   fitPickerView(tempUnits);
+
+  // Draw edges after transforms are updated.
+  renderPickerEdges(tempUnits, linkSnap, edgeSvg);
 }
 
 function renderPickerEdges(units, links, svg) {
   svg.innerHTML = "";
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-  marker.setAttribute("id", "pickerArrow");
-  marker.setAttribute("markerWidth", "7"); marker.setAttribute("markerHeight", "7");
-  marker.setAttribute("refX", "3.5");      marker.setAttribute("refY", "6");
-  marker.setAttribute("orient", "auto");
-  marker.innerHTML = `<path d="M0,0 L7,0 L3.5,7 z" fill="#565d67"/>`;
-  defs.appendChild(marker);
-  svg.appendChild(defs);
-
-  const UNIT_H = 56;
   for (const lnk of links) {
     const p = units.find(u => u.id === lnk.parentId);
     const c = units.find(u => u.id === lnk.childId);
     if (!p || !c) continue;
-    const x1 = p.x, y1 = p.y + UNIT_H / 2;
-    const x2 = c.x, y2 = c.y - UNIT_H / 2;
+    const x1 = p.x;
+    const y1 = p.y + TO_EDGE_LAYOUT.cardHalfHeight + TO_EDGE_LAYOUT.connectorBuffer;
+    const x2 = c.x;
+    const y2 = c.y - TO_EDGE_LAYOUT.iconHalfHeight - TO_EDGE_LAYOUT.connectorBuffer;
     const midY = (y1 + y2) / 2;
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", `M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`);
@@ -20302,7 +20293,6 @@ function renderPickerEdges(units, links, svg) {
     path.setAttribute("stroke-width", "1.5");
     path.setAttribute("fill", "none");
     path.setAttribute("stroke-linejoin", "miter");
-    path.setAttribute("marker-end", "url(#pickerArrow)");
     svg.appendChild(path);
   }
 }
@@ -20418,6 +20408,7 @@ const _toState = {
   units: [],       // { id, label, designator, affiliation, type, size, x, y }
   links: [],       // { parentId, childId }
   nextId: 1,
+  iconRenderer: "aigen",
   zoom: 1,
   panX: 0,
   panY: 0,
@@ -20429,11 +20420,22 @@ const _toState = {
   _initialized: false,
 };
 
+const TO_ICON_RENDERERS = {
+  AIGEN: "aigen",
+  MILSTD: "milstd",
+};
+
+const TO_EDGE_LAYOUT = {
+  cardHalfHeight: 54,
+  iconHalfHeight: 28,
+  connectorBuffer: 10,
+};
+
 const MIL_COLORS = {
-  friendly: { frame: "#006bb6", bg: "#aad4f5", text: "#003566" },
-  hostile:  { frame: "#c80000", bg: "#ff9999", text: "#5c0000" },
-  neutral:  { frame: "#00875a", bg: "#bff0c4", text: "#00391c" },
-  unknown:  { frame: "#ffe600", bg: "#fffaa0", text: "#4d4200" },
+  friendly: { frame: "#006bb6", bg: "#aad4f5", text: "#000000" },
+  hostile:  { frame: "#c80000", bg: "#ff9999", text: "#000000" },
+  neutral:  { frame: "#00875a", bg: "#bff0c4", text: "#000000" },
+  unknown:  { frame: "#ffe600", bg: "#fffaa0", text: "#000000" },
 };
 
 const UNIT_SIZE_SYMBOLS = {
@@ -20501,6 +20503,163 @@ const UNIT_TYPE_SYMBOLS = {
   default:             "□",
 };
 
+const MILSTD_FRAME_PATHS = {
+  unknown: {
+    ground: "images/milstd/Frames/0_110_0.svg",
+    air: "images/milstd/Frames/0_105_0.svg",
+    sea_surface: "images/milstd/Frames/0_115_0.svg",
+    subsurface: "images/milstd/Frames/0_135_0.svg",
+    space: "images/milstd/Frames/0_130_0.svg",
+  },
+  friendly: {
+    ground: "images/milstd/Frames/0_310_0.svg",
+    air: "images/milstd/Frames/0_305_0.svg",
+    sea_surface: "images/milstd/Frames/0_315_0.svg",
+    subsurface: "images/milstd/Frames/0_335_0.svg",
+    space: "images/milstd/Frames/0_330_0.svg",
+  },
+  neutral: {
+    ground: "images/milstd/Frames/0_410_0.svg",
+    air: "images/milstd/Frames/0_405_0.svg",
+    sea_surface: "images/milstd/Frames/0_415_0.svg",
+    subsurface: "images/milstd/Frames/0_435_0.svg",
+    space: "images/milstd/Frames/0_430_0.svg",
+  },
+  hostile: {
+    ground: "images/milstd/Frames/0_610_0.svg",
+    air: "images/milstd/Frames/0_605_0.svg",
+    sea_surface: "images/milstd/Frames/0_615_0.svg",
+    subsurface: "images/milstd/Frames/0_635_0.svg",
+    space: "images/milstd/Frames/0_630_0.svg",
+  },
+};
+
+const MILSTD_ECHELON_PATHS = {
+  team: "images/milstd/Echelon/111.svg",
+  fireteam: "images/milstd/Echelon/112.svg",
+  squad: "images/milstd/Echelon/113.svg",
+  section: "images/milstd/Echelon/121.svg",
+  platoon: "images/milstd/Echelon/122.svg",
+  company: "images/milstd/Echelon/123.svg",
+  battalion: "images/milstd/Echelon/124.svg",
+  regiment: "images/milstd/Echelon/125.svg",
+  brigade: "images/milstd/Echelon/311.svg",
+  division: "images/milstd/Echelon/312.svg",
+  corps: "images/milstd/Echelon/313.svg",
+  army: "images/milstd/Echelon/314.svg",
+  army_group: "images/milstd/Echelon/315.svg",
+  theater: "images/milstd/Echelon/316.svg",
+};
+
+const MILSTD_FULL_FRAME_SUFFIX = {
+  unknown: "0",
+  friendly: "1",
+  neutral: "2",
+  hostile: "3",
+};
+
+const MILSTD_MAIN_ASSETS = {
+  headquarters: { path: "images/milstd/Appendices/Land/10110000.svg" },
+  civil_affairs: { path: "images/milstd/Appendices/Land/10110200.svg" },
+  psyop: { path: "images/milstd/Appendices/Land/10110600.svg" },
+  signal: { base: "images/milstd/Appendices/Land/10120501", fullFrame: true },
+  armor: { base: "images/milstd/Appendices/Land/10121100", fullFrame: true },
+  recon: { base: "images/milstd/Appendices/Land/10121101", fullFrame: true },
+  mechanized_infantry: { base: "images/milstd/Appendices/Land/10121102", fullFrame: true },
+  armored_cavalry: { base: "images/milstd/Appendices/Land/10121300", fullFrame: true },
+  special_forces: { path: "images/milstd/Appendices/Land/10121700.svg" },
+  artillery: { path: "images/milstd/Appendices/Land/10130300.svg" },
+  air_defense: { base: "images/milstd/Appendices/Land/10130100", fullFrame: true },
+  medical: { path: "images/milstd/Appendices/Land/10140100.svg" },
+  engineer: { path: "images/milstd/Appendices/Land/10140700.svg" },
+  military_police: { path: "images/milstd/Appendices/Land/10141200.svg" },
+  ew: { path: "images/milstd/Appendices/Land/10150500.svg" },
+  military_intelligence: { path: "images/milstd/Appendices/Land/10151000.svg" },
+  judge_advocate: { path: "images/milstd/Appendices/Land/10160800.svg" },
+  infantry: { path: "images/milstd/Appendices/Land/10161100.svg" },
+  light_infantry: { path: "images/milstd/Appendices/Land/10161100.svg" },
+  marine_infantry: { path: "images/milstd/Appendices/Land/10161100.svg" },
+  airborne_infantry: { base: "images/milstd/Appendices/Land/10163400", fullFrame: true },
+  aviation_fixed: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  fighter: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  bomber: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  attack_fixed: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  transport_fixed: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  isr_fixed: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  tanker: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  uav_fixed: { path: "images/milstd/Appendices/Air/01110300.svg" },
+  aviation_rotary: { path: "images/milstd/Appendices/Air/01110400.svg" },
+  attack_helo: { path: "images/milstd/Appendices/Air/01110400.svg" },
+  utility_helo: { path: "images/milstd/Appendices/Air/01110400.svg" },
+  recon_helo: { path: "images/milstd/Appendices/Air/01110400.svg" },
+  medevac: { path: "images/milstd/Appendices/Air/01110400.svg" },
+  uav_rotary: { path: "images/milstd/Appendices/Air/01110400.svg" },
+  naval_surface: { path: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+  naval_aviation: { path: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+  amphibious: { path: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+  mine_warfare: { path: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+  coast_guard: { path: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+  submarine: { path: "images/milstd/Appendices/SeaSubsurface/35110100.svg" },
+  cyber: { path: "images/milstd/Appendices/Cyberspace/60110100.svg" },
+  space: { path: "images/milstd/Appendices/Space/05111500.svg" },
+};
+
+const MILSTD_FALLBACK_TEXT = {
+  ranger: "RGR",
+  logistics: "LOG",
+  maintenance: "MNT",
+  chemical: "CBRN",
+  finance: "FIN",
+  adjutant_general: "AG",
+  chaplain: "REL",
+};
+
+function resolveMilstdDomain(unit) {
+  if (!unit?.type) return "ground";
+  if (unit.type === "space") return "space";
+  if (["naval_surface", "naval_aviation", "amphibious", "mine_warfare", "coast_guard"].includes(unit.type)) return "sea_surface";
+  if (unit.type === "submarine") return "subsurface";
+  if (unit.type.includes("fixed") || unit.type.includes("rotary")
+    || ["fighter", "bomber", "attack_fixed", "transport_fixed", "isr_fixed", "tanker", "uav_fixed", "attack_helo", "utility_helo", "recon_helo", "medevac", "uav_rotary"].includes(unit.type)) {
+    return "air";
+  }
+  return "ground";
+}
+
+function resolveMilstdFramePath(unit) {
+  const affiliation = MILSTD_FRAME_PATHS[unit.affiliation] ? unit.affiliation : "unknown";
+  return MILSTD_FRAME_PATHS[affiliation][resolveMilstdDomain(unit)] || MILSTD_FRAME_PATHS.unknown.ground;
+}
+
+function resolveMilstdMainPath(unit) {
+  const asset = MILSTD_MAIN_ASSETS[unit.type];
+  if (!asset) return null;
+  if (asset.path) return asset.path;
+  if (asset.fullFrame && asset.base) {
+    const suffix = MILSTD_FULL_FRAME_SUFFIX[unit.affiliation] || MILSTD_FULL_FRAME_SUFFIX.unknown;
+    return `${asset.base}_${suffix}.svg`;
+  }
+  return asset.base ? `${asset.base}.svg` : null;
+}
+
+function getMilstdFallbackText(unit) {
+  return MILSTD_FALLBACK_TEXT[unit.type]
+    || UNIT_TYPE_SYMBOLS[unit.type]
+    || UNIT_TYPE_SYMBOLS.default;
+}
+
+function milstd2525Svg(unit) {
+  const framePath = resolveMilstdFramePath(unit);
+  const mainPath = resolveMilstdMainPath(unit);
+  const echelonPath = MILSTD_ECHELON_PATHS[unit.size] || "";
+  const fallback = !mainPath ? getMilstdFallbackText(unit) : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" width="56" height="56" class="ms2525-icon milstd-icon" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+    <image href="${framePath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />
+    ${mainPath ? `<image href="${mainPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : `<text x="306" y="410" text-anchor="middle" font-size="${fallback.length > 2 ? 86 : 112}" class="milstd-fallback-text">${esc(fallback)}</text>`}
+    ${echelonPath ? `<image href="${echelonPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : ""}
+  </svg>`;
+}
+
 function ms2525Svg(unit) {
   const col = MIL_COLORS[unit.affiliation] || MIL_COLORS.unknown;
   const sym = UNIT_TYPE_SYMBOLS[unit.type] || UNIT_TYPE_SYMBOLS.default;
@@ -20522,8 +20681,37 @@ function ms2525Svg(unit) {
     <text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
       font-size="16" font-weight="bold" fill="${col.text}" font-family="monospace">${sym}</text>
     <text x="28" y="6" text-anchor="middle" dominant-baseline="middle"
-      font-size="8" font-weight="bold" fill="${col.frame}" font-family="monospace">${sizeSym}</text>
+      font-size="8" font-weight="bold" fill="#000000" font-family="monospace">${sizeSym}</text>
   </svg>`;
+}
+
+function renderToUnitIcon(unit) {
+  return _toState.iconRenderer === TO_ICON_RENDERERS.MILSTD ? milstd2525Svg(unit) : ms2525Svg(unit);
+}
+
+function syncToRendererToggle() {
+  const activeRenderer = _toState.iconRenderer === TO_ICON_RENDERERS.MILSTD ? TO_ICON_RENDERERS.MILSTD : TO_ICON_RENDERERS.AIGEN;
+  document.querySelectorAll(".to-renderer-option").forEach((button) => {
+    const isActive = button.dataset.renderer === activeRenderer;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function setToIconRenderer(renderer) {
+  const nextRenderer = renderer === TO_ICON_RENDERERS.MILSTD ? TO_ICON_RENDERERS.MILSTD : TO_ICON_RENDERERS.AIGEN;
+  if (_toState.iconRenderer === nextRenderer) return;
+  _toState.iconRenderer = nextRenderer;
+  syncToRendererToggle();
+  renderToView();
+  if (!document.getElementById("toPickerModal")?.classList.contains("hidden")) renderToPickerCanvas();
+}
+
+function wireToRendererToggle() {
+  document.querySelectorAll(".to-renderer-option").forEach((button) => {
+    button.addEventListener("click", () => setToIconRenderer(button.dataset.renderer));
+  });
+  syncToRendererToggle();
 }
 
 function initPlanViewIfNeeded() {
@@ -20534,6 +20722,7 @@ function initPlanViewIfNeeded() {
   const world  = document.getElementById("toWorld");
   const edgeSvg = document.getElementById("toEdgeSvg");
   if (!canvas || !world) return;
+  wireToRendererToggle();
 
   // ── Wire toolbar buttons ──
   document.getElementById("toAddUnitBtn")?.addEventListener("click", () => {
@@ -20671,7 +20860,7 @@ function renderToUnit(unit) {
   el.style.left = unit.x + "px";
   el.style.top  = unit.y + "px";
   el.innerHTML = `
-    <span class="to-unit-icon">${ms2525Svg(unit)}</span>
+    <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
     <span class="to-unit-label">${esc(unit.label)}</span>
     <span class="to-unit-size-badge">${esc(UNIT_SIZE_SYMBOLS[unit.size] || "")} ${esc(unit.size || "")}</span>
   `;
@@ -20736,19 +20925,6 @@ function renderToEdges() {
   const svg = document.getElementById("toEdgeSvg");
   if (!svg) return;
   svg.innerHTML = "";
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-  marker.setAttribute("id", "toArrow");
-  marker.setAttribute("markerWidth", "7");
-  marker.setAttribute("markerHeight", "7");
-  marker.setAttribute("refX", "3.5");
-  marker.setAttribute("refY", "6");
-  marker.setAttribute("orient", "auto");
-  marker.innerHTML = `<path d="M0,0 L7,0 L3.5,7 z" fill="#565d67"/>`;
-  defs.appendChild(marker);
-  svg.appendChild(defs);
-
-  const UNIT_H = 56; // icon height in world coords
   for (const link of _toState.links) {
     const parent = _toState.units.find(u => u.id === link.parentId);
     const child  = _toState.units.find(u => u.id === link.childId);
@@ -20758,10 +20934,11 @@ function renderToEdges() {
     const py  = parent.y * _toState.zoom + _toState.panY;
     const cx2 = child.x  * _toState.zoom + _toState.panX;
     const cy2 = child.y  * _toState.zoom + _toState.panY;
-    const halfH = (UNIT_H / 2) * _toState.zoom;
-    // Exit bottom-center of parent, enter top-center of child
-    const x1 = px,  y1 = py + halfH;
-    const x2 = cx2, y2 = cy2 - halfH;
+    const parentClearance = (TO_EDGE_LAYOUT.cardHalfHeight + TO_EDGE_LAYOUT.connectorBuffer) * _toState.zoom;
+    const childClearance = (TO_EDGE_LAYOUT.iconHalfHeight + TO_EDGE_LAYOUT.connectorBuffer) * _toState.zoom;
+    // Exit below the card body and stop above the icon block.
+    const x1 = px,  y1 = py + parentClearance;
+    const x2 = cx2, y2 = cy2 - childClearance;
     const midY = (y1 + y2) / 2;
     // Orthogonal elbow: down → horizontal → down
     const d = `M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2}`;
@@ -20771,7 +20948,6 @@ function renderToEdges() {
     line.setAttribute("stroke-width", "1.5");
     line.setAttribute("fill", "none");
     line.setAttribute("stroke-linejoin", "miter");
-    line.setAttribute("marker-end", "url(#toArrow)");
     svg.appendChild(line);
   }
 }

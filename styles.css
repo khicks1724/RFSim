@@ -5693,6 +5693,39 @@ body.emitter-modal-open {
   flex-wrap: nowrap;
   flex-shrink: 0;
 }
+.to-renderer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.82);
+  border: 1px solid rgba(15,23,42,0.12);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+  flex-shrink: 0;
+}
+.to-renderer-option {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #243245;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.to-renderer-option:hover {
+  background: rgba(15,23,42,0.08);
+}
+.to-renderer-option.is-active {
+  background: #111827;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(15,23,42,0.18);
+}
 .to-toolbar-section-right {
   margin-left: auto;
   flex-shrink: 0;
@@ -5752,8 +5785,9 @@ body.emitter-modal-open {
   overflow: hidden;
   position: relative;
   background:
-    radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 24px 24px;
-  background-color: var(--bg, #17191d);
+    radial-gradient(circle, rgba(15,23,42,0.14) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(180deg, rgba(255,255,255,0.8), rgba(226,236,247,0.88));
+  background-color: #edf3f9;
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
@@ -5765,6 +5799,7 @@ body.emitter-modal-open {
   top: 0; left: 0;
   transform-origin: 0 0;
   will-change: transform;
+  z-index: 2;
 }
 /* SVG edge overlay */
 .to-edge-svg {
@@ -5774,6 +5809,7 @@ body.emitter-modal-open {
   height: 100%;
   pointer-events: none;
   overflow: visible;
+  z-index: 1;
 }
 /* Unit card */
 .to-unit {
@@ -5786,7 +5822,13 @@ body.emitter-modal-open {
   -webkit-user-select: none;
   user-select: none;
   width: 100px;
+  padding: 6px 10px 8px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.94);
+  border: 1px solid rgba(15,23,42,0.12);
+  box-shadow: 0 8px 22px rgba(15,23,42,0.12);
   transform: translate(-50%, -50%);
+  z-index: 2;
 }
 .to-unit:hover .to-unit-icon { filter: brightness(1.3); }
 .to-unit.selected .to-unit-icon { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
@@ -5798,18 +5840,21 @@ body.emitter-modal-open {
 }
 .to-unit-label {
   font-size: 0.65rem;
-  color: var(--text);
+  color: #000000;
   text-align: center;
   line-height: 1.2;
-  max-width: 100px;
+  max-width: 100%;
   word-break: break-word;
   pointer-events: none;
+  font-weight: 600;
 }
 .to-unit-size-badge {
   font-size: 0.6rem;
-  color: var(--muted);
+  color: #000000;
   text-align: center;
   pointer-events: none;
+  font-weight: 600;
+  opacity: 1;
 }
 /* Context menu */
 .to-context-menu {
@@ -6277,6 +6322,15 @@ body.emitter-modal-open {
   width: 56px;
   height: 56px;
 }
+.milstd-icon {
+  overflow: visible;
+}
+.milstd-fallback-text {
+  fill: #000000;
+  font-family: "Arial Narrow", Arial, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    Topo link quality colors (gradient via stroke)
@@ -6394,8 +6448,9 @@ body.emitter-modal-open {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 24px 24px;
-  background-color: var(--bg, #17191d);
+    radial-gradient(circle, rgba(15,23,42,0.14) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(180deg, rgba(255,255,255,0.8), rgba(226,236,247,0.88));
+  background-color: #edf3f9;
   cursor: default;
 }
 .to-picker-canvas .to-unit {
