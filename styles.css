@@ -5833,8 +5833,8 @@ body.emitter-modal-open {
 .to-unit:hover .to-unit-icon { filter: brightness(1.3); }
 .to-unit.selected .to-unit-icon { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
 .to-unit-icon {
-  width: 56px;
-  height: 56px;
+  width: 80px;
+  height: 80px;
   display: block;
   border-radius: 2px;
 }
@@ -6319,8 +6319,8 @@ body.emitter-modal-open {
 ═══════════════════════════════════════════════════════════════ */
 .ms2525-icon {
   display: block;
-  width: 56px;
-  height: 56px;
+  width: 80px;
+  height: 80px;
 }
 .milstd-icon {
   overflow: visible;

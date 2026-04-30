@@ -20263,7 +20263,6 @@ function renderToPickerCanvas() {
     el.innerHTML = `
       <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
       <span class="to-unit-label">${esc(unit.label)}</span>
-      <span class="to-unit-size-badge">${esc(unit.size || "")}</span>
     `;
     el.addEventListener("click", () => selectToUnitForEmitter(unit, el));
     world.appendChild(el);
@@ -20439,20 +20438,19 @@ const MIL_COLORS = {
 };
 
 const UNIT_SIZE_SYMBOLS = {
-  team:      "·",
-  fireteam:  "··",
-  squad:     "···",
-  section:   "I",
-  platoon:   "II",
-  company:   "III",
-  battalion: "X",
-  regiment:  "XX",
-  brigade:   "XXX",
-  division:  "XXXX",
-  corps:     "XXXXX",
-  army:      "XXXXXX",
-  army_group:"XXXXXXX",
-  theater:   "XXXXXXXX",
+  team:      "ø",
+  squad:     "•",
+  section:   "••",
+  platoon:   "•••",
+  company:   "I",
+  battalion: "II",
+  regiment:  "III",
+  brigade:   "X",
+  division:  "XX",
+  corps:     "XXX",
+  army:      "XXXX",
+  army_group:"XXXXX",
+  theater:   "XXXXXX",
 };
 
 const UNIT_TYPE_SYMBOLS = {
@@ -20653,7 +20651,7 @@ function milstd2525Svg(unit) {
   const mainPath = resolveMilstdMainPath(unit);
   const echelonPath = MILSTD_ECHELON_PATHS[unit.size] || "";
   const fallback = !mainPath ? getMilstdFallbackText(unit) : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" width="56" height="56" class="ms2525-icon milstd-icon" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" width="80" height="80" class="ms2525-icon milstd-icon" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
     <image href="${framePath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />
     ${mainPath ? `<image href="${mainPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : `<text x="306" y="410" text-anchor="middle" font-size="${fallback.length > 2 ? 86 : 112}" class="milstd-fallback-text">${esc(fallback)}</text>`}
     ${echelonPath ? `<image href="${echelonPath}" x="0" y="0" width="612" height="792" preserveAspectRatio="xMidYMid meet" />` : ""}
@@ -20675,7 +20673,7 @@ function ms2525Svg(unit) {
     ? `<line x1="4" y1="8" x2="52" y2="48" stroke="${col.frame}" stroke-width="1.5"/>
        <line x1="52" y1="8" x2="4" y2="48" stroke="${col.frame}" stroke-width="1.5"/>`
     : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" width="56" height="56" class="ms2525-icon">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" width="80" height="80" class="ms2525-icon">
     ${frameShape}
     ${hostile_marks}
     <text x="28" y="34" text-anchor="middle" dominant-baseline="middle"
@@ -20862,7 +20860,6 @@ function renderToUnit(unit) {
   el.innerHTML = `
     <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
     <span class="to-unit-label">${esc(unit.label)}</span>
-    <span class="to-unit-size-badge">${esc(UNIT_SIZE_SYMBOLS[unit.size] || "")} ${esc(unit.size || "")}</span>
   `;
 
   // Drag to move
