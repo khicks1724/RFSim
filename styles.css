@@ -6108,6 +6108,7 @@ body.emitter-modal-open {
   width: 100vw; height: 100vh;
   overflow: visible;
   pointer-events: none;
+  z-index: 0;
 }
 /* Allow link lines to receive pointer events */
 .topo-svg .topo-link {
@@ -6125,6 +6126,7 @@ body.emitter-modal-open {
   height: 100%;
   transform-origin: 0 0;
   pointer-events: none;
+  z-index: 0;
 }
 /* Re-enable pointer events on nodes themselves */
 .topo-node {

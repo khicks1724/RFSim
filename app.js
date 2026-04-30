@@ -21503,7 +21503,7 @@ async function renderTopologyView() {
 
   // ── Smart layout ──────────────────────────────────────────────────
   // Card dimensions (approximate — cards are centered on their position point)
-  const CARD_W = 160, CARD_H = 220, PAD_X = 80, PAD_Y = 80;
+  const CARD_W = 170, CARD_H = 240, PAD_X = 240, PAD_Y = 200;
   const SLOT_W = CARD_W + PAD_X, SLOT_H = CARD_H + PAD_Y;
   const unitPos = new Map(); // key → {x, y}  (visual center)
   const n = toLinkedUnits.length;
@@ -21519,7 +21519,7 @@ async function renderTopologyView() {
 
   } else if (n <= 6) {
     // Circle arrangement — evenly spaced, top-first
-    const R = Math.max(SLOT_W, SLOT_H) * n / (2 * Math.PI) * 1.1;
+    const R = Math.max(280, Math.max(SLOT_W, SLOT_H) * n / (2 * Math.PI) * 1.45);
     const cx = R + CARD_W, cy = R + CARD_H;
     toLinkedUnits.forEach((u, i) => {
       const angle = (2 * Math.PI * i / n) - Math.PI / 2;
@@ -21566,10 +21566,14 @@ async function renderTopologyView() {
           const labelB = (emB.emitterLabel || "").toUpperCase();
           const sameModel = labelA && labelB && labelA === labelB;
           let bucket = null;
-          if (satA || satB) {
-            // Either is SATCOM — match if waveform or model compatible
-            const wfCompat = !wfA || !wfB || wfA === wfB;
-            if (wfCompat || sameModel) bucket = wfA || wfB || labelA || "satcom";
+          if (satA !== satB) {
+            continue;
+          }
+          if (satA && satB) {
+            // SATCOM only matches SATCOM. Mixed SATCOM/LOS pairs are invalid.
+            const wfCompat = !!wfA && !!wfB && wfA === wfB;
+            if (sameModel) bucket = labelA;
+            else if (wfCompat) bucket = wfA;
           } else {
             // Non-SATCOM: same model, OR same freq+compatible waveform
             const freqMatch = Math.abs((emA.frequencyMHz || 0) - (emB.frequencyMHz || 0)) < 1.0;
@@ -22064,8 +22068,9 @@ function linkTypeClass(emA, emB) {
   const wfB = (emB?.ext?.waveform || emB?.waveform || "").toUpperCase();
   const SATCOM_WF = ["MUOS", "STARSHIELD", "INMARSAT", "VIASAT", "BLOS", "SATCOM", "WGS", "AEHF", "LINK 182"];
   const MANET_WF  = ["SRW", "ANW2", "WAVE", "MESH", "MANET", "WIFI", "802.11", "TRELLISWARE"];
-  if (SATCOM_WF.some(w => wfA.includes(w) || wfB.includes(w))
-      || emA?.ext?.satcomEnabled || emB?.ext?.satcomEnabled) return "topo-link-type-satcom";
+  const satA = emA?.ext?.satcomEnabled || SATCOM_WF.some(w => wfA.includes(w));
+  const satB = emB?.ext?.satcomEnabled || SATCOM_WF.some(w => wfB.includes(w));
+  if (satA && satB) return "topo-link-type-satcom";
   if (MANET_WF.some(w => wfA.includes(w) || wfB.includes(w))
       || emA?.ext?.isManet || emB?.ext?.isManet) return "topo-link-type-mesh";
   const fMhz = ((emA?.frequencyMHz || 0) + (emB?.frequencyMHz || 0)) / 2;
@@ -22138,6 +22143,16 @@ function redrawTopoLinks() {
   if (!svg) return;
   svg.innerHTML = "";
   const tooltip = getOrCreateTopoTooltip();
+  const nodeMetrics = new Map();
+  document.querySelectorAll("#topoNodes .topo-node").forEach((nodeEl) => {
+    const key = nodeEl.dataset.key;
+    if (!key) return;
+    const cardEl = nodeEl.querySelector(".topo-unit-card") || nodeEl;
+    nodeMetrics.set(key, {
+      width: cardEl.offsetWidth || 170,
+      height: cardEl.offsetHeight || 240,
+    });
+  });
 
   // Count links per node-pair so parallel links can be offset perpendicularly
   const pairCounts = new Map(); // pairKey → total count
@@ -22148,13 +22163,16 @@ function redrawTopoLinks() {
     if (!pairIndex.has(k)) pairIndex.set(k, 0);
   }
 
-  const LINK_OFFSET = 10; // px between parallel links
+  const LINK_OFFSET = 18; // px between parallel links
+  const CARD_CLEARANCE = 18; // keep link anchors visibly below each card
 
   for (const lnk of _topoLinkDescriptors) {
     // Positions are stored as the visual center of each node (CSS transform: translate(-50%,-50%))
     const pa = _topoNodePositions.get(lnk.keyA);
     const pb = _topoNodePositions.get(lnk.keyB);
     if (!pa || !pb) continue;
+    const metricsA = nodeMetrics.get(lnk.keyA) || { width: 170, height: 240 };
+    const metricsB = nodeMetrics.get(lnk.keyB) || { width: 170, height: 240 };
 
     // Compute perpendicular offset for parallel links between the same pair
     const pairKey = [lnk.keyA, lnk.keyB].sort().join("|");
@@ -22163,7 +22181,8 @@ function redrawTopoLinks() {
     pairIndex.set(pairKey, idx + 1);
     const offsetMag = total > 1 ? (idx - (total - 1) / 2) * LINK_OFFSET : 0;
 
-    let x1 = pa.x, y1 = pa.y, x2 = pb.x, y2 = pb.y;
+    let x1 = pa.x, y1 = pa.y + metricsA.height / 2 + CARD_CLEARANCE;
+    let x2 = pb.x, y2 = pb.y + metricsB.height / 2 + CARD_CLEARANCE;
     if (offsetMag !== 0) {
       const dx = pb.x - pa.x, dy = pb.y - pa.y;
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
