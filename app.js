@@ -11197,8 +11197,12 @@ function renderAssetPopup(asset) {
   const groundElevationLine = Number.isFinite(asset.groundElevationM)
     ? `Ground ${formatElevation(asset.groundElevationM)}<br>`
     : "";
+  const radioName = asset.emitterLabel || asset.name || "Radio";
+  const toUnit = asset.toUnitId ? (_toState?.units || []).find(u => u.id === asset.toUnitId) : null;
+  const unitLabel = toUnit?.label || toUnit?.designator || asset.unit;
+  const displayName = unitLabel ? `${unitLabel}: ${radioName}` : radioName;
   return `
-    <strong>${escapeHtml(asset.name)}</strong><br>
+    <strong>${escapeHtml(displayName)}</strong><br>
     ${escapeHtml(asset.unit)}<br>
     ${escapeHtml(asset.type)} | ${asset.frequencyMHz} MHz | ${asset.powerW} W<br>
     Gain ${asset.antennaGainDbi} dBi | Height ${asset.antennaHeightM} m<br>
@@ -13355,11 +13359,20 @@ function getMapContentEntries() {
   });
 
   state.assets.forEach((asset) => {
+    const radioName = asset.emitterLabel || asset.name || "Radio";
+    let displayName;
+    if (asset.toUnitId) {
+      const toUnit = (_toState?.units || []).find(u => u.id === asset.toUnitId);
+      const unitLabel = toUnit?.label || toUnit?.designator || asset.unit;
+      displayName = unitLabel ? `${unitLabel}: ${radioName}` : radioName;
+    } else {
+      displayName = radioName;
+    }
     entries.push({
       id: `asset:${asset.id}`,
       kind: "asset",
       assetType: asset.type,
-      name: asset.name,
+      name: displayName,
       subtitle: `${asset.type} | ${asset.unit}`,
     });
   });
