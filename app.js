@@ -25,10 +25,10 @@ const MILSTD_PALETTE = [
   "#ffff80",  // MIL unknown (yellow)
   "#ffffff",  // white
   "#000000",  // black
-  "#f97316",  // orange
-  "#a855f7",  // purple
-  "#facc15",  // amber
-  "#6b7280",  // gray
+  "#c0392b",  // medium-dark vivid red
+  "#1a3a6b",  // navy blue
+  "#7b3fa0",  // grape
+  "#e8710a",  // moderately bright orange
 ];
 
 const BASEMAPS = {
@@ -21390,104 +21390,234 @@ function buildPlanAiContext() {
 /* ═══════════════════════════════════════════════════════════════
    TOPOLOGY VIEW — Network Link Quality
 ═══════════════════════════════════════════════════════════════ */
-function renderTopologyView() {
-  const svg    = document.getElementById("topoSvg");
-  const nodes  = document.getElementById("topoNodes");
-  const empty  = document.getElementById("topoEmptyMsg");
+async function renderTopologyView() {
+  const svg   = document.getElementById("topoSvg");
+  const nodes = document.getElementById("topoNodes");
+  const empty = document.getElementById("topoEmptyMsg");
   if (!svg || !nodes) return;
 
-  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
-  if (!emitters.length) {
+  // Only assets that have a frequencyMHz (i.e. are radio emitters)
+  const allEmitters = (state.assets || []).filter(a => a.frequencyMHz > 0);
+
+  // Build a map of toUnitId → emitter for TO-linked assets
+  const unitEmitterMap = new Map(); // unitId → asset
+  for (const a of allEmitters) {
+    if (a.toUnitId) unitEmitterMap.set(a.toUnitId, a);
+  }
+
+  // Collect all TO units that have an emitter attached
+  const linkedUnitIds = new Set(unitEmitterMap.keys());
+
+  // Find all TO unit trees that contain at least one linked emitter.
+  // An emitter pair is candidates for a comms link if they are in the same
+  // hierarchy tree (any ancestor/descendant/sibling path).
+  function getAncestors(unitId) {
+    const ancestors = new Set();
+    let cur = unitId;
+    for (let depth = 0; depth < 20; depth++) {
+      const link = _toState.links.find(l => l.childId === cur);
+      if (!link) break;
+      ancestors.add(link.parentId);
+      cur = link.parentId;
+    }
+    return ancestors;
+  }
+
+  function getDescendants(unitId) {
+    const desc = new Set();
+    const queue = [unitId];
+    while (queue.length) {
+      const id = queue.shift();
+      for (const l of _toState.links) {
+        if (l.parentId === id && !desc.has(l.childId)) {
+          desc.add(l.childId);
+          queue.push(l.childId);
+        }
+      }
+    }
+    return desc;
+  }
+
+  function sameTree(idA, idB) {
+    // True if A is ancestor/descendant/sibling of B (same org tree)
+    if (idA === idB) return true;
+    const descA = getDescendants(idA);
+    if (descA.has(idB)) return true;
+    const descB = getDescendants(idB);
+    if (descB.has(idA)) return true;
+    // Check shared root
+    const ancA = getAncestors(idA); ancA.add(idA);
+    const ancB = getAncestors(idB); ancB.add(idB);
+    for (const id of ancA) if (ancB.has(id)) return true;
+    return false;
+  }
+
+  // Collect nodes to display: TO-linked emitters + standalone emitters
+  // For layout we use a hierarchical tree matching the TO, then append
+  // standalone emitters in a row below.
+  const toLinkedUnits = _toState.units.filter(u => linkedUnitIds.has(u.id));
+  const standaloneEmitters = allEmitters.filter(a => !a.toUnitId);
+
+  if (!toLinkedUnits.length && !standaloneEmitters.length) {
     if (empty) empty.classList.remove("hidden");
-    svg.innerHTML = "";
-    nodes.innerHTML = "";
+    svg.innerHTML = ""; nodes.innerHTML = "";
     wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
     return;
   }
   if (empty) empty.classList.add("hidden");
 
-  // Layout: arrange nodes in a circle
-  const canvas = document.getElementById("topoCanvas");
-  const W = canvas?.clientWidth  || 800;
-  const H = canvas?.clientHeight || 600;
-  const cx = W / 2;
-  const cy = H / 2;
-  const r  = Math.min(W, H) * 0.36;
+  // ── Tree layout for TO-linked units ──────────────────────────────
+  const NODE_W = 160, NODE_V = 220;
+  const unitPos = new Map(); // unitId → {x, y}
 
-  const positions = emitters.map((em, i) => {
-    const angle = (2 * Math.PI * i) / emitters.length - Math.PI / 2;
-    return { em, x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
-  });
+  function subtreeWidth(uid) {
+    const children = _toState.links.filter(l => l.parentId === uid && linkedUnitIds.has(l.childId)).map(l => l.childId);
+    if (!children.length) return NODE_W;
+    return Math.max(NODE_W, children.reduce((s, cid) => s + subtreeWidth(cid), 0));
+  }
 
-  // Build links between emitters sharing freq band or net_id
-  const links = [];
-  for (let i = 0; i < positions.length; i++) {
-    for (let j = i + 1; j < positions.length; j++) {
-      const a = positions[i].em;
-      const b = positions[j].em;
-      const quality = assessLinkQuality(a, b);
-      links.push({ i, j, quality });
+  function layoutUnit(uid, x, y) {
+    unitPos.set(uid, { x, y });
+    const children = _toState.links.filter(l => l.parentId === uid && linkedUnitIds.has(l.childId)).map(l => l.childId);
+    let cx = x - subtreeWidth(uid) / 2;
+    for (const cid of children) {
+      const w = subtreeWidth(cid);
+      layoutUnit(cid, cx + w / 2, y + NODE_V);
+      cx += w;
     }
   }
 
-  // Render SVG links
+  // Find root TO units (no parent among linked units)
+  const linkedChildIds = new Set(_toState.links.filter(l => linkedUnitIds.has(l.childId)).map(l => l.childId));
+  const roots = toLinkedUnits.filter(u => !linkedChildIds.has(u.id));
+
+  let startX = NODE_W;
+  for (const root of roots) {
+    const w = subtreeWidth(root.id);
+    layoutUnit(root.id, startX + w / 2, 100);
+    startX += w + NODE_W * 0.5;
+  }
+
+  // Standalone emitters go in a row at the bottom
+  const maxY = unitPos.size ? Math.max(...[...unitPos.values()].map(p => p.y)) + NODE_V : 100;
+  standaloneEmitters.forEach((em, i) => {
+    unitPos.set("standalone_" + em.id, { x: NODE_W + i * NODE_W, y: maxY });
+  });
+
+  // ── Determine link candidates ─────────────────────────────────────
+  // For TO-linked: same hierarchy tree + matching freq+waveform
+  // For standalone: matching freq+waveform with any other emitter
+  const posEntries = [
+    ...toLinkedUnits.map(u => ({ key: u.id, unit: u, em: unitEmitterMap.get(u.id) })),
+    ...standaloneEmitters.map(em => ({ key: "standalone_" + em.id, unit: null, em })),
+  ];
+
+  // ── Collect candidate pairs (freq+waveform match + same hierarchy tree) ──
+  const candidatePairs = [];
+  for (let i = 0; i < posEntries.length; i++) {
+    for (let j = i + 1; j < posEntries.length; j++) {
+      const a = posEntries[i], b = posEntries[j];
+      if (!a.em || !b.em) continue;
+      const freqMatch = Math.abs((a.em.frequencyMHz || 0) - (b.em.frequencyMHz || 0)) < 0.01;
+      const wfA = (a.em.ext?.waveform || "").toUpperCase();
+      const wfB = (b.em.ext?.waveform || "").toUpperCase();
+      const waveformMatch = !wfA || !wfB || wfA === wfB;
+      if (!freqMatch || !waveformMatch) continue;
+      if (a.unit && b.unit && !sameTree(a.unit.id, b.unit.id)) continue;
+      candidatePairs.push({ a, b });
+    }
+  }
+
+  // Assess link quality for all pairs in parallel (each awaits Cesium terrain)
+  const qualityResults = await Promise.all(candidatePairs.map(p => assessLinkQuality(p.a.em, p.b.em)));
+  const linkList = candidatePairs.map((p, idx) => ({ ...p, quality: qualityResults[idx] }));
+
+  // ── Render SVG links ──────────────────────────────────────────────
   svg.innerHTML = "";
   const tooltip = getOrCreateTopoTooltip();
-  for (const lnk of links) {
-    const pa = positions[lnk.i];
-    const pb = positions[lnk.j];
+  for (const lnk of linkList) {
+    const pa = unitPos.get(lnk.a.key);
+    const pb = unitPos.get(lnk.b.key);
+    if (!pa || !pb) continue;
     const cls = linkQualityClass(lnk.quality.score);
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
     line.setAttribute("x1", pa.x); line.setAttribute("y1", pa.y);
     line.setAttribute("x2", pb.x); line.setAttribute("y2", pb.y);
     line.setAttribute("stroke-width", "2.5");
     line.setAttribute("class", `topo-link ${cls}`);
+    const nameA = lnk.a.unit?.label || lnk.a.em.name || lnk.a.em.id;
+    const nameB = lnk.b.unit?.label || lnk.b.em.name || lnk.b.em.id;
     line.addEventListener("mousemove", (e) => {
       tooltip.style.display = "block";
       tooltip.style.left = (e.clientX + 12) + "px";
       tooltip.style.top  = (e.clientY - 8) + "px";
-      tooltip.textContent = `${pa.em.name || pa.em.id} ↔ ${pb.em.name || pb.em.id}: ${lnk.quality.label}`;
+      tooltip.textContent = `${nameA} ↔ ${nameB}: ${lnk.quality.label}`;
     });
     line.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
     line.addEventListener("click", (e) => {
       e.stopPropagation();
-      showTopoLinkDetail(pa.em, pb.em, lnk.quality);
+      showTopoLinkDetail(lnk.a.em, lnk.b.em, lnk.quality, nameA, nameB);
     });
     svg.appendChild(line);
   }
 
-  // Render nodes
+  // ── Render nodes ──────────────────────────────────────────────────
   nodes.innerHTML = "";
-  for (const { em, x, y } of positions) {
+  for (const entry of posEntries) {
+    const pos = unitPos.get(entry.key);
+    if (!pos || !entry.em) continue;
+    const em = entry.em;
+    const unit = entry.unit;
     const nd = document.createElement("div");
-    nd.className = "topo-node";
-    nd.style.left = x + "px";
-    nd.style.top  = y + "px";
-    const freqMhz = ((em.freq || em.frequency || 0) / 1e6).toFixed(3);
-    nd.innerHTML = `
-      <div class="topo-node-icon" title="${esc(em.name || em.id)}">📡</div>
-      <div class="topo-node-label">${esc(em.name || em.id || "Emitter")}<br><span style="color:var(--muted);font-size:0.58rem">${freqMhz} MHz</span></div>
-    `;
+    nd.className = "topo-node topo-node-card";
+    nd.style.left = pos.x + "px";
+    nd.style.top  = pos.y + "px";
+
+    const freqLabel = `${(em.frequencyMHz || 0).toFixed(3)} MHz`;
+    const wfLabel   = em.ext?.waveform ? ` · ${em.ext.waveform}` : "";
+    const radioLine = `${em.name || "Emitter"}${wfLabel ? " · " + em.ext.waveform : ""}`;
+
+    if (unit) {
+      // TO unit card: MIL icon + unit label + emitter info below
+      nd.innerHTML = `
+        <div class="topo-unit-card">
+          <div class="topo-unit-icon-wrap">${renderToUnitIcon(unit)}</div>
+          <div class="topo-unit-name">${esc(unit.label || unit.designator || "Unit")}</div>
+          <div class="topo-unit-emitter">${esc(em.name || "Emitter")}<br><span class="topo-unit-freq">${esc(freqLabel)}${wfLabel ? " · " + esc(em.ext.waveform) : ""}</span></div>
+        </div>
+      `;
+    } else {
+      // Standalone emitter
+      nd.innerHTML = `
+        <div class="topo-unit-card topo-standalone-card">
+          <div class="topo-unit-name">${esc(em.name || "Emitter")}</div>
+          <div class="topo-unit-freq">${esc(freqLabel)}${wfLabel ? " · " + esc(em.ext.waveform) : ""}</div>
+        </div>
+      `;
+    }
+
+    nd.addEventListener("click", (e) => { e.stopPropagation(); });
     nodes.appendChild(nd);
   }
 
-  // Wire pan/zoom
+  // ── Wire pan/zoom ─────────────────────────────────────────────────
   wireTopoCanvasPanZoom();
   wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
 }
 
-function assessLinkQuality(a, b) {
+async function assessLinkQuality(a, b) {
   let score = 100;
   const reasons = [];
 
-  // Same frequency band check
-  const freqA = a.freq || a.frequency || 0;
-  const freqB = b.freq || b.frequency || 0;
+  // Frequency band check (assets store frequencyMHz; convert to Hz for freqBand)
+  const freqA = (a.frequencyMHz || 0) * 1e6;
+  const freqB = (b.frequencyMHz || 0) * 1e6;
+  const fMhz  = ((a.frequencyMHz || 0) + (b.frequencyMHz || 0)) / 2 || 100;
   const bandA = freqBand(freqA);
   const bandB = freqBand(freqB);
   if (bandA !== bandB) {
     score -= 60;
-    reasons.push(`Different frequency bands (${bandA} vs ${bandB}) — cross-band communication requires additional bridging equipment.`);
+    reasons.push(`Different frequency bands (${bandA} vs ${bandB}) — cross-band communication requires bridging equipment.`);
   } else {
     reasons.push(`Same frequency band (${bandA}) — compatible radios.`);
   }
@@ -21496,58 +21626,114 @@ function assessLinkQuality(a, b) {
   const netA = a.netId || a.net_id || null;
   const netB = b.netId || b.net_id || null;
   if (netA && netB) {
-    if (netA === netB) {
-      score += 10;
-      reasons.push(`Matching Net ID (${netA}) — same radio net.`);
-    } else {
-      score -= 20;
-      reasons.push(`Different Net IDs (${netA} vs ${netB}) — separate nets; interoperability depends on gateway.`);
-    }
+    if (netA === netB) { score += 10; reasons.push(`Matching Net ID (${netA}) — same radio net.`); }
+    else { score -= 20; reasons.push(`Different Net IDs (${netA} vs ${netB}) — separate nets.`); }
   }
 
-  // Waveform match
-  const wfA = (a.waveform || "").toUpperCase();
-  const wfB = (b.waveform || "").toUpperCase();
+  // Waveform match (stored in asset.ext.waveform)
+  const wfA = (a.ext?.waveform || a.waveform || "").toUpperCase();
+  const wfB = (b.ext?.waveform || b.waveform || "").toUpperCase();
   if (wfA && wfB) {
-    if (wfA === wfB) {
-      reasons.push(`Matching waveform (${wfA}).`);
-    } else {
-      score -= 25;
-      reasons.push(`Waveform mismatch (${wfA} vs ${wfB}) — cannot communicate without gateway.`);
-    }
+    if (wfA === wfB) reasons.push(`Matching waveform (${wfA}).`);
+    else { score -= 25; reasons.push(`Waveform mismatch (${wfA} vs ${wfB}) — cannot communicate without a gateway.`); }
   }
 
-  // Distance-based attenuation estimate (if lat/lng available)
-  if (a.lat && a.lng && b.lat && b.lng) {
-    const dist = haversineKm(a.lat, a.lng, b.lat, b.lng);
-    const txPower = a.power || a.txPower || 5; // watts
-    const eirpDbm = 10 * Math.log10(txPower * 1000);
-    // Free-space path loss estimate at mid-frequency
-    const fMhz = ((freqA + freqB) / 2) / 1e6 || 100;
-    const fspl = 20 * Math.log10(dist) + 20 * Math.log10(fMhz) + 32.44;
-    const rssi = eirpDbm - fspl;
-    if (dist > 0) {
-      if (rssi < -110) {
-        score -= 40;
-        reasons.push(`Estimated RSSI ${rssi.toFixed(0)} dBm at ${dist.toFixed(1)} km — below typical sensitivity threshold. Consider higher-gain antennas or relays.`);
-      } else if (rssi < -90) {
-        score -= 15;
-        reasons.push(`Estimated RSSI ${rssi.toFixed(0)} dBm at ${dist.toFixed(1)} km — marginal signal; reliability depends on terrain and antenna orientation.`);
-      } else {
-        reasons.push(`Estimated RSSI ${rssi.toFixed(0)} dBm at ${dist.toFixed(1)} km — adequate signal strength.`);
-      }
+  // SATCOM/BLOS waveforms bypass terrain and distance limits
+  const SATCOM_WF = ["MUOS", "STARSHIELD", "INMARSAT", "VIASAT", "BLOS", "SATCOM", "WGS", "AEHF"];
+  const isSatcom = SATCOM_WF.includes(wfA) || SATCOM_WF.includes(wfB)
+    || a.ext?.satcomEnabled || b.ext?.satcomEnabled;
+  if (isSatcom) {
+    reasons.push("SATCOM/BLOS waveform — range is not terrain-limited.");
+    score = Math.max(0, Math.min(100, score));
+    const label = score >= 80 ? "Excellent" : score >= 60 ? "Good" : score >= 40 ? "Fair" : score >= 20 ? "Poor" : "No Link";
+    return { score, label, reasons, terrain: null };
+  }
+
+  // ── Propagation + terrain (requires lat/lon) ────────────────────
+  if (!(a.lat && a.lon && b.lat && b.lon)) {
+    score = Math.max(0, Math.min(100, score));
+    const label = score >= 80 ? "Excellent" : score >= 60 ? "Good" : score >= 40 ? "Fair" : score >= 20 ? "Poor" : "No Link";
+    return { score, label, reasons, terrain: null };
+  }
+
+  const distKm = haversineKm(a.lat, a.lon, b.lat, b.lon);
+  const distM  = distKm * 1000;
+
+  // Free-space path loss (using fsplDb which expects MHz and meters)
+  const fspl = fsplDb(fMhz, Math.max(distM, 1));
+
+  // Transmitter link budget
+  const txPowerW   = a.powerW || 5;
+  const txGainDbi  = a.antennaGainDbi ?? 2.15;
+  const sysLossDb  = (a.systemLossDb ?? 3) + (b.systemLossDb ?? 3);
+  const rxSensDbm  = b.receiverSensitivityDbm || -107;
+  const eirpDbm    = wattsToDbm(txPowerW) + txGainDbi;
+
+  // ── Terrain LOS via Cesium (async, cached) ─────────────────────
+  const h1 = a.antennaHeightM ?? 2;
+  const h2 = b.antennaHeightM ?? 2;
+  const los = await computeTerrainLosAsync(a.lat, a.lon, h1, b.lat, b.lon, h2);
+
+  let diffractionDb = 0;
+  if (los.hasTerrain) {
+    if (los.blocked && los.minClearanceM < 0) {
+      // Knife-edge diffraction penalty (ITU-R P.526)
+      const obstrM = Math.abs(los.minClearanceM);
+      const wavelengthM = 300 / Math.max(fMhz, 0.1);
+      const v = obstrM * Math.sqrt((2 / wavelengthM) * (2 / Math.max(distM, 1)));
+      diffractionDb = v <= -0.78 ? 0
+        : 6.9 + 20 * Math.log10(Math.sqrt((v - 0.1) ** 2 + 1) + v - 0.1);
+      diffractionDb = Math.min(diffractionDb, 40); // cap at 40 dB
+
+      const src = los.source === "cesium" ? "Cesium terrain" : "DTED";
+      score -= diffractionDb >= 30 ? 50 : diffractionDb >= 15 ? 30 : 15;
+      reasons.push(
+        `Terrain BLOCKED (${src}): LOS obstructed by ${obstrM.toFixed(0)} m. ` +
+        `Knife-edge diffraction penalty: ${diffractionDb.toFixed(1)} dB. ` +
+        (los.obstructionLat ? `Worst obstruction ~${(los.obstructionFrac * distKm).toFixed(1)} km from TX.` : "")
+      );
+    } else {
+      const src = los.source === "cesium" ? "Cesium terrain" : "DTED";
+      const clr = Number.isFinite(los.minClearanceM) ? `${los.minClearanceM.toFixed(0)} m clearance` : "clear";
+      reasons.push(`Terrain LOS clear (${src}): ${clr}.`);
     }
-    // Terrain obstruction hint
-    const elevDiff = Math.abs((a.elevation || a.elev || 0) - (b.elevation || b.elev || 0));
-    if (elevDiff > 300) {
-      score -= 20;
-      reasons.push(`Significant elevation difference (${elevDiff.toFixed(0)} m) — terrain masking likely. Consider NLOS waveform or relay placement on high ground.`);
-    }
+  } else {
+    reasons.push("No terrain data available — terrain effects not modelled.");
+  }
+
+  // RSSI estimate including diffraction
+  const totalLossDb = fspl + diffractionDb + sysLossDb;
+  const rssiDbm = eirpDbm - totalLossDb;
+  const marginDb = rssiDbm - rxSensDbm;
+
+  if (marginDb < 0) {
+    score -= Math.min(50, Math.abs(marginDb) * 2);
+    reasons.push(
+      `Estimated RSSI ${rssiDbm.toFixed(0)} dBm at ${distKm.toFixed(1)} km — ` +
+      `${Math.abs(marginDb).toFixed(0)} dB below receiver sensitivity (${rxSensDbm} dBm). Link likely unusable.`
+    );
+  } else if (marginDb < 10) {
+    score -= 20;
+    reasons.push(
+      `Estimated RSSI ${rssiDbm.toFixed(0)} dBm at ${distKm.toFixed(1)} km — ` +
+      `only ${marginDb.toFixed(0)} dB margin above sensitivity. Marginal reliability.`
+    );
+  } else if (marginDb < 20) {
+    score -= 10;
+    reasons.push(
+      `Estimated RSSI ${rssiDbm.toFixed(0)} dBm at ${distKm.toFixed(1)} km — ` +
+      `${marginDb.toFixed(0)} dB margin. Adequate but limited fade tolerance.`
+    );
+  } else {
+    reasons.push(
+      `Estimated RSSI ${rssiDbm.toFixed(0)} dBm at ${distKm.toFixed(1)} km — ` +
+      `${marginDb.toFixed(0)} dB margin above sensitivity. Good link budget.`
+    );
   }
 
   score = Math.max(0, Math.min(100, score));
   const label = score >= 80 ? "Excellent" : score >= 60 ? "Good" : score >= 40 ? "Fair" : score >= 20 ? "Poor" : "No Link";
-  return { score, label, reasons };
+  return { score, label, reasons, terrain: los.hasTerrain ? los : null, rssiDbm, marginDb, distKm };
 }
 
 function freqBand(hz) {
@@ -21568,21 +21754,39 @@ function linkQualityClass(score) {
   return "topo-link-none";
 }
 
-function showTopoLinkDetail(a, b, quality) {
+function showTopoLinkDetail(a, b, quality, nameA, nameB) {
   const popup = document.getElementById("topoLinkPopup");
   const title = document.getElementById("topoLinkPopupTitle");
   const body  = document.getElementById("topoLinkPopupBody");
   if (!popup || !body) return;
-  const nameA = a.name || a.id || "Emitter A";
-  const nameB = b.name || b.id || "Emitter B";
+  nameA = nameA || a.name || a.id || "Emitter A";
+  nameB = nameB || b.name || b.id || "Emitter B";
   if (title) title.textContent = `${nameA} ↔ ${nameB}`;
   const scoreColor = quality.score >= 80 ? "#10b981" : quality.score >= 60 ? "#34d399" :
                      quality.score >= 40 ? "#f59e0b" : quality.score >= 20 ? "#f97316" : "#ef4444";
+  const t = quality.terrain;
+  const terrainBadge = !t ? `<span style="color:var(--muted);font-size:0.65rem">⛰ No terrain data</span>`
+    : t.blocked
+      ? `<span style="color:#ef4444;font-size:0.65rem">⛰ LOS BLOCKED · ${Math.abs(t.minClearanceM).toFixed(0)} m obstruction${t.source === "cesium" ? " · Cesium" : " · DTED"}</span>`
+      : `<span style="color:#10b981;font-size:0.65rem">⛰ LOS Clear · ${t.minClearanceM?.toFixed(0) ?? "?"}m clearance${t.source === "cesium" ? " · Cesium" : " · DTED"}</span>`;
+
+  const statsRow = (quality.distKm != null)
+    ? `<div style="display:flex;gap:14px;font-size:0.68rem;color:var(--muted);margin:6px 0 8px">
+        <span>📏 ${quality.distKm.toFixed(1)} km</span>
+        ${quality.rssiDbm != null ? `<span>📶 ${quality.rssiDbm.toFixed(0)} dBm</span>` : ""}
+        ${quality.marginDb != null ? `<span>🔋 ${quality.marginDb.toFixed(0)} dB margin</span>` : ""}
+      </div>` : "";
+
   body.innerHTML = `
-    <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px">
+    <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
       <div style="font-size:1.4rem;font-weight:700;color:${scoreColor}">${quality.score}</div>
-      <div><strong style="color:${scoreColor}">${quality.label}</strong><br><span style="color:var(--muted);font-size:0.7rem">Link Quality Score (0–100)</span></div>
+      <div>
+        <strong style="color:${scoreColor}">${quality.label}</strong><br>
+        <span style="color:var(--muted);font-size:0.7rem">Link Quality Score (0–100)</span><br>
+        ${terrainBadge}
+      </div>
     </div>
+    ${statsRow}
     <ul style="margin:0;padding:0 0 0 16px;font-size:0.75rem;line-height:1.6">
       ${quality.reasons.map(r => `<li>${esc(r)}</li>`).join("")}
     </ul>

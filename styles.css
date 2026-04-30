@@ -6112,19 +6112,84 @@ body.emitter-modal-open {
   top: 0; left: 0;
   width: 0; height: 0;
 }
-/* Emitter node */
+/* Topology node wrapper */
 .topo-node {
   position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
   transform: translate(-50%, -50%);
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
   z-index: 2;
 }
+/* TO unit card — mirrors plan view card style */
+.topo-unit-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 10px 10px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.94);
+  border: 1px solid rgba(15,23,42,0.12);
+  box-shadow: 0 6px 18px rgba(15,23,42,0.14);
+  min-width: 110px;
+  max-width: 145px;
+  transition: box-shadow 0.15s, outline 0.15s;
+}
+.topo-node:hover .topo-unit-card {
+  box-shadow: 0 8px 24px rgba(59,130,246,0.22);
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 1px;
+}
+.topo-unit-size {
+  font-size: 0.6rem;
+  color: #555;
+  text-align: center;
+  line-height: 1;
+  font-weight: 600;
+  pointer-events: none;
+  min-height: 10px;
+}
+.topo-unit-icon-wrap {
+  width: 80px;
+  height: 80px;
+  display: block;
+  pointer-events: none;
+}
+.topo-unit-icon-wrap .milstd-stack,
+.topo-unit-icon-wrap svg {
+  width: 80px !important;
+  height: 80px !important;
+}
+.topo-unit-name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #111;
+  text-align: center;
+  line-height: 1.2;
+  pointer-events: none;
+}
+.topo-unit-emitter {
+  font-size: 0.62rem;
+  color: #444;
+  text-align: center;
+  line-height: 1.3;
+  pointer-events: none;
+  margin-top: 2px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+  padding-top: 4px;
+  width: 100%;
+}
+.topo-unit-freq {
+  color: #666;
+  font-size: 0.58rem;
+}
+/* Standalone emitter card */
+.topo-standalone-card {
+  min-width: 80px;
+  padding: 8px 10px;
+}
+/* Legacy icon style kept for backward compat */
 .topo-node-icon {
   width: 40px;
   height: 40px;
@@ -6136,11 +6201,6 @@ body.emitter-modal-open {
   justify-content: center;
   font-size: 16px;
   color: var(--text);
-  transition: border-color 0.15s, transform 0.15s;
-}
-.topo-node:hover .topo-node-icon {
-  border-color: var(--accent, #3b82f6);
-  transform: scale(1.1);
 }
 .topo-node-label {
   font-size: 0.62rem;
@@ -6558,13 +6618,15 @@ body.emitter-modal-open {
 ═══════════════════════════════════════════════════════════════ */
 .color-picker-wrap {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
 }
 .color-swatches {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, 18px);
   gap: 4px;
+  align-content: start;
 }
 .color-swatch {
   width: 18px;
