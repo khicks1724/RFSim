@@ -21399,12 +21399,27 @@ async function renderTopologyView() {
   // Only assets that have a frequencyMHz (i.e. are radio emitters)
   const allEmitters = (state.assets || []).filter(a => a.frequencyMHz > 0);
 
+  // Build a name→unitId lookup for fallback matching
+  const unitByLabel = new Map(); // normalized label → unit
+  for (const u of (_toState.units || [])) {
+    const key = (u.label || u.designator || "").trim().toUpperCase();
+    if (key) unitByLabel.set(key, u);
+  }
+
   // Build unitId → [asset, asset, …] (all emitters linked to that TO unit)
+  // Falls back to name-based matching if toUnitId is not explicitly set.
   const unitEmittersMap = new Map(); // unitId → asset[]
   for (const a of allEmitters) {
-    if (!a.toUnitId) continue;
-    if (!unitEmittersMap.has(a.toUnitId)) unitEmittersMap.set(a.toUnitId, []);
-    unitEmittersMap.get(a.toUnitId).push(a);
+    let uid = a.toUnitId;
+    if (!uid) {
+      // Try matching emitter name to a TO unit label
+      const nameKey = (a.name || "").trim().toUpperCase();
+      const matched = unitByLabel.get(nameKey);
+      if (matched) uid = matched.id;
+    }
+    if (!uid) continue;
+    if (!unitEmittersMap.has(uid)) unitEmittersMap.set(uid, []);
+    unitEmittersMap.get(uid).push(a);
   }
 
   const linkedUnitIds = new Set(unitEmittersMap.keys());
