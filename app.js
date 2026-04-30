@@ -1,18 +1,35 @@
+// MIL-STD-2525D standard frame fill colors
 const FORCE_COLORS = {
-  friendly: "#a8d8ea",
-  enemy: "#f4a8a0",
-  "host-nation": "#a8dbb5",
-  civilian: "#e8e8e8",
-  other: "#c0c0c0",
+  friendly:     "#80c8ff",  // cyan-blue
+  enemy:        "#ff8080",  // red
+  "host-nation":"#aaffaa",  // green (neutral)
+  civilian:     "#ffff80",  // yellow (unknown)
+  other:        "#ffffff",  // white
+  unknown:      "#ffff80",  // yellow
 };
 
 const FORCE_LABELS = {
-  friendly: "Friendly",
-  enemy: "Enemy",
-  "host-nation": "Host Nation",
-  civilian: "Civilian",
-  other: "Other",
+  friendly:     "Friendly",
+  enemy:        "Enemy",
+  "host-nation":"Host Nation",
+  civilian:     "Civilian",
+  other:        "Other",
+  unknown:      "Unknown",
 };
+
+// Standard palette available on all color pickers
+const MILSTD_PALETTE = [
+  "#80c8ff",  // MIL friendly (cyan-blue)
+  "#ff8080",  // MIL enemy (red)
+  "#aaffaa",  // MIL neutral (green)
+  "#ffff80",  // MIL unknown (yellow)
+  "#ffffff",  // white
+  "#000000",  // black
+  "#f97316",  // orange
+  "#a855f7",  // purple
+  "#facc15",  // amber
+  "#6b7280",  // gray
+];
 
 const BASEMAPS = {
   esri: {
@@ -3270,9 +3287,31 @@ function ensureMapContentsSearchUi() {
   dom.mapContentsSearchClearBtn = document.querySelector("#mapContentsSearchClearBtn");
 }
 
+function initColorSwatches() {
+  document.querySelectorAll(".color-swatches[data-for]").forEach(container => {
+    const inputId = container.dataset.for;
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    MILSTD_PALETTE.forEach(hex => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "color-swatch";
+      btn.style.background = hex;
+      btn.title = hex;
+      btn.addEventListener("click", () => {
+        input.value = hex;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      container.appendChild(btn);
+    });
+  });
+}
+
 async function init() {
   initMap();
   initTopBarDropdowns();
+  initColorSwatches();
   initRangeInputs();
   ensureMapContentsSearchUi();
   initEmitterModal();
@@ -20295,18 +20334,20 @@ function renderToPickerCanvas() {
     if (otherLink && otherLink !== _currentEmitterEditId) el.classList.add("has-emitter-link");
 
     el.innerHTML = `
-      <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
-      <span class="to-unit-label">${esc(unit.label)}</span>
+      <div class="to-unit-card">
+        <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
+        <span class="to-unit-label">${esc(unit.label)}</span>
+      </div>
     `;
     el.addEventListener("click", () => selectToUnitForEmitter(unit, el));
     world.appendChild(el);
   }
 
-  // Center the view
-  fitPickerView(tempUnits);
-
-  // Draw edges after transforms are updated.
-  renderPickerEdges(tempUnits, linkSnap, edgeSvg);
+  // Defer fit+edges so the modal has its final dimensions before we measure clientWidth/Height.
+  requestAnimationFrame(() => {
+    fitPickerView(tempUnits);
+    renderPickerEdges(tempUnits, linkSnap, edgeSvg);
+  });
 }
 
 function renderPickerEdges(units, links, svg) {
@@ -21139,8 +21180,10 @@ function renderToUnit(unit) {
   el.style.left = unit.x + "px";
   el.style.top  = unit.y + "px";
   el.innerHTML = `
-    <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
-    <span class="to-unit-label">${esc(unit.label)}</span>
+    <div class="to-unit-card">
+      <span class="to-unit-icon">${renderToUnitIcon(unit)}</span>
+      <span class="to-unit-label">${esc(unit.label)}</span>
+    </div>
   `;
   el.setAttribute("draggable", "false");
   el.querySelectorAll("img, svg").forEach((node) => {
