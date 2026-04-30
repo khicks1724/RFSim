@@ -6095,10 +6095,11 @@ body.emitter-modal-open {
 }
 .topo-canvas:active { cursor: grabbing; }
 .topo-canvas:focus { outline: none; }
+/* SVG lives inside .topo-nodes (the world div) so lines share the same transform */
 .topo-svg {
   position: absolute;
   top: 0; left: 0;
-  width: 100%; height: 100%;
+  width: 0; height: 0;
   overflow: visible;
   pointer-events: none;
 }
@@ -6107,10 +6108,12 @@ body.emitter-modal-open {
   pointer-events: stroke;
   cursor: pointer;
 }
+/* The single world container — gets the pan/zoom transform */
 .topo-nodes {
   position: absolute;
   top: 0; left: 0;
   width: 0; height: 0;
+  transform-origin: 0 0;
 }
 /* Topology node wrapper */
 .topo-node {
@@ -6188,6 +6191,25 @@ body.emitter-modal-open {
 .topo-standalone-card {
   min-width: 80px;
   padding: 8px 10px;
+}
+/* Generic emitter icon for unlinked nodes */
+.topo-generic-icon {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: #444;
+}
+.topo-generic-icon svg {
+  width: 100% !important;
+  height: 100% !important;
+}
+/* Dragging state */
+.topo-node.topo-dragging {
+  opacity: 0.85;
+  z-index: 10;
 }
 /* Legacy icon style kept for backward compat */
 .topo-node-icon {

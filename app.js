@@ -21532,37 +21532,27 @@ async function renderTopologyView() {
   const qualityResults = await Promise.all(candidatePairs.map(p => assessLinkQuality(p.a.em, p.b.em)));
   const linkList = candidatePairs.map((p, idx) => ({ ...p, quality: qualityResults[idx] }));
 
-  // ── Render SVG links ──────────────────────────────────────────────
-  svg.innerHTML = "";
-  const tooltip = getOrCreateTopoTooltip();
-  for (const lnk of linkList) {
-    const pa = unitPos.get(lnk.a.key);
-    const pb = unitPos.get(lnk.b.key);
-    if (!pa || !pb) continue;
-    const cls = linkQualityClass(lnk.quality.score);
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", pa.x); line.setAttribute("y1", pa.y);
-    line.setAttribute("x2", pb.x); line.setAttribute("y2", pb.y);
-    line.setAttribute("stroke-width", "2.5");
-    line.setAttribute("class", `topo-link ${cls}`);
-    const nameA = lnk.a.unit?.label || lnk.a.em.name || lnk.a.em.id;
-    const nameB = lnk.b.unit?.label || lnk.b.em.name || lnk.b.em.id;
-    line.addEventListener("mousemove", (e) => {
-      tooltip.style.display = "block";
-      tooltip.style.left = (e.clientX + 12) + "px";
-      tooltip.style.top  = (e.clientY - 8) + "px";
-      tooltip.textContent = `${nameA} ↔ ${nameB}: ${lnk.quality.label}`;
-    });
-    line.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
-    line.addEventListener("click", (e) => {
-      e.stopPropagation();
-      showTopoLinkDetail(lnk.a.em, lnk.b.em, lnk.quality, nameA, nameB);
-    });
-    svg.appendChild(line);
-  }
+  // ── Populate node position map ────────────────────────────────────
+  _topoNodePositions.clear();
+  for (const [key, pos] of unitPos) _topoNodePositions.set(key, { ...pos });
 
-  // ── Render nodes ──────────────────────────────────────────────────
+  // ── Store link descriptors for live redraw during drag ────────────
+  _topoLinkDescriptors = linkList.map(lnk => ({
+    keyA: lnk.a.key,
+    keyB: lnk.b.key,
+    quality: lnk.quality,
+    nameA: lnk.a.unit?.label || lnk.a.em.name || lnk.a.em.id,
+    nameB: lnk.b.unit?.label || lnk.b.em.name || lnk.b.em.id,
+    emA: lnk.a.em,
+    emB: lnk.b.em,
+  }));
+
+  // ── Render nodes (inside topoNodes world div) ─────────────────────
+  // Keep SVG as first child; clear everything else
+  const svgEl = nodes.querySelector(".topo-svg");
   nodes.innerHTML = "";
+  if (svgEl) nodes.appendChild(svgEl);
+
   for (const entry of posEntries) {
     const pos = unitPos.get(entry.key);
     if (!pos || !entry.em) continue;
@@ -21570,37 +21560,39 @@ async function renderTopologyView() {
     const unit = entry.unit;
     const nd = document.createElement("div");
     nd.className = "topo-node topo-node-card";
+    nd.dataset.key = entry.key;
     nd.style.left = pos.x + "px";
     nd.style.top  = pos.y + "px";
 
     const freqLabel = `${(em.frequencyMHz || 0).toFixed(3)} MHz`;
-    const wfLabel   = em.ext?.waveform ? ` · ${em.ext.waveform}` : "";
-    const radioLine = `${em.name || "Emitter"}${wfLabel ? " · " + em.ext.waveform : ""}`;
+    const wfLabel   = em.ext?.waveform || "";
 
-    if (unit) {
-      // TO unit card: MIL icon + unit label + emitter info below
-      nd.innerHTML = `
-        <div class="topo-unit-card">
-          <div class="topo-unit-icon-wrap">${renderToUnitIcon(unit)}</div>
-          <div class="topo-unit-name">${esc(unit.label || unit.designator || "Unit")}</div>
-          <div class="topo-unit-emitter">${esc(em.name || "Emitter")}<br><span class="topo-unit-freq">${esc(freqLabel)}${wfLabel ? " · " + esc(em.ext.waveform) : ""}</span></div>
-        </div>
-      `;
-    } else {
-      // Standalone emitter
-      nd.innerHTML = `
-        <div class="topo-unit-card topo-standalone-card">
-          <div class="topo-unit-name">${esc(em.name || "Emitter")}</div>
-          <div class="topo-unit-freq">${esc(freqLabel)}${wfLabel ? " · " + esc(em.ext.waveform) : ""}</div>
-        </div>
-      `;
-    }
+    const iconHtml = unit
+      ? `<div class="topo-unit-icon-wrap">${renderToUnitIcon(unit)}</div>`
+      : `<div class="topo-generic-icon">${EMITTER_ICONS[em.icon] || EMITTER_ICONS.radio}</div>`;
 
-    nd.addEventListener("click", (e) => { e.stopPropagation(); });
+    const unitLabel = unit
+      ? `<div class="topo-unit-name">${esc(unit.label || unit.designator || "Unit")}</div>`
+      : "";
+
+    nd.innerHTML = `
+      <div class="topo-unit-card${unit ? "" : " topo-standalone-card"}">
+        ${iconHtml}
+        ${unitLabel}
+        <div class="topo-unit-emitter">
+          ${esc(em.name || "Emitter")}
+          <br><span class="topo-unit-freq">${esc(freqLabel)}${wfLabel ? " · " + esc(wfLabel) : ""}</span>
+        </div>
+      </div>
+    `;
+
     nodes.appendChild(nd);
   }
 
-  // ── Wire pan/zoom ─────────────────────────────────────────────────
+  // ── Draw links (reads from _topoNodePositions) ────────────────────
+  redrawTopoLinks();
+
+  // ── Wire pan/zoom + node drag ─────────────────────────────────────
   wireTopoCanvasPanZoom();
   wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
 }
@@ -21807,40 +21799,105 @@ function getOrCreateTopoTooltip() {
   return t;
 }
 
+// World-space positions for each node (key → {x,y}), kept in sync during drag
+const _topoNodePositions = new Map();
+// Link descriptors for live redraw during drag
+let _topoLinkDescriptors = [];
+
+function redrawTopoLinks() {
+  const svg = document.getElementById("topoSvg");
+  if (!svg) return;
+  svg.innerHTML = "";
+  const tooltip = getOrCreateTopoTooltip();
+  for (const lnk of _topoLinkDescriptors) {
+    const pa = _topoNodePositions.get(lnk.keyA);
+    const pb = _topoNodePositions.get(lnk.keyB);
+    if (!pa || !pb) continue;
+    const cls = linkQualityClass(lnk.quality.score);
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", pa.x); line.setAttribute("y1", pa.y);
+    line.setAttribute("x2", pb.x); line.setAttribute("y2", pb.y);
+    line.setAttribute("stroke-width", "2.5");
+    line.setAttribute("class", `topo-link ${cls}`);
+    line.addEventListener("mousemove", (e) => {
+      tooltip.style.display = "block";
+      tooltip.style.left = (e.clientX + 12) + "px";
+      tooltip.style.top  = (e.clientY - 8) + "px";
+      tooltip.textContent = `${lnk.nameA} ↔ ${lnk.nameB}: ${lnk.quality.label}`;
+    });
+    line.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+    line.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showTopoLinkDetail(lnk.emA, lnk.emB, lnk.quality, lnk.nameA, lnk.nameB);
+    });
+    svg.appendChild(line);
+  }
+}
+
 let _topoCanvasWired = false;
 function wireTopoCanvasPanZoom() {
   if (_topoCanvasWired) return;
   _topoCanvasWired = true;
   const canvas = document.getElementById("topoCanvas");
   if (!canvas) return;
-  let panning = false, panStart = null, panOffset = { x: 0, y: 0 };
+
+  let panOffset = { x: 0, y: 0 };
   let zoom = 1;
-  const getWorld = () => ({ nodes: document.getElementById("topoNodes"), svg: document.getElementById("topoSvg") });
+  const getWorld = () => document.getElementById("topoNodes");
   const applyTransform = () => {
-    const { nodes, svg } = getWorld();
-    const t = `translate(${panOffset.x}px,${panOffset.y}px) scale(${zoom})`;
-    if (nodes) nodes.style.transform = t;
-    if (svg) svg.style.transform = t;
+    const world = getWorld();
+    if (world) world.style.transform = `translate(${panOffset.x}px,${panOffset.y}px) scale(${zoom})`;
   };
+
+  let dragging = null; // { node, key, startClientX, startClientY, origX, origY } | { panning, startClientX, startClientY }
+
   canvas.addEventListener("mousedown", (e) => {
+    const nodeEl = e.target.closest(".topo-node");
+    if (nodeEl) {
+      e.stopPropagation();
+      const key = nodeEl.dataset.key;
+      const pos = _topoNodePositions.get(key);
+      if (!pos) return;
+      dragging = { node: nodeEl, key, startClientX: e.clientX, startClientY: e.clientY, origX: pos.x, origY: pos.y };
+      nodeEl.classList.add("topo-dragging");
+      return;
+    }
     if (e.target === canvas || e.target.closest(".topo-svg")) {
-      panning = true;
-      panStart = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+      dragging = { panning: true, startClientX: e.clientX - panOffset.x, startClientY: e.clientY - panOffset.y };
     }
   });
+
   document.addEventListener("mousemove", (e) => {
-    if (!panning) return;
-    panOffset.x = e.clientX - panStart.x;
-    panOffset.y = e.clientY - panStart.y;
-    applyTransform();
+    if (!dragging) return;
+    if (dragging.panning) {
+      panOffset.x = e.clientX - dragging.startClientX;
+      panOffset.y = e.clientY - dragging.startClientY;
+      applyTransform();
+      return;
+    }
+    // Node drag: convert screen delta → world delta (divide by zoom)
+    const dx = (e.clientX - dragging.startClientX) / zoom;
+    const dy = (e.clientY - dragging.startClientY) / zoom;
+    const newX = dragging.origX + dx;
+    const newY = dragging.origY + dy;
+    _topoNodePositions.set(dragging.key, { x: newX, y: newY });
+    dragging.node.style.left = newX + "px";
+    dragging.node.style.top  = newY + "px";
+    redrawTopoLinks();
   });
-  document.addEventListener("mouseup", () => { panning = false; });
+
+  document.addEventListener("mouseup", () => {
+    if (dragging && !dragging.panning) dragging.node?.classList.remove("topo-dragging");
+    dragging = null;
+  });
+
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
     zoom = Math.max(0.3, Math.min(3, zoom * factor));
     applyTransform();
   }, { passive: false });
+
   document.getElementById("topoFitBtn")?.addEventListener("click", () => {
     panOffset = { x: 0, y: 0 }; zoom = 1; applyTransform();
   });
