@@ -21915,7 +21915,7 @@ function cloneRadioConfig(source, target) {
   setStatus(`Cloned ${source.emitterLabel || source.name} config onto ${target.name}.`);
 }
 
-async function assessLinkQuality(a, b) {
+async function assessLinkQualityLegacyOld(a, b) {
   let score = 100;
   const reasons = [];
 
@@ -22056,7 +22056,7 @@ function freqBand(hz) {
   return "EHF";
 }
 
-function linkQualityClass(score) {
+function linkQualityClassLegacy(score) {
   if (score >= 80) return "topo-link-excellent";
   if (score >= 60) return "topo-link-good";
   if (score >= 40) return "topo-link-fair";
