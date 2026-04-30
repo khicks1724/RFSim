@@ -6119,10 +6119,13 @@ body.emitter-modal-open {
 .topo-node {
   position: absolute;
   transform: translate(-50%, -50%);
-  cursor: pointer;
+  cursor: grab;
   -webkit-user-select: none;
   user-select: none;
   z-index: 2;
+}
+.topo-node.topo-dragging {
+  cursor: grabbing !important;
 }
 /* TO unit card — mirrors plan view card style */
 .topo-unit-card {
@@ -6244,11 +6247,7 @@ body.emitter-modal-open {
   width: 100% !important;
   height: 100% !important;
 }
-/* Dragging state */
-.topo-node.topo-dragging {
-  opacity: 0.85;
-  z-index: 10;
-}
+/* Dragging state — merged with rule above */
 /* Legacy icon style kept for backward compat */
 .topo-node-icon {
   width: 40px;

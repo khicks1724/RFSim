@@ -4758,6 +4758,7 @@ async function refreshAssetGroundElevation(asset) {
   asset.groundElevationM = groundElevationM;
   updateAssetMarker(asset);
   syncCesiumEntities();
+  scheduleTopoRefresh(1200); // longer delay — terrain data just arrived, debounce batch updates
   return groundElevationM;
 }
 
@@ -9864,6 +9865,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     if (!Number.isFinite(newAsset.groundElevationM) && usesConfiguredCesiumTerrain()) {
       refreshAssetGroundElevation(newAsset).catch(() => {});
     }
+    scheduleTopoRefresh();
     // Track so subsequent run-simulation actions in this batch can target it
     placedAssetIds.push(newAsset.id);
     const relationLabel = placementRelation
@@ -9900,6 +9902,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
       refreshAssetGroundElevation(asset).catch(() => {});
     }
+    scheduleTopoRefresh();
     return `Updated ${asset.name}.`;
   }
 
@@ -11095,6 +11098,7 @@ function addAsset(latlng) {
     refreshAssetGroundElevation(asset).catch(() => {});
   }
   focusPlacedAsset(asset, marker);
+  scheduleTopoRefresh();
 }
 
 function focusPlacedAsset(asset, marker) {
@@ -11186,6 +11190,7 @@ function saveAssetEdits() {
   setStatus(`Updated ${asset.name}.`);
   state.editingAssetId = null;
   refreshActionButtons();
+  scheduleTopoRefresh();
 }
 
 function renderAssetPopup(asset) {
@@ -15079,6 +15084,7 @@ function removeAsset(assetId, options = {}) {
   if (asset && !options.silent) {
     setStatus(`Removed ${asset.name}.`);
   }
+  scheduleTopoRefresh();
 }
 
 function renderImportedItemPopup(item) {
@@ -21390,6 +21396,15 @@ function buildPlanAiContext() {
 /* ═══════════════════════════════════════════════════════════════
    TOPOLOGY VIEW — Network Link Quality
 ═══════════════════════════════════════════════════════════════ */
+
+let _topoRefreshTimer = null;
+function scheduleTopoRefresh(delayMs = 800) {
+  clearTimeout(_topoRefreshTimer);
+  _topoRefreshTimer = setTimeout(() => {
+    if (state.ui?.currentView === "topology") renderTopologyView();
+  }, delayMs);
+}
+
 async function renderTopologyView() {
   const svg   = document.getElementById("topoSvg");
   const nodes = document.getElementById("topoNodes");
@@ -21461,11 +21476,10 @@ async function renderTopologyView() {
     return false;
   }
 
-  // ── Nodes: one per TO-linked unit + one per standalone emitter ────
+  // ── Nodes: one card per TO unit that has at least one emitter ────
   const toLinkedUnits = _toState.units.filter(u => linkedUnitIds.has(u.id));
-  const standaloneEmitters = allEmitters.filter(a => !a.toUnitId);
 
-  if (!toLinkedUnits.length && !standaloneEmitters.length) {
+  if (!toLinkedUnits.length) {
     if (empty) empty.classList.remove("hidden");
     svg.innerHTML = ""; nodes.innerHTML = "";
     wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
@@ -21502,42 +21516,46 @@ async function renderTopologyView() {
     startX += w + NODE_W * 0.5;
   }
 
-  const maxY = unitPos.size ? Math.max(...[...unitPos.values()].map(p => p.y)) + NODE_V : 100;
-  standaloneEmitters.forEach((em, i) => {
-    unitPos.set("standalone_" + em.id, { x: NODE_W + i * NODE_W, y: maxY });
-  });
+  // posEntries: one entry per TO-unit card; emitters sorted lowest freq first
+  const posEntries = toLinkedUnits.map(u => ({
+    key: u.id,
+    unit: u,
+    emitters: (unitEmittersMap.get(u.id) || []).slice().sort((a, b) => (a.frequencyMHz || 0) - (b.frequencyMHz || 0)),
+  }));
 
-  // posEntries: one entry per card (TO unit or standalone emitter)
-  // emitters[] = all assets for this card
-  const posEntries = [
-    ...toLinkedUnits.map(u => ({ key: u.id, unit: u, emitters: unitEmittersMap.get(u.id) || [] })),
-    ...standaloneEmitters.map(em => ({ key: "standalone_" + em.id, unit: null, emitters: [em] })),
-  ];
+  // ── Candidate links: one per unique emitter-type pair between any two unit cards ──
+  // Match on waveform bucket (waveform name, or frequency if no waveform).
+  // SATCOM links match across any distance without freq equality requirement.
+  const SATCOM_WF_SET = new Set(["MUOS","STARSHIELD","INMARSAT","VIASAT","BLOS","SATCOM","WGS","AEHF","LINK 182"]);
+  function isSatcomEmitter(em) {
+    return em.ext?.satcomEnabled ||
+      SATCOM_WF_SET.has((em.ext?.waveform || "").toUpperCase());
+  }
 
-  // ── Candidate links: per matching emitter pair across unit cards ──
-  // Each link is between a specific emitter in unit A and a specific emitter in unit B
-  // that share freq+waveform. We key links by "waveform bucket" so parallel links
-  // (same type, different unit pairs) are possible, but only one link per
-  // unique (unitA, unitB, emitter-type) combination.
   const candidatePairs = []; // { a: entry, b: entry, emA: asset, emB: asset }
+  const globalSeen = new Set(); // deduplicate across all pairs
   for (let i = 0; i < posEntries.length; i++) {
     for (let j = i + 1; j < posEntries.length; j++) {
       const nodeA = posEntries[i], nodeB = posEntries[j];
-      if (nodeA.unit && nodeB.unit && !sameTree(nodeA.unit.id, nodeB.unit.id)) continue;
-      // Find all matched emitter pairs between the two cards
-      const seen = new Set(); // deduplicate by waveform bucket
       for (const emA of nodeA.emitters) {
         for (const emB of nodeB.emitters) {
-          const freqMatch = Math.abs((emA.frequencyMHz || 0) - (emB.frequencyMHz || 0)) < 0.01;
           const wfA = (emA.ext?.waveform || "").toUpperCase();
           const wfB = (emB.ext?.waveform || "").toUpperCase();
-          const waveformMatch = !wfA || !wfB || wfA === wfB;
-          if (!freqMatch || !waveformMatch) continue;
-          // Deduplicate: one link per unique waveform type between these two nodes
-          const bucket = wfA || wfB || `freq:${emA.frequencyMHz}`;
+          const satA = isSatcomEmitter(emA), satB = isSatcomEmitter(emB);
+          // SATCOM: match on waveform bucket only (ignore freq — they relay via satellite)
+          // Non-SATCOM: require same frequency and compatible waveform
+          let bucket = null;
+          if (satA && satB && (wfA === wfB || !wfA || !wfB)) {
+            bucket = wfA || wfB || "satcom";
+          } else if (!satA && !satB) {
+            const freqMatch = Math.abs((emA.frequencyMHz || 0) - (emB.frequencyMHz || 0)) < 0.01;
+            const waveformMatch = !wfA || !wfB || wfA === wfB;
+            if (freqMatch && waveformMatch) bucket = wfA || wfB || `freq:${emA.frequencyMHz}`;
+          }
+          if (!bucket) continue;
           const pairKey = `${nodeA.key}|${nodeB.key}|${bucket}`;
-          if (seen.has(pairKey)) continue;
-          seen.add(pairKey);
+          if (globalSeen.has(pairKey)) continue;
+          globalSeen.add(pairKey);
           candidatePairs.push({ a: nodeA, b: nodeB, emA, emB, pairKey });
         }
       }
@@ -21587,18 +21605,20 @@ async function renderTopologyView() {
       ? `<div class="topo-unit-name">${esc(unit.label || unit.designator || "Unit")}</div>`
       : "";
 
-    // List each emitter on its own line: name · freq · waveform
+    // List each emitter sorted lowest→highest freq: radio label + waveform, then frequency
     const emitterListHtml = entry.emitters.map(em => {
+      const radioName = em.emitterLabel || em.name || "Emitter";
       const wf = em.ext?.waveform || "";
       const freq = `${(em.frequencyMHz || 0).toFixed(3)} MHz`;
+      const title = wf ? `${radioName} — ${wf}` : radioName;
       return `<div class="topo-em-row">
-        <span class="topo-em-name">${esc(em.name || "Emitter")}</span>
-        <span class="topo-em-detail">${esc(freq)}${wf ? " · " + esc(wf) : ""}</span>
+        <span class="topo-em-name">${esc(title)}</span>
+        <span class="topo-em-detail">${esc(freq)}</span>
       </div>`;
     }).join("");
 
     nd.innerHTML = `
-      <div class="topo-unit-card${unit ? "" : " topo-standalone-card"}">
+      <div class="topo-unit-card">
         ${iconHtml}
         ${unitNameHtml}
         <div class="topo-emitter-list">${emitterListHtml}</div>
@@ -21609,8 +21629,9 @@ async function renderTopologyView() {
   }
 
   // ── Draw links + wire interaction ─────────────────────────────────
-  redrawTopoLinks();
+  // Defer link draw one frame so cards have rendered dimensions for center calculation
   wireTopoCanvasPanZoom();
+  requestAnimationFrame(() => redrawTopoLinks());
   wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
 }
 
@@ -21840,12 +21861,24 @@ let _topoLinkDescriptors = [];
 
 function redrawTopoLinks() {
   const svg = document.getElementById("topoSvg");
-  if (!svg) return;
+  const nodes = document.getElementById("topoNodes");
+  if (!svg || !nodes) return;
   svg.innerHTML = "";
   const tooltip = getOrCreateTopoTooltip();
+
+  // Node center in world space = stored top-left + half the card's rendered size.
+  // We read the actual DOM element so the offset is always accurate regardless of card height.
+  function nodeCenter(key) {
+    const pos = _topoNodePositions.get(key);
+    if (!pos) return null;
+    const el = nodes.querySelector(`.topo-node[data-key="${CSS.escape(key)}"]`);
+    if (!el) return { x: pos.x, y: pos.y };
+    return { x: pos.x + el.offsetWidth / 2, y: pos.y + el.offsetHeight / 2 };
+  }
+
   for (const lnk of _topoLinkDescriptors) {
-    const pa = _topoNodePositions.get(lnk.keyA);
-    const pb = _topoNodePositions.get(lnk.keyB);
+    const pa = nodeCenter(lnk.keyA);
+    const pb = nodeCenter(lnk.keyB);
     if (!pa || !pb) continue;
     const cls = linkQualityClass(lnk.quality.score);
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -21868,10 +21901,13 @@ function redrawTopoLinks() {
   }
 }
 
-let _topoCanvasWired = false;
+let _topoAbortController = null;
 function wireTopoCanvasPanZoom() {
-  if (_topoCanvasWired) return;
-  _topoCanvasWired = true;
+  // Cancel any previous listeners before re-wiring
+  if (_topoAbortController) _topoAbortController.abort();
+  _topoAbortController = new AbortController();
+  const sig = _topoAbortController.signal;
+
   const canvas = document.getElementById("topoCanvas");
   if (!canvas) return;
 
@@ -21888,6 +21924,7 @@ function wireTopoCanvasPanZoom() {
   canvas.addEventListener("mousedown", (e) => {
     const nodeEl = e.target.closest(".topo-node");
     if (nodeEl) {
+      e.preventDefault();
       e.stopPropagation();
       const key = nodeEl.dataset.key;
       const pos = _topoNodePositions.get(key);
@@ -21899,7 +21936,7 @@ function wireTopoCanvasPanZoom() {
     if (e.target === canvas || e.target.closest(".topo-svg")) {
       dragging = { panning: true, startClientX: e.clientX - panOffset.x, startClientY: e.clientY - panOffset.y };
     }
-  });
+  }, { signal: sig });
 
   document.addEventListener("mousemove", (e) => {
     if (!dragging) return;
@@ -21918,27 +21955,27 @@ function wireTopoCanvasPanZoom() {
     dragging.node.style.left = newX + "px";
     dragging.node.style.top  = newY + "px";
     redrawTopoLinks();
-  });
+  }, { signal: sig });
 
   document.addEventListener("mouseup", () => {
     if (dragging && !dragging.panning) dragging.node?.classList.remove("topo-dragging");
     dragging = null;
-  });
+  }, { signal: sig });
 
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
     zoom = Math.max(0.3, Math.min(3, zoom * factor));
     applyTransform();
-  }, { passive: false });
+  }, { passive: false, signal: sig });
 
   document.getElementById("topoFitBtn")?.addEventListener("click", () => {
     panOffset = { x: 0, y: 0 }; zoom = 1; applyTransform();
-  });
+  }, { signal: sig });
+
   document.getElementById("topoRefreshBtn")?.addEventListener("click", () => {
-    _topoCanvasWired = false;
     renderTopologyView();
-  });
+  }, { signal: sig });
 }
 
 function buildTopoAiContext() {
