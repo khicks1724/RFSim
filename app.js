@@ -22133,12 +22133,26 @@ function getOrCreateTopoTooltip() {
   return t;
 }
 
+function getRectRayExitPoint(cx, cy, width, height, angleRad, extra = 0) {
+  const hw = Math.max(1, width / 2);
+  const hh = Math.max(1, height / 2);
+  const dx = Math.cos(angleRad);
+  const dy = Math.sin(angleRad);
+  const scaleX = Math.abs(dx) > 1e-6 ? hw / Math.abs(dx) : Number.POSITIVE_INFINITY;
+  const scaleY = Math.abs(dy) > 1e-6 ? hh / Math.abs(dy) : Number.POSITIVE_INFINITY;
+  const scale = Math.min(scaleX, scaleY);
+  return {
+    x: cx + dx * (scale + extra),
+    y: cy + dy * (scale + extra),
+  };
+}
+
 // World-space positions for each node (key → {x,y}), kept in sync during drag
 const _topoNodePositions = new Map();
 // Link descriptors for live redraw during drag
 let _topoLinkDescriptors = [];
 
-function redrawTopoLinks() {
+function redrawTopoLinksLegacy() {
   const svg = document.getElementById("topoSvg");
   if (!svg) return;
   svg.innerHTML = "";
@@ -22155,16 +22169,15 @@ function redrawTopoLinks() {
   });
 
   // Count links per node-pair so parallel links can be offset perpendicularly
-  const pairCounts = new Map(); // pairKey → total count
-  const pairIndex  = new Map(); // pairKey → next index
+  const pairGroups = new Map();
   for (const lnk of _topoLinkDescriptors) {
     const k = [lnk.keyA, lnk.keyB].sort().join("|");
-    pairCounts.set(k, (pairCounts.get(k) || 0) + 1);
-    if (!pairIndex.has(k)) pairIndex.set(k, 0);
+    if (!pairGroups.has(k)) pairGroups.set(k, []);
+    pairGroups.get(k).push(lnk);
   }
 
-  const LINK_OFFSET = 18; // px between parallel links
-  const CARD_CLEARANCE = 18; // keep link anchors visibly below each card
+  const LINK_SPACING = 18;
+  const EDGE_CLEARANCE = 2;
 
   for (const lnk of _topoLinkDescriptors) {
     // Positions are stored as the visual center of each node (CSS transform: translate(-50%,-50%))
@@ -22208,6 +22221,95 @@ function redrawTopoLinks() {
       showTopoLinkDetail(lnk.emA, lnk.emB, lnk.quality, lnk.nameA, lnk.nameB);
     });
     svg.appendChild(line);
+  }
+}
+
+function redrawTopoLinks() {
+  const svg = document.getElementById("topoSvg");
+  if (!svg) return;
+  svg.innerHTML = "";
+  const tooltip = getOrCreateTopoTooltip();
+  const nodeMetrics = new Map();
+  document.querySelectorAll("#topoNodes .topo-node").forEach((nodeEl) => {
+    const key = nodeEl.dataset.key;
+    if (!key) return;
+    const cardEl = nodeEl.querySelector(".topo-unit-card") || nodeEl;
+    nodeMetrics.set(key, {
+      width: cardEl.offsetWidth || 170,
+      height: cardEl.offsetHeight || 240,
+    });
+  });
+
+  const pairGroups = new Map();
+  for (const lnk of _topoLinkDescriptors) {
+    const k = [lnk.keyA, lnk.keyB].sort().join("|");
+    if (!pairGroups.has(k)) pairGroups.set(k, []);
+    pairGroups.get(k).push(lnk);
+  }
+
+  const LINK_SPACING = 18;
+  const EDGE_CLEARANCE = 2;
+
+  for (const group of pairGroups.values()) {
+    if (!group.length) continue;
+    const sample = group[0];
+    const pa = _topoNodePositions.get(sample.keyA);
+    const pb = _topoNodePositions.get(sample.keyB);
+    if (!pa || !pb) continue;
+
+    const useABOrder = pa.x < pb.x || (pa.x === pb.x && pa.y <= pb.y);
+    const leftKey = useABOrder ? sample.keyA : sample.keyB;
+    const rightKey = useABOrder ? sample.keyB : sample.keyA;
+    const leftPos = _topoNodePositions.get(leftKey);
+    const rightPos = _topoNodePositions.get(rightKey);
+    if (!leftPos || !rightPos) continue;
+
+    const leftMetrics = nodeMetrics.get(leftKey) || { width: 170, height: 240 };
+    const rightMetrics = nodeMetrics.get(rightKey) || { width: 170, height: 240 };
+    const dx = rightPos.x - leftPos.x;
+    const dy = rightPos.y - leftPos.y;
+    const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+    const baseAngle = Math.atan2(dy, dx);
+
+    const orderedGroup = group.slice().sort((a, b) => {
+      const fa = Math.min(a.emA?.frequencyMHz || 0, a.emB?.frequencyMHz || 0);
+      const fb = Math.min(b.emA?.frequencyMHz || 0, b.emB?.frequencyMHz || 0);
+      if (fa !== fb) return fa - fb;
+      const na = `${a.emA?.emitterLabel || a.emA?.name || ""}|${a.emB?.emitterLabel || a.emB?.name || ""}`;
+      const nb = `${b.emA?.emitterLabel || b.emA?.name || ""}|${b.emB?.emitterLabel || b.emB?.name || ""}`;
+      return na.localeCompare(nb);
+    });
+
+    orderedGroup.forEach((lnk, idx) => {
+      const offsetPx = (idx - (orderedGroup.length - 1) / 2) * LINK_SPACING;
+      const angleOffset = offsetPx / dist;
+      const angle = baseAngle + angleOffset;
+      const start = getRectRayExitPoint(leftPos.x, leftPos.y, leftMetrics.width, leftMetrics.height, angle, EDGE_CLEARANCE);
+      const end = getRectRayExitPoint(rightPos.x, rightPos.y, rightMetrics.width, rightMetrics.height, angle + Math.PI, EDGE_CLEARANCE);
+
+      const cls = linkQualityClass(lnk.quality.score);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", start.x);
+      line.setAttribute("y1", start.y);
+      line.setAttribute("x2", end.x);
+      line.setAttribute("y2", end.y);
+      line.setAttribute("stroke-width", "2.5");
+      line.setAttribute("class", `topo-link ${cls} ${lnk.typeClass || ""}`);
+      line.addEventListener("mousemove", (e) => {
+        tooltip.style.display = "block";
+        tooltip.style.left = (e.clientX + 12) + "px";
+        tooltip.style.top = (e.clientY - 8) + "px";
+        tooltip.textContent = `${lnk.nameA} ↔ ${lnk.nameB}: ${lnk.quality.label}`;
+      });
+      line.addEventListener("mouseleave", () => {
+        tooltip.style.display = "none";
+      });
+      line.addEventListener("click", (e) => {
+        e.stopPropagation();
+        showTopoLinkDetail(lnk.emA, lnk.emB, lnk.quality, lnk.nameA, lnk.nameB);
+      });
+      svg.appendChild(line);
+    });
   }
 }
 
