@@ -9,10 +9,10 @@ const net = require("net");
 const tls = require("tls");
 const fs = require("fs");
 const path = require("path");
-const { spawnSync } = require("child_process");
 const { z } = require("zod");
 const { config } = require("./config");
 const { pool, query } = require("./db");
+const { parsePkcs12, parseTruststore } = require("./tak/certUtils");
 
 const app = express();
 
@@ -161,6 +161,13 @@ function isTakCertUploadLike(value = "") {
     return true;
   }
   return /^data:[^;]+;base64,[a-z0-9+/=\s]+$/i.test(text);
+}
+
+function extractPemBlocks(value = "", typePattern = "[A-Z0-9 ]+") {
+  const matches = String(value || "").match(
+    new RegExp(`-----BEGIN ${typePattern}-----[\\s\\S]+?-----END ${typePattern}-----`, "gi")
+  );
+  return Array.isArray(matches) ? matches.join("\n") : "";
 }
 
 function summarizeTakProfileRow(row) {
@@ -315,106 +322,6 @@ function decodeTakUploadBlob(rawValue = "") {
   };
 }
 
-function encodePowerShellCommand(script = "") {
-  return Buffer.from(String(script || ""), "utf16le").toString("base64");
-}
-
-function normalizePkcs12WithWindowsCrypto(bundleBuffer, password = "", { requirePrivateKey = false } = {}) {
-  if (!bundleBuffer?.length) {
-    throw new Error("PKCS12 bundle is empty.");
-  }
-  if (process.platform !== "win32") {
-    return null;
-  }
-
-  const script = `
-$ErrorActionPreference = 'Stop'
-$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$bytes = [Convert]::FromBase64String([string]$payload.bundleBase64)
-$password = [string]$payload.password
-$requirePrivateKey = [bool]$payload.requirePrivateKey
-$flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
-$collection = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2Collection
-$collection.Import($bytes, $password, $flags)
-$newline = [Environment]::NewLine
-$pemParts = New-Object System.Collections.Generic.List[string]
-$leaf = $null
-foreach ($cert in $collection) {
-  if (-not $leaf) { $leaf = $cert }
-  if ($cert.HasPrivateKey) { $leaf = $cert }
-  $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
-  $pem = '-----BEGIN CERTIFICATE-----' + $newline + [Convert]::ToBase64String($certBytes, [System.Base64FormattingOptions]::InsertLineBreaks) + $newline + '-----END CERTIFICATE-----'
-  $pemParts.Add($pem)
-}
-if ($requirePrivateKey -and (-not $leaf -or -not $leaf.HasPrivateKey)) {
-  throw 'PKCS12 bundle does not contain an exportable private key.'
-}
-$normalizedPfxBase64 = ''
-if ($requirePrivateKey) {
-  $normalizedPfxBytes = $collection.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12, $password)
-  $normalizedPfxBase64 = [Convert]::ToBase64String($normalizedPfxBytes)
-}
-$privateKeyPem = ''
-if ($requirePrivateKey -and $leaf -and $leaf.HasPrivateKey) {
-  $rsa = $leaf.GetRSAPrivateKey()
-  if ($rsa) {
-    $pkcs8 = $rsa.ExportPkcs8PrivateKey()
-    $privateKeyPem = '-----BEGIN PRIVATE KEY-----' + $newline + [Convert]::ToBase64String($pkcs8, [System.Base64FormattingOptions]::InsertLineBreaks) + $newline + '-----END PRIVATE KEY-----'
-  } else {
-    $ecdsa = $leaf.GetECDsaPrivateKey()
-    if ($ecdsa) {
-      $pkcs8 = $ecdsa.ExportPkcs8PrivateKey()
-      $privateKeyPem = '-----BEGIN PRIVATE KEY-----' + $newline + [Convert]::ToBase64String($pkcs8, [System.Base64FormattingOptions]::InsertLineBreaks) + $newline + '-----END PRIVATE KEY-----'
-    }
-  }
-}
-$result = @{
-  certificatesPem = ($pemParts -join $newline)
-  normalizedPfxBase64 = $normalizedPfxBase64
-  privateKeyPem = $privateKeyPem
-  subject = if ($leaf) { $leaf.Subject } else { '' }
-  issuer = if ($leaf) { $leaf.Issuer } else { '' }
-  thumbprint = if ($leaf) { $leaf.Thumbprint } else { '' }
-  hasPrivateKey = [bool]($leaf -and $leaf.HasPrivateKey)
-}
-[Console]::Out.Write(($result | ConvertTo-Json -Compress))
-`;
-
-  const payload = JSON.stringify({
-    bundleBase64: Buffer.from(bundleBuffer).toString("base64"),
-    password: String(password || ""),
-    requirePrivateKey: Boolean(requirePrivateKey),
-  });
-  const result = spawnSync(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(script)],
-    {
-      input: payload,
-      encoding: "utf8",
-      windowsHide: true,
-      maxBuffer: 8 * 1024 * 1024,
-    }
-  );
-
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    const stderr = String(result.stderr || "").trim();
-    throw new Error(stderr || "Windows PKCS12 normalization failed.");
-  }
-  const parsed = JSON.parse(String(result.stdout || "{}"));
-  return {
-    certificatesPem: String(parsed.certificatesPem || ""),
-    pfxBuffer: parsed.normalizedPfxBase64 ? Buffer.from(parsed.normalizedPfxBase64, "base64") : null,
-    privateKeyPem: String(parsed.privateKeyPem || ""),
-    subject: String(parsed.subject || ""),
-    issuer: String(parsed.issuer || ""),
-    thumbprint: String(parsed.thumbprint || ""),
-    hasPrivateKey: Boolean(parsed.hasPrivateKey),
-  };
-}
-
 function buildTakSocketConfig(profileRow) {
   const host = String(profileRow?.server_host || "").trim();
   const port = Number(profileRow?.server_port || 0);
@@ -438,16 +345,15 @@ function buildTakSocketConfig(profileRow) {
   let verificationNote = "";
 
   if (clientCert.kind === "data-url") {
-    const normalizedClientBundle = normalizePkcs12WithWindowsCrypto(clientCert.buffer, clientCertPassword, { requirePrivateKey: true });
-    if (normalizedClientBundle?.certificatesPem && normalizedClientBundle?.privateKeyPem) {
-      tlsOptions.cert = normalizedClientBundle.certificatesPem;
-      tlsOptions.key = normalizedClientBundle.privateKeyPem;
-    } else {
-      tlsOptions.pfx = normalizedClientBundle?.pfxBuffer || clientCert.buffer;
-      tlsOptions.passphrase = clientCertPassword;
-    }
-  } else if (isPemLike(clientCert.text, { kind: "certificate" })) {
-    tlsOptions.cert = clientCert.text;
+    const { certPem, keyPem } = parsePkcs12(clientCert.buffer, clientCertPassword);
+    tlsOptions.cert = certPem;
+    tlsOptions.key = keyPem;
+  } else if (
+    isPemLike(clientCert.text, { kind: "certificate" })
+    && isPemLike(clientCert.text, { kind: "privateKey" })
+  ) {
+    tlsOptions.cert = extractPemBlocks(clientCert.text, "CERTIFICATE");
+    tlsOptions.key = extractPemBlocks(clientCert.text, "[A-Z0-9 ]*PRIVATE KEY");
   } else {
     throw new Error("Client certificate bundle format is not supported.");
   }
@@ -463,28 +369,12 @@ function buildTakSocketConfig(profileRow) {
     verificationMode = "custom-ca";
     verificationNote = "The uploaded CA trust bundle is used, but hostname mismatch checks are relaxed so direct server IP connections can succeed.";
   } else if (caCert.kind === "data-url") {
-    try {
-      const normalizedCaBundle = normalizePkcs12WithWindowsCrypto(
-        caCert.buffer,
-        decryptSecret(profileRow.ca_cert_password_secret || ""),
-        { requirePrivateKey: false }
-      );
-      if (normalizedCaBundle?.certificatesPem) {
-        tlsOptions.ca = normalizedCaBundle.certificatesPem;
-        tlsOptions.rejectUnauthorized = true;
-        tlsOptions.checkServerIdentity = () => undefined;
-        verificationMode = "custom-ca-p12";
-        verificationNote = "The uploaded PKCS12 CA truststore was converted through Windows crypto APIs and hostname mismatch checks are relaxed for direct server IP connections.";
-      } else {
-        tlsOptions.rejectUnauthorized = false;
-        verificationMode = "p12-truststore-unverified";
-        verificationNote = "The uploaded PKCS12 CA truststore could not be converted into certificates, so server identity verification is disabled.";
-      }
-    } catch (error) {
-      tlsOptions.rejectUnauthorized = false;
-      verificationMode = "p12-truststore-unverified";
-      verificationNote = `The uploaded PKCS12 CA truststore could not be converted into certificates, so server identity verification is disabled. ${error.message}`;
-    }
+    const { caPem } = parseTruststore(caCert.buffer, decryptSecret(profileRow.ca_cert_password_secret || ""));
+    tlsOptions.ca = caPem;
+    tlsOptions.rejectUnauthorized = true;
+    tlsOptions.checkServerIdentity = () => undefined;
+    verificationMode = "custom-ca-p12";
+    verificationNote = "The uploaded PKCS12 CA truststore is used and hostname mismatch checks are relaxed so direct server IP connections can succeed.";
   } else {
     tlsOptions.rejectUnauthorized = false;
     verificationMode = "p12-truststore-unverified";
