@@ -4610,6 +4610,15 @@ button:focus {
   font-size: 0.92rem;
 }
 
+.tak-file-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  width: fit-content;
+  cursor: pointer;
+}
+
 .tak-cert-summary,
 .tak-project-hint,
 .tak-project-empty {
@@ -6861,6 +6870,43 @@ body.emitter-modal-open {
   margin-top: 3px;
 }
 .analyze-conflict-dot.high { background: #ef4444; }
+.analyze-conflict-dot.good { background: #10b981; }
+.analyze-conflict-dot.fair { background: #f59e0b; }
+.analyze-conflict-dot.poor { background: #f97316; }
+.analyze-link-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(148, 163, 184, 0.12);
+}
+.analyze-link-score.good {
+  color: #10b981;
+  background: rgba(16,185,129,0.16);
+}
+.analyze-link-score.fair {
+  color: #f59e0b;
+  background: rgba(245,158,11,0.18);
+}
+.analyze-link-score.poor {
+  color: #f97316;
+  background: rgba(249,115,22,0.18);
+}
+.analyze-link-score.none {
+  color: #ef4444;
+  background: rgba(239,68,68,0.18);
+}
+.analyze-card-note {
+  margin-top: 10px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
 .analyze-table-wrap {
   overflow-x: auto;
 }

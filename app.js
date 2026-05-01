@@ -2235,6 +2235,10 @@ function syncTakUi() {
       emptyText: "No client certificate stored.",
     });
   }
+  dom.takDeleteClientCertBtn?.classList.toggle(
+    "hidden",
+    !(draft.hasClientCert || draft._clientCertFileNameDraft) || Boolean(draft._deleteClientCert),
+  );
   if (dom.takClientKeySummary) {
     dom.takClientKeySummary.textContent = formatTakCertSummary({
       hasValue: draft.hasClientKey,
@@ -2245,6 +2249,10 @@ function syncTakUi() {
       emptyText: "No client key stored.",
     });
   }
+  dom.takDeleteClientKeyBtn?.classList.toggle(
+    "hidden",
+    !(draft.hasClientKey || draft._clientKeyFileNameDraft) || Boolean(draft._deleteClientKey),
+  );
   if (dom.takCaCertSummary) {
     dom.takCaCertSummary.textContent = formatTakCertSummary({
       hasValue: draft.hasCaCert,
@@ -2255,6 +2263,10 @@ function syncTakUi() {
       emptyText: "No CA certificate stored.",
     });
   }
+  dom.takDeleteCaCertBtn?.classList.toggle(
+    "hidden",
+    !(draft.hasCaCert || draft._caCertFileNameDraft) || Boolean(draft._deleteCaCert),
+  );
   if (dom.takClientCertInput) dom.takClientCertInput.value = "";
   if (dom.takClientKeyInput) dom.takClientKeyInput.value = "";
   if (dom.takCaCertInput) dom.takCaCertInput.value = "";
@@ -23817,16 +23829,21 @@ function wireTopoCanvasPanZoom() {
 }
 
 function buildTopoAiContext() {
-  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
+  const emitters = getAnalyzeEmitters();
   return JSON.stringify({
     view: "topology",
     emitterCount: emitters.length,
     emitters: emitters.slice(0, 30).map(e => {
-      const toUnit = e.toUnitId ? _toState.units.find(u => u.id === e.toUnitId) : null;
       return {
-        id: e.id, name: e.name, freq: e.freq || e.frequency, waveform: e.waveform,
-        netId: e.netId || e.net_id, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
-        toUnit: toUnit ? { id: toUnit.id, label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
+        id: e.id,
+        name: e.name,
+        freq: e.frequencyMHz,
+        waveform: e.waveform,
+        netId: e.netId || e.net_id,
+        lat: e.lat,
+        lng: e.lng,
+        elevation: e.elevation,
+        toUnit: e.toUnit ? { id: e.toUnit.id, label: e.toUnit.label, size: e.toUnit.size, affiliation: e.toUnit.affiliation, type: e.toUnit.type } : null,
       };
     }),
     toUnits: _toState.units.map(u => ({ id: u.id, label: u.label, size: u.size, affiliation: u.affiliation, type: u.type })),
@@ -23837,17 +23854,104 @@ function buildTopoAiContext() {
 /* ═══════════════════════════════════════════════════════════════
    ANALYZE VIEW — RF Analytics Dashboard
 ═══════════════════════════════════════════════════════════════ */
-function renderAnalyzeView() {
-  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
-  renderAnalyzeCoverage(emitters);
-  renderAnalyzeFreq(emitters);
-  renderAnalyzeTerrain(emitters);
-  renderAnalyzeConflicts(emitters);
-  renderAnalyzeWaveform(emitters);
-  document.getElementById("analyzeRefreshBtn")?.addEventListener("click", renderAnalyzeView, { once: true });
+function getAnalyzeEmitters() {
+  return (state.assets || [])
+    .filter((asset) => Number(asset.frequencyMHz) > 0)
+    .map((asset) => {
+      const toUnit = asset.toUnitId ? _toState.units.find((u) => u.id === asset.toUnitId) : null;
+      return {
+        ...asset,
+        frequencyMHz: Number(asset.frequencyMHz) || 0,
+        powerW: Number(asset.powerW) || 0,
+        bandwidthKHz: Number(asset.bandwidthKHz ?? asset.ext?.bandwidthKHz) || 25,
+        waveform: asset.ext?.waveform || asset.waveform || "",
+        antenna: asset.ext?.antennaType || asset.antennaType || asset.antenna || "",
+        elevation: Number(asset.elevation ?? asset.elev) || 0,
+        toUnit,
+      };
+    });
 }
 
-function renderAnalyzeCoverage(emitters) {
+function getAnalyzeScoreClass(score) {
+  if (score >= 85) return "good";
+  if (score >= 45) return "fair";
+  if (score >= 20) return "poor";
+  return "none";
+}
+
+function summarizeLinkReason(quality, positive = false) {
+  const reason = (quality?.reasons || []).find((entry) => positive
+    ? /clear|strong|compatible|matching|inside|tight|satcom/i.test(entry)
+    : /blocked|mismatch|below|poor|exceeds|severe|unlikely|different/i.test(entry))
+    || quality?.reasons?.[0]
+    || (positive ? "Configuration is aligned for this path." : "Link has no meaningful support data.");
+  return reason.replace(/\s+/g, " ").trim();
+}
+
+function buildLinkImprovementSuggestions(emA, emB, quality) {
+  const suggestions = [];
+  const wfA = String(emA.waveform || "").toUpperCase();
+  const wfB = String(emB.waveform || "").toUpperCase();
+  const freqDelta = Math.abs((Number(emA.frequencyMHz) || 0) - (Number(emB.frequencyMHz) || 0));
+  if (wfA && wfB && wfA !== wfB) {
+    suggestions.push("align both radios to the same waveform or add a gateway node");
+  }
+  if (freqDelta > 0.05 && !quality.isSatcom) {
+    suggestions.push("retune both radios onto the same channel or net plan");
+  }
+  if (quality.terrain?.blocked) {
+    suggestions.push("move one endpoint to higher ground or add a relay on an intermediate ridgeline");
+  }
+  if (quality.marginDb != null && quality.marginDb < 10) {
+    suggestions.push("increase antenna height or use a higher-gain antenna to add fade margin");
+  }
+  if (quality.distKm != null && quality.distKm > 15 && !quality.isSatcom && !quality.terrain?.blocked) {
+    suggestions.push("reduce range by repositioning or switch to SATCOM / relay for this path");
+  }
+  if (!suggestions.length) {
+    suggestions.push("preserve current configuration and monitor for terrain or weather-driven degradation");
+  }
+  return suggestions.slice(0, 2);
+}
+
+async function buildAnalyzeLinkAssessments(emitters) {
+  const pairs = [];
+  for (let i = 0; i < emitters.length; i += 1) {
+    for (let j = i + 1; j < emitters.length; j += 1) {
+      pairs.push([emitters[i], emitters[j]]);
+    }
+  }
+  const limitedPairs = pairs.slice(0, 28);
+  const assessed = await Promise.all(limitedPairs.map(async ([emA, emB]) => {
+    const quality = await assessLinkQuality(emA, emB);
+    return {
+      emA,
+      emB,
+      quality,
+      scoreClass: getAnalyzeScoreClass(quality.score),
+      explanation: summarizeLinkReason(quality, quality.score >= 65),
+      suggestions: buildLinkImprovementSuggestions(emA, emB, quality),
+    };
+  }));
+  return assessed.sort((a, b) => b.quality.score - a.quality.score);
+}
+
+async function renderAnalyzeView() {
+  const emitters = getAnalyzeEmitters();
+  const assessments = emitters.length > 1
+    ? await buildAnalyzeLinkAssessments(emitters)
+    : [];
+  renderAnalyzeCoverage(emitters, assessments);
+  renderAnalyzeFreq(emitters);
+  renderAnalyzeTerrain(emitters, assessments);
+  renderAnalyzeConflicts(emitters, assessments);
+  renderAnalyzeWaveform(emitters, assessments);
+  document.getElementById("analyzeRefreshBtn")?.addEventListener("click", () => {
+    void renderAnalyzeView();
+  }, { once: true });
+}
+
+function renderAnalyzeCoverage(emitters, assessments = []) {
   const count = document.getElementById("analyzeCoverageCount");
   const body  = document.getElementById("analyzeCoverageBody");
   if (count) count.textContent = `${emitters.length} emitter${emitters.length !== 1 ? "s" : ""}`;
@@ -23861,11 +23965,25 @@ function renderAnalyzeCoverage(emitters) {
   const rows = Object.entries(byAff).map(([aff, cnt]) =>
     `<div class="analyze-terrain-item"><span>${esc(aff)}</span><span>${cnt} emitter${cnt !== 1 ? "s" : ""}</span></div>`
   ).join("");
-  const powers = emitters.filter(e => e.power || e.txPower).map(e => e.power || e.txPower);
+  const powers = emitters.filter(e => e.powerW).map(e => e.powerW);
   const avgPow = powers.length ? (powers.reduce((a,b)=>a+b,0)/powers.length).toFixed(1) : "N/A";
+  const qualityBuckets = {
+    good: assessments.filter((entry) => entry.quality.score >= 65).length,
+    fair: assessments.filter((entry) => entry.quality.score >= 45 && entry.quality.score < 65).length,
+    poor: assessments.filter((entry) => entry.quality.score < 45).length,
+  };
+  const bestLink = assessments[0];
+  const worstLink = assessments.length ? assessments[assessments.length - 1] : null;
   body.innerHTML = `
     <div class="analyze-terrain-list">${rows}</div>
     <div style="margin-top:10px;font-size:0.72rem;color:var(--muted)">Avg TX Power: <strong style="color:var(--text)">${avgPow}${powers.length ? " W" : ""}</strong></div>
+    ${assessments.length ? `
+      <div class="analyze-card-note">
+        ${qualityBuckets.good} strong links, ${qualityBuckets.fair} moderate links, ${qualityBuckets.poor} weak links assessed.
+        ${bestLink ? `<br>Best: <strong>${esc(bestLink.emA.name)} ↔ ${esc(bestLink.emB.name)}</strong> (${bestLink.quality.label}) because ${esc(bestLink.explanation.toLowerCase())}.` : ""}
+        ${worstLink ? `<br>Weakest: <strong>${esc(worstLink.emA.name)} ↔ ${esc(worstLink.emB.name)}</strong> (${worstLink.quality.label}) because ${esc(worstLink.explanation.toLowerCase())}.` : ""}
+      </div>
+    ` : ""}
   `;
 }
 
@@ -23880,7 +23998,7 @@ function renderAnalyzeFreq(emitters) {
   if (ph) ph.classList.add("hidden");
   const bands = {};
   for (const e of emitters) {
-    const band = freqBand(e.freq || e.frequency || 0);
+    const band = freqBand((e.frequencyMHz || 0) * 1e6);
     bands[band] = (bands[band] || 0) + 1;
   }
   const entries = Object.entries(bands).sort((a,b) => b[1]-a[1]);
@@ -23898,17 +24016,20 @@ function renderAnalyzeFreq(emitters) {
         </div>
       `).join("")}
     </div>
+    <div class="analyze-card-note">This view is using the live emitter frequencies stored in RF SIM, not placeholder values.</div>
   `;
 }
 
-function renderAnalyzeTerrain(emitters) {
+function renderAnalyzeTerrain(emitters, assessments = []) {
   const list = document.getElementById("analyzeTerrainList");
   const ph   = document.getElementById("analyzeTerrainPlaceholder");
   if (!list) return;
   if (!emitters.length) { if (ph) ph.style.display = ""; return; }
   if (ph) ph.style.display = "none";
   list.innerHTML = emitters.slice(0, 20).map(e => {
-    const elev = e.elevation || e.elev || 0;
+    const elev = e.elevation || 0;
+    const related = assessments.filter((entry) => entry.emA.id === e.id || entry.emB.id === e.id);
+    const blockedCount = related.filter((entry) => entry.quality.terrain?.blocked).length;
     let grade, cls;
     if (elev > 600)      { grade = "High Ground"; cls = "good"; }
     else if (elev > 200) { grade = "Mid Terrain"; cls = "fair"; }
@@ -23917,6 +24038,7 @@ function renderAnalyzeTerrain(emitters) {
       <div class="analyze-terrain-item">
         <span>${esc(e.name || e.id || "Emitter")}</span>
         <div style="display:flex;align-items:center;gap:6px">
+          ${blockedCount ? `<span style="color:var(--muted);font-size:0.65rem">${blockedCount} blocked path${blockedCount === 1 ? "" : "s"}</span>` : ""}
           <span style="color:var(--muted);font-size:0.65rem">${elev.toFixed(0)} m MSL</span>
           <span class="analyze-terrain-badge ${cls}">${grade}</span>
         </div>
@@ -23925,86 +24047,97 @@ function renderAnalyzeTerrain(emitters) {
   }).join("");
 }
 
-function renderAnalyzeConflicts(emitters) {
+function renderAnalyzeConflicts(emitters, assessments = []) {
   const list = document.getElementById("analyzeConflictsList");
   const ph   = document.getElementById("analyzeConflictsPlaceholder");
   if (!list) return;
-  const conflicts = [];
-  for (let i = 0; i < emitters.length; i++) {
-    for (let j = i + 1; j < emitters.length; j++) {
-      const a = emitters[i], b = emitters[j];
-      const fa = a.freq || a.frequency || 0;
-      const fb = b.freq || b.frequency || 0;
-      const bwa = a.bandwidth || 0;
-      const bwb = b.bandwidth || 0;
-      const overlap = Math.min(fa + bwa/2, fb + bwb/2) - Math.max(fa - bwa/2, fb - bwb/2);
-      if (overlap > 0 || Math.abs(fa - fb) < 5e3) {
-        const severity = overlap > 0 ? "high" : "medium";
-        conflicts.push({
-          a: a.name || a.id, b: b.name || b.id,
-          desc: overlap > 0
-            ? `Overlapping spectrum by ${(overlap/1e3).toFixed(1)} kHz — active interference risk.`
-            : `Frequencies within 5 kHz — co-channel interference possible under strong signal conditions.`,
-          severity,
-        });
-      }
-    }
-  }
-  if (!conflicts.length) {
+  if (!assessments.length) {
     if (ph) ph.style.display = "";
     list.innerHTML = "";
     return;
   }
   if (ph) ph.style.display = "none";
-  list.innerHTML = conflicts.slice(0, 20).map(c => `
+  const strongest = assessments.filter((entry) => entry.quality.score >= 65).slice(0, 2);
+  const weakest = [...assessments].reverse().slice(0, Math.min(4, assessments.length));
+  const rows = [
+    ...strongest.map((entry) => ({
+      heading: `${entry.emA.name} ↔ ${entry.emB.name}`,
+      detail: `${entry.quality.label}: ${entry.explanation}`,
+      severity: "good",
+      scoreClass: entry.scoreClass,
+      score: entry.quality.score,
+    })),
+    ...weakest.map((entry) => ({
+      heading: `${entry.emA.name} ↔ ${entry.emB.name}`,
+      detail: `${entry.quality.label}: ${entry.explanation} Suggested fix: ${entry.suggestions.join("; ")}.`,
+      severity: entry.quality.score < 20 ? "high" : entry.quality.score < 45 ? "poor" : "fair",
+      scoreClass: entry.scoreClass,
+      score: entry.quality.score,
+    })),
+  ];
+  list.innerHTML = rows.map((c) => `
     <div class="analyze-conflict-item">
-      <div class="analyze-conflict-dot ${c.severity === "high" ? "high" : ""}"></div>
+      <div class="analyze-conflict-dot ${c.severity === "high" ? "high" : c.severity}"></div>
       <div>
-        <strong style="font-size:0.72rem">${esc(c.a)} ↔ ${esc(c.b)}</strong><br>
-        <span style="color:var(--muted)">${esc(c.desc)}</span>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <strong style="font-size:0.72rem">${esc(c.heading)}</strong>
+          <span class="analyze-link-score ${c.scoreClass}">${c.score}</span>
+        </div>
+        <span style="color:var(--muted)">${esc(c.detail)}</span>
       </div>
     </div>
   `).join("");
 }
 
-function renderAnalyzeWaveform(emitters) {
+function renderAnalyzeWaveform(emitters, assessments = []) {
   const wrap = document.getElementById("analyzeWaveformTable");
   const ph   = document.getElementById("analyzeWaveformPlaceholder");
   if (!wrap) return;
   if (!emitters.length) { if (ph) ph.style.display = ""; return; }
   if (ph) ph.style.display = "none";
   const rows = emitters.slice(0, 30).map(e => {
-    const freqMhz = ((e.freq || e.frequency || 0) / 1e6).toFixed(3);
-    const bwKhz   = ((e.bandwidth || 0) / 1e3).toFixed(1);
+    const freqMhz = Number(e.frequencyMHz || 0).toFixed(3);
+    const bwKhz   = Number(e.bandwidthKHz || 0).toFixed(1);
+    const related = assessments.filter((entry) => entry.emA.id === e.id || entry.emB.id === e.id);
+    const avgScore = related.length
+      ? Math.round(related.reduce((sum, entry) => sum + entry.quality.score, 0) / related.length)
+      : null;
     return `<tr>
       <td>${esc(e.name || e.id || "—")}</td>
       <td>${freqMhz} MHz</td>
       <td>${bwKhz ? bwKhz + " kHz" : "—"}</td>
       <td>${esc(e.waveform || "—")}</td>
-      <td>${esc(e.antenna || e.antennaType || "—")}</td>
-      <td>${e.power || e.txPower ? (e.power || e.txPower) + " W" : "—"}</td>
+      <td>${esc(e.antenna || "—")}</td>
+      <td>${e.powerW ? e.powerW + " W" : "—"}</td>
+      <td>${avgScore != null ? avgScore : "—"}</td>
     </tr>`;
   }).join("");
   wrap.innerHTML = `
     <table>
-      <thead><tr><th>Name</th><th>Freq</th><th>BW</th><th>Waveform</th><th>Antenna</th><th>TX Pwr</th></tr></thead>
+      <thead><tr><th>Name</th><th>Freq</th><th>BW</th><th>Waveform</th><th>Antenna</th><th>TX Pwr</th><th>Avg Link</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
 }
 
 function buildAnalyzeAiContext() {
-  const emitters = (state.assets || []).filter(a => a.freq || a.frequency);
+  const emitters = getAnalyzeEmitters();
   return JSON.stringify({
     view: "analyze",
     emitterCount: emitters.length,
     emitters: emitters.slice(0, 40).map(e => {
-      const toUnit = e.toUnitId ? _toState.units.find(u => u.id === e.toUnitId) : null;
       return {
-        id: e.id, name: e.name, freq: e.freq || e.frequency, bandwidth: e.bandwidth,
-        waveform: e.waveform, antenna: e.antenna || e.antennaType,
-        power: e.power || e.txPower, lat: e.lat, lng: e.lng, elevation: e.elevation || e.elev,
-        toUnit: toUnit ? { label: toUnit.label, size: toUnit.size, affiliation: toUnit.affiliation, type: toUnit.type } : null,
+        id: e.id,
+        name: e.name,
+        freq: e.frequencyMHz,
+        bandwidth: e.bandwidthKHz,
+        waveform: e.waveform,
+        antenna: e.antenna,
+        power: e.powerW,
+        lat: e.lat,
+        lng: e.lng,
+        elevation: e.elevation,
+        toUnit: e.toUnit ? { label: e.toUnit.label, size: e.toUnit.size, affiliation: e.toUnit.affiliation, type: e.toUnit.type } : null,
       };
     }),
     toUnits: _toState.units.map(u => ({ id: u.id, label: u.label, size: u.size, affiliation: u.affiliation, type: u.type })),

@@ -956,12 +956,12 @@
               </div>
               <div class="analyze-card analyze-card-wide" id="analyzeCardConflicts">
                 <div class="analyze-card-header">
-                  <strong>Spectrum Conflicts &amp; Interference Risk</strong>
-                  <span class="eyebrow">Overlapping frequencies within mutual range</span>
+                  <strong>Link Findings &amp; Recommendations</strong>
+                  <span class="eyebrow">Strong links, weak links, and suggested fixes</span>
                 </div>
                 <div id="analyzeConflictsBody" class="analyze-card-body">
                   <div id="analyzeConflictsList" class="analyze-conflicts-list"></div>
-                  <div class="analyze-placeholder" id="analyzeConflictsPlaceholder">No conflicts detected.</div>
+                  <div class="analyze-placeholder" id="analyzeConflictsPlaceholder">No analyzed links yet.</div>
                 </div>
               </div>
               <div class="analyze-card analyze-card-wide" id="analyzeCardWaveform">
@@ -2069,19 +2069,22 @@
               <div class="settings-span-2 tak-cert-grid">
                 <div class="tak-cert-card">
                   <strong>Install Certificate Authority</strong>
-                  <input id="takCaCertInput" type="file" accept=".pem,.crt,.cer,.txt">
+                  <input id="takCaCertInput" class="hidden" type="file" accept=".pem,.crt,.cer,.txt">
+                  <label for="takCaCertInput" class="ghost-button small tak-file-upload">Choose File</label>
                   <div id="takCaCertSummary" class="tak-cert-summary">No CA certificate stored.</div>
                   <button id="takDeleteCaCertBtn" class="ghost-button small" type="button">Delete CA</button>
                 </div>
                 <div class="tak-cert-card">
                   <strong>Install Client Certificate</strong>
-                  <input id="takClientCertInput" type="file" accept=".pem,.crt,.cer,.txt">
+                  <input id="takClientCertInput" class="hidden" type="file" accept=".pem,.crt,.cer,.txt">
+                  <label for="takClientCertInput" class="ghost-button small tak-file-upload">Choose File</label>
                   <div id="takClientCertSummary" class="tak-cert-summary">No client certificate stored.</div>
                   <button id="takDeleteClientCertBtn" class="ghost-button small" type="button">Delete Certificate</button>
                 </div>
                 <div class="tak-cert-card">
                   <strong>Install Client Private Key (PEM)</strong>
-                  <input id="takClientKeyInput" type="file" accept=".pem,.key,.txt">
+                  <input id="takClientKeyInput" class="hidden" type="file" accept=".pem,.key,.txt">
+                  <label for="takClientKeyInput" class="ghost-button small tak-file-upload">Choose File</label>
                   <div id="takClientKeySummary" class="tak-cert-summary">No client key stored.</div>
                   <button id="takDeleteClientKeyBtn" class="ghost-button small" type="button">Delete Key</button>
                 </div>
