@@ -442,15 +442,28 @@ function buildTakSocketConfig(profileRow) {
     verificationMode = "custom-ca";
     verificationNote = "The uploaded CA trust bundle is used, but hostname mismatch checks are relaxed so direct server IP connections can succeed.";
   } else if (caCert.kind === "data-url") {
-    const normalizedCaBundle = normalizePkcs12WithWindowsCrypto(caCert.buffer, decryptSecret(profileRow.ca_cert_password_secret || ""), { requirePrivateKey: false });
-    if (!normalizedCaBundle?.certificatesPem) {
-      throw new Error("CA truststore could not be converted into certificates.");
+    try {
+      const normalizedCaBundle = normalizePkcs12WithWindowsCrypto(
+        caCert.buffer,
+        decryptSecret(profileRow.ca_cert_password_secret || ""),
+        { requirePrivateKey: false }
+      );
+      if (normalizedCaBundle?.certificatesPem) {
+        tlsOptions.ca = normalizedCaBundle.certificatesPem;
+        tlsOptions.rejectUnauthorized = true;
+        tlsOptions.checkServerIdentity = () => undefined;
+        verificationMode = "custom-ca-p12";
+        verificationNote = "The uploaded PKCS12 CA truststore was converted through Windows crypto APIs and hostname mismatch checks are relaxed for direct server IP connections.";
+      } else {
+        tlsOptions.rejectUnauthorized = false;
+        verificationMode = "p12-truststore-unverified";
+        verificationNote = "The uploaded PKCS12 CA truststore could not be converted into certificates, so server identity verification is disabled.";
+      }
+    } catch (error) {
+      tlsOptions.rejectUnauthorized = false;
+      verificationMode = "p12-truststore-unverified";
+      verificationNote = `The uploaded PKCS12 CA truststore could not be converted into certificates, so server identity verification is disabled. ${error.message}`;
     }
-    tlsOptions.ca = normalizedCaBundle.certificatesPem;
-    tlsOptions.rejectUnauthorized = true;
-    tlsOptions.checkServerIdentity = () => undefined;
-    verificationMode = "custom-ca-p12";
-    verificationNote = "The uploaded PKCS12 CA truststore was converted through Windows crypto APIs and hostname mismatch checks are relaxed for direct server IP connections.";
   } else {
     tlsOptions.rejectUnauthorized = false;
     verificationMode = "p12-truststore-unverified";
