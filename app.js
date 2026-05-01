@@ -1677,6 +1677,13 @@ const state = {
     saving: false,
     statusMessage: "Save a TAK server profile to assign it to server-backed projects.",
   },
+  takLive: {
+    pollTimerId: null,
+    projectId: null,
+    status: "idle",
+    message: "",
+    lastPollAt: "",
+  },
   authScreenMode: "login",
   canceledSimulationRequestIds: new Set(),
 };
@@ -2108,6 +2115,211 @@ function getTakProfileForProject(projectId = state.session.activeProjectId) {
 
 function isTakEnabledForProject(projectId = state.session.activeProjectId) {
   return Boolean(getTakProfileForProject(projectId));
+}
+
+function isTakLiveImportedItem(item) {
+  return Boolean(item?.tak?.source === "tak-live-pli");
+}
+
+function getTakLiveItems() {
+  return state.importedItems.filter(isTakLiveImportedItem);
+}
+
+function ensureTakInboundFolder() {
+  const takFolderId = createOrGetNestedMapContentFolder("TAK", null, { collapsed: false });
+  return createOrGetNestedMapContentFolder("Inbound", takFolderId, { collapsed: false });
+}
+
+function buildTakLiveMarkerStyle(contact) {
+  const type = String(contact?.cotType || "").toLowerCase();
+  const isFriendly = type.startsWith("a-f");
+  const isHostNation = type.startsWith("a-n");
+  const isEnemy = type.startsWith("a-h");
+  const color = isEnemy ? "#ff8080" : isHostNation ? "#aaffaa" : isFriendly ? "#80c8ff" : "#7dd3fc";
+  return {
+    color,
+    size: 28,
+    scale: 1,
+  };
+}
+
+function buildTakLiveSubtitle(contact, profile) {
+  const parts = ["TAK Live PLI"];
+  if (profile?.label) parts.push(profile.label);
+  if (contact?.role) parts.push(contact.role);
+  return parts.join(" | ");
+}
+
+function upsertTakLiveContact(contact, profile) {
+  if (!Number.isFinite(Number(contact?.lat)) || !Number.isFinite(Number(contact?.lon)) || !contact?.uid) {
+    return null;
+  }
+
+  const existing = state.importedItems.find((item) => isTakLiveImportedItem(item) && item.tak?.uid === contact.uid) ?? null;
+  const folderId = ensureTakInboundFolder();
+  const markerStyle = buildTakLiveMarkerStyle(contact);
+  const tak = normalizeTakMetadata({
+    uid: contact.uid,
+    profileId: profile?.id || "",
+    cotType: contact.cotType || "",
+    source: "tak-live-pli",
+    staleAt: contact.stale || "",
+    how: contact.how || "",
+    detail: {
+      callsign: contact.callsign || contact.uid,
+      role: contact.role || "",
+      team: contact.team || "",
+      lastSeenAt: contact.lastSeenAt || "",
+    },
+  });
+
+  if (existing) {
+    existing.name = contact.callsign || existing.name || contact.uid;
+    existing.subtitle = buildTakLiveSubtitle(contact, profile);
+    existing.properties = {
+      ...(existing.properties ?? {}),
+      cotType: contact.cotType || "",
+      role: contact.role || "",
+      team: contact.team || "",
+      lastSeenAt: contact.lastSeenAt || "",
+      stale: contact.stale || "",
+    };
+    existing.markerStyle = markerStyle;
+    existing.tak = tak;
+    existing.lastModified = nowIso();
+    existing.layer.setLatLng([Number(contact.lat), Number(contact.lon)]);
+    const icon = buildImportedPointIcon(existing.markerStyle);
+    if (icon) existing.layer.setIcon(icon);
+    existing.layer.setPopupContent(renderImportedItemPopup(existing));
+    applyItemLabel(existing);
+    setMapContentFolderId(`imported:${existing.id}`, folderId);
+    return existing;
+  }
+
+  const item = stampContentRecord({
+    id: generateId(),
+    name: contact.callsign || contact.uid,
+    subtitle: buildTakLiveSubtitle(contact, profile),
+    kind: "tak-live-point",
+    geometryType: "Point",
+    folderPath: ["TAK", "Inbound"],
+    sourceLabel: "TAK Live",
+    properties: {
+      cotType: contact.cotType || "",
+      role: contact.role || "",
+      team: contact.team || "",
+      lastSeenAt: contact.lastSeenAt || "",
+      stale: contact.stale || "",
+    },
+    drawn: false,
+    tak,
+    shapeKind: "point",
+    markerStyle,
+    showLabel: true,
+    layer: null,
+  });
+
+  const contentId = `imported:${item.id}`;
+  item.layer = createImportedLayer({
+    contentId,
+    geometryType: "Point",
+    coordinates: [Number(contact.lat), Number(contact.lon)],
+    markerStyle,
+  });
+  item.layer.addTo(state.map);
+  item.layer.bindPopup(renderImportedItemPopup(item));
+  item.layer.on?.("click", () => focusMapContent(contentId));
+  state.importedItems.push(item);
+  setMapContentFolderId(contentId, folderId);
+  state.mapContentOrder.push(contentId);
+  applyItemLabel(item);
+  return item;
+}
+
+function removeTakLiveContactsNotIn(seenUids = new Set()) {
+  getTakLiveItems().forEach((item) => {
+    if (!seenUids.has(item?.tak?.uid)) {
+      removeImportedItem(item.id, { deferFinalize: true, silent: true });
+    }
+  });
+}
+
+function clearTakLiveContacts() {
+  getTakLiveItems().forEach((item) => {
+    removeImportedItem(item.id, { deferFinalize: true, silent: true });
+  });
+  renderMapContents();
+  syncCesiumEntities();
+}
+
+function stopTakLivePolling({ clearContacts = false } = {}) {
+  if (state.takLive.pollTimerId) {
+    window.clearTimeout(state.takLive.pollTimerId);
+    state.takLive.pollTimerId = null;
+  }
+  state.takLive.projectId = null;
+  state.takLive.status = "idle";
+  state.takLive.message = "";
+  state.takLive.lastPollAt = "";
+  if (clearContacts) {
+    clearTakLiveContacts();
+  }
+}
+
+async function pollTakLiveContacts({ immediate = false } = {}) {
+  if (!state.session.token || !state.session.activeProjectId || !isTakEnabledForProject(state.session.activeProjectId)) {
+    stopTakLivePolling({ clearContacts: true });
+    return;
+  }
+
+  const currentProjectId = state.session.activeProjectId;
+  state.takLive.projectId = currentProjectId;
+  if (!immediate) {
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+
+  try {
+    const payload = await apiFetch(`/projects/${currentProjectId}/tak-contacts`);
+    if (state.session.activeProjectId !== currentProjectId) {
+      return;
+    }
+
+    state.takLive.status = payload.status || (payload.linked ? "connected" : "unlinked");
+    state.takLive.message = payload.message || "";
+    state.takLive.lastPollAt = nowIso();
+
+    if (!payload.linked) {
+      clearTakLiveContacts();
+    } else {
+      const profile = payload.profile ?? getTakProfileForProject(currentProjectId);
+      const seen = new Set();
+      (Array.isArray(payload.contacts) ? payload.contacts : []).forEach((contact) => {
+        if (!contact?.uid) return;
+        seen.add(contact.uid);
+        upsertTakLiveContact(contact, profile);
+      });
+      removeTakLiveContactsNotIn(seen);
+      renderMapContents();
+      syncCesiumEntities();
+    }
+  } catch (error) {
+    state.takLive.status = "error";
+    state.takLive.message = error.message;
+  } finally {
+    if (state.session.token && state.session.activeProjectId === currentProjectId && isTakEnabledForProject(currentProjectId)) {
+      state.takLive.pollTimerId = window.setTimeout(() => {
+        pollTakLiveContacts().catch(() => {});
+      }, 5000);
+    }
+  }
+}
+
+function refreshTakLiveFeed({ immediate = false } = {}) {
+  stopTakLivePolling({ clearContacts: !isTakEnabledForProject(state.session.activeProjectId) });
+  if (!state.session.token || !state.session.activeProjectId || !isTakEnabledForProject(state.session.activeProjectId)) {
+    return;
+  }
+  void pollTakLiveContacts({ immediate }).catch(() => {});
 }
 
 function setTakDraft(profile) {
@@ -2564,12 +2776,6 @@ function buildCurrentViewAiContext(view = state.ui?.currentView) {
 
 function syncAiViewMeta() {
   const profile = getAiViewProfile();
-  if (dom.aiAgentRole) {
-    dom.aiAgentRole.textContent = profile.role;
-  }
-  if (dom.aiAgentPurpose) {
-    dom.aiAgentPurpose.textContent = profile.purpose;
-  }
   if (dom.aiChatInput) {
     dom.aiChatInput.placeholder = profile.placeholder;
   }
@@ -2911,6 +3117,7 @@ function clearSessionState({ preserveGuest = false } = {}) {
   if (state.session.localSaveTimerId) {
     window.clearTimeout(state.session.localSaveTimerId);
   }
+  stopTakLivePolling({ clearContacts: true });
   if (!preserveGuest) {
     setGuestSessionEnabled(false);
   }
@@ -4087,6 +4294,7 @@ async function init() {
   renderViewsheds();
   renderPlanningResults();
   renderMapContents();
+  refreshTakLiveFeed({ immediate: true });
   refreshActionButtons();
   updateTerrainSummary();
   updateWeatherState();
@@ -4783,7 +4991,9 @@ function serializeImportedItem(item) {
 
 function serializeCurrentMapState() {
   const center = state.map.getCenter();
-  const serializedImported = state.importedItems.map(serializeImportedItem);
+  const serializedImported = state.importedItems
+    .filter((item) => !isTakLiveImportedItem(item))
+    .map(serializeImportedItem);
 
   return {
     schemaVersion: STATE_SCHEMA_VERSION,
@@ -4810,7 +5020,9 @@ function serializeCurrentMapState() {
 function serializeMapStateForServer() {
   const full = serializeCurrentMapState();
   const { profiles, settings, ...serverState } = full;
-  serverState.importedItems = (serverState.importedItems ?? []).filter((item) => item.drawn || item.tak);
+  serverState.importedItems = (serverState.importedItems ?? []).filter((item) =>
+    (item.drawn || item.tak) && item?.tak?.source !== "tak-live-pli"
+  );
   // Keep schemaVersion and savedAt so the server can record what version wrote the state.
   return serverState;
 }
@@ -4966,6 +5178,9 @@ function applySavedMapState(rawSaved) {
   if (Array.isArray(saved.importedItems)) {
     let skipped = 0;
     saved.importedItems.forEach((saved) => {
+      if (saved?.tak?.source === "tak-live-pli") {
+        return;
+      }
       // Skip items whose coordinates were lost (e.g. localStorage quota fallback
       // stripped them). Silently dropping these caused the entire restore to
       // abort mid-loop when createImportedLayer threw on undefined coordinates.
@@ -6467,6 +6682,7 @@ async function saveTakProfile() {
     state.takSettings.statusMessage = `Saved ${draft.label || draft.serverHost}.`;
     syncWorkspaceUi();
     syncTakUi();
+    refreshTakLiveFeed({ immediate: true });
     setStatus(state.takSettings.statusMessage);
   } catch (error) {
     state.takSettings.statusMessage = `TAK profile save failed: ${error.message}`;
@@ -6496,6 +6712,7 @@ async function deleteTakProfile() {
     state.takSettings.statusMessage = `Deleted ${profile.label || profile.serverHost}.`;
     syncWorkspaceUi();
     syncTakUi();
+    refreshTakLiveFeed({ immediate: true });
     setStatus(state.takSettings.statusMessage);
   } catch (error) {
     setStatus(`TAK profile delete failed: ${error.message}`, true);
@@ -6564,11 +6781,13 @@ async function onTakProjectBindingChanged(event) {
       : `Disabled TAK stream for ${project?.name || "project"}.`;
     syncWorkspaceUi();
     syncTakUi();
+    refreshTakLiveFeed({ immediate: true });
   } catch (error) {
     setStatus(`TAK project binding failed: ${error.message}`, true);
     await loadServerTakProjectBindings();
     syncWorkspaceUi();
     syncTakUi();
+    refreshTakLiveFeed({ immediate: true });
   }
 }
 
@@ -6577,23 +6796,22 @@ function renderAiEmptyState() {
     return;
   }
 
-  const profile = getAiViewProfile();
   const isLocalModel = Boolean(getAiProviderMeta(state.ai.provider)?.isLocalModel);
   const hasConfiguredProvider = Boolean(state.ai.provider && (state.ai.apiKey || isLocalModel));
-  const message = escapeHtml(profile.emptyMessage);
   const note = !hasConfiguredProvider
     ? "Add a working AI provider in the top bar to enable chat-assisted planning."
     : state.ai.status === "ready"
       ? ""
       : escapeHtml(state.ai.statusMessage || "AI assistant is unavailable right now.");
 
-  dom.aiChatMessages.innerHTML = `
-    <article class="ai-chat-message ai-chat-message-system">
-      <strong>Assistant</strong>
-      <p>${message}</p>
-      ${note ? `<p>${note}</p>` : ""}
-    </article>
-  `;
+  dom.aiChatMessages.innerHTML = note
+    ? `
+      <article class="ai-chat-message ai-chat-message-system">
+        <strong>Assistant</strong>
+        <p>${note}</p>
+      </article>
+    `
+    : "";
 }
 
 function syncAiUi() {
@@ -16178,6 +16396,13 @@ function buildImportedItemDetailLines(item) {
   }
 
   const lines = [];
+  if (isTakLiveImportedItem(item)) {
+    const team = item.properties?.team ? `Team: ${item.properties.team}` : "";
+    const role = item.properties?.role ? `Role: ${item.properties.role}` : "";
+    const cotType = item.properties?.cotType ? `CoT: ${item.properties.cotType}` : "";
+    const lastSeen = item.properties?.lastSeenAt ? `Last seen: ${formatTakTimestamp(item.properties.lastSeenAt)}` : "";
+    [team, role, cotType, lastSeen].filter(Boolean).forEach((line) => lines.push(line));
+  }
   const isCircle = Boolean(item.properties?.isCircle && Number.isFinite(Number(item.properties?.radiusM)));
   if (isCircle) {
     lines.push(`Radius: ${formatDistance(Number(item.properties.radiusM))}`);

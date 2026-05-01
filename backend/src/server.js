@@ -5,6 +5,8 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { Readable } = require("stream");
+const net = require("net");
+const tls = require("tls");
 const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
@@ -186,6 +188,406 @@ function summarizeTakProfileRow(row) {
     lastTestStatus: row.last_test_status || "",
   };
 }
+
+const TAK_CONNECTOR_IDLE_MS = 2 * 60 * 1000;
+const TAK_CONTACT_MAX_AGE_MS = 10 * 60 * 1000;
+const takConnectorState = new Map();
+
+function decodeXmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function parseXmlAttributes(fragment = "") {
+  const attributes = {};
+  const attrRegex = /([A-Za-z_][\w:.-]*)\s*=\s*(['"])(.*?)\2/g;
+  let match = attrRegex.exec(fragment);
+  while (match) {
+    attributes[match[1]] = decodeXmlEntities(match[3] || "");
+    match = attrRegex.exec(fragment);
+  }
+  return attributes;
+}
+
+function extractCotEventsFromBuffer(buffer = "") {
+  const events = [];
+  let remainder = String(buffer || "");
+  while (true) {
+    const startIndex = remainder.indexOf("<event");
+    if (startIndex < 0) {
+      remainder = remainder.slice(-4096);
+      break;
+    }
+    if (startIndex > 0) {
+      remainder = remainder.slice(startIndex);
+    }
+    const endIndex = remainder.indexOf("</event>");
+    if (endIndex < 0) {
+      break;
+    }
+    const xml = remainder.slice(0, endIndex + "</event>".length);
+    events.push(xml);
+    remainder = remainder.slice(endIndex + "</event>".length);
+  }
+  return { events, remainder };
+}
+
+function parseTakCotEvent(xml = "") {
+  const eventMatch = String(xml || "").match(/<event\b([^>]*)>/i);
+  const pointMatch = String(xml || "").match(/<point\b([^>]*)\/?>/i);
+  if (!eventMatch || !pointMatch) {
+    return null;
+  }
+
+  const eventAttrs = parseXmlAttributes(eventMatch[1]);
+  const pointAttrs = parseXmlAttributes(pointMatch[1]);
+  const lat = Number(pointAttrs.lat);
+  const lon = Number(pointAttrs.lon);
+  if (!eventAttrs.uid || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+
+  const type = String(eventAttrs.type || "");
+  if (type && !type.toLowerCase().startsWith("a-")) {
+    return null;
+  }
+
+  const contactMatch = String(xml || "").match(/<contact\b([^>]*)\/?>/i);
+  const groupMatch = String(xml || "").match(/<__group\b([^>]*)\/?>/i);
+  const remarksMatch = String(xml || "").match(/<remarks[^>]*>([\s\S]*?)<\/remarks>/i);
+  const contactAttrs = contactMatch ? parseXmlAttributes(contactMatch[1]) : {};
+  const groupAttrs = groupMatch ? parseXmlAttributes(groupMatch[1]) : {};
+  const callsign = (
+    contactAttrs.callsign
+    || groupAttrs.name
+    || decodeXmlEntities((remarksMatch?.[1] || "").trim())
+    || eventAttrs.uid
+  ).trim();
+
+  return {
+    uid: String(eventAttrs.uid).trim(),
+    cotType: type,
+    callsign,
+    lat,
+    lon,
+    hae: Number.isFinite(Number(pointAttrs.hae)) ? Number(pointAttrs.hae) : null,
+    ce: Number.isFinite(Number(pointAttrs.ce)) ? Number(pointAttrs.ce) : null,
+    le: Number.isFinite(Number(pointAttrs.le)) ? Number(pointAttrs.le) : null,
+    how: String(eventAttrs.how || "").trim(),
+    time: String(eventAttrs.time || "").trim(),
+    start: String(eventAttrs.start || "").trim(),
+    stale: String(eventAttrs.stale || "").trim(),
+    team: String(groupAttrs.name || "").trim(),
+    role: String(groupAttrs.role || "").trim(),
+  };
+}
+
+function decodeTakUploadBlob(rawValue = "") {
+  const value = String(rawValue || "").trim();
+  if (!value) {
+    return { kind: "empty", text: "", buffer: null, mimeType: "", nameHint: "" };
+  }
+  if (value.startsWith("data:")) {
+    const match = value.match(/^data:([^;,]+)?(?:;[^,]*)?;base64,([\s\S]+)$/i);
+    if (!match) {
+      throw new Error("TAK certificate upload is malformed.");
+    }
+    return {
+      kind: "data-url",
+      text: "",
+      buffer: Buffer.from(match[2].replace(/\s+/g, ""), "base64"),
+      mimeType: String(match[1] || "application/octet-stream").toLowerCase(),
+      nameHint: "",
+    };
+  }
+  return {
+    kind: "text",
+    text: value,
+    buffer: Buffer.from(value, "utf8"),
+    mimeType: isPemLike(value) ? "application/x-pem-file" : "text/plain",
+    nameHint: "",
+  };
+}
+
+function buildTakSocketConfig(profileRow) {
+  const host = String(profileRow?.server_host || "").trim();
+  const port = Number(profileRow?.server_port || 0);
+  const transport = String(profileRow?.transport || "ssl").trim().toLowerCase();
+  if (!host || !Number.isFinite(port) || port < 1 || port > 65535) {
+    throw new Error("TAK profile is missing a valid host or port.");
+  }
+
+  const clientCertRaw = decryptSecret(profileRow.client_cert_pem || "");
+  const clientCertPassword = decryptSecret(profileRow.client_cert_password_secret || "");
+  const caCertRaw = decryptSecret(profileRow.ca_cert_pem || "");
+  const clientCert = decodeTakUploadBlob(clientCertRaw);
+  const caCert = decodeTakUploadBlob(caCertRaw);
+
+  if (!clientCertRaw || !clientCertPassword) {
+    throw new Error("TAK client certificate bundle or password is missing.");
+  }
+
+  const tlsOptions = { host, port };
+  let verificationMode = "system";
+  let verificationNote = "";
+
+  if (clientCert.kind === "data-url") {
+    tlsOptions.pfx = clientCert.buffer;
+    tlsOptions.passphrase = clientCertPassword;
+  } else if (isPemLike(clientCert.text, { kind: "certificate" })) {
+    tlsOptions.cert = clientCert.text;
+  } else {
+    throw new Error("Client certificate bundle format is not supported.");
+  }
+
+  if (!caCertRaw) {
+    tlsOptions.rejectUnauthorized = false;
+    verificationMode = "unverified";
+    verificationNote = "No CA trust bundle was available, so server identity verification is disabled.";
+  } else if (caCert.kind === "text" && isPemLike(caCert.text, { kind: "certificate" })) {
+    tlsOptions.ca = caCert.text;
+    tlsOptions.rejectUnauthorized = true;
+    tlsOptions.checkServerIdentity = () => undefined;
+    verificationMode = "custom-ca";
+    verificationNote = "The uploaded CA trust bundle is used, but hostname mismatch checks are relaxed so direct server IP connections can succeed.";
+  } else {
+    tlsOptions.rejectUnauthorized = false;
+    verificationMode = "p12-truststore-unverified";
+    verificationNote = "PKCS#12 truststores cannot be validated directly by this Node connector, so server identity verification is disabled.";
+  }
+
+  return {
+    host,
+    port,
+    transport,
+    tlsOptions,
+    verificationMode,
+    verificationNote,
+  };
+}
+
+function buildTakConnectorKey(userId, profileId) {
+  return `${userId}:${profileId}`;
+}
+
+function serializeTakConnectorContact(contact) {
+  return {
+    uid: contact.uid,
+    cotType: contact.cotType,
+    callsign: contact.callsign,
+    lat: contact.lat,
+    lon: contact.lon,
+    hae: contact.hae,
+    ce: contact.ce,
+    le: contact.le,
+    how: contact.how,
+    time: contact.time,
+    start: contact.start,
+    stale: contact.stale,
+    team: contact.team,
+    role: contact.role,
+    lastSeenAt: contact.lastSeenAt,
+  };
+}
+
+function pruneTakConnectorContacts(connector) {
+  const now = Date.now();
+  connector.contacts.forEach((contact, uid) => {
+    const staleAt = contact.stale ? Date.parse(contact.stale) : NaN;
+    const lastSeenAt = contact.lastSeenAt ? Date.parse(contact.lastSeenAt) : NaN;
+    const expired = Number.isFinite(staleAt)
+      ? staleAt <= now
+      : (Number.isFinite(lastSeenAt) ? (lastSeenAt + TAK_CONTACT_MAX_AGE_MS) <= now : false);
+    if (expired) {
+      connector.contacts.delete(uid);
+    }
+  });
+}
+
+function summarizeTakConnector(connector) {
+  pruneTakConnectorContacts(connector);
+  return {
+    status: connector.status,
+    connected: connector.status === "connected",
+    message: connector.lastError || connector.statusMessage || "",
+    verificationMode: connector.verificationMode,
+    verificationNote: connector.verificationNote || "",
+    connectedAt: connector.connectedAt,
+    lastMessageAt: connector.lastMessageAt,
+    contactCount: connector.contacts.size,
+    contacts: [...connector.contacts.values()].map(serializeTakConnectorContact),
+  };
+}
+
+function closeTakConnectorSocket(connector) {
+  if (connector.socket) {
+    connector.socket.removeAllListeners();
+    connector.socket.destroy();
+    connector.socket = null;
+  }
+}
+
+function stopTakConnector(connector, reason = "stopped") {
+  connector.manualStop = true;
+  connector.status = reason;
+  connector.statusMessage = reason;
+  if (connector.reconnectTimer) {
+    clearTimeout(connector.reconnectTimer);
+    connector.reconnectTimer = null;
+  }
+  closeTakConnectorSocket(connector);
+}
+
+function scheduleTakConnectorReconnect(connector) {
+  if (connector.manualStop || connector.reconnectTimer) {
+    return;
+  }
+  connector.status = "reconnecting";
+  connector.statusMessage = connector.lastError || "Reconnecting to TAK server...";
+  connector.reconnectTimer = setTimeout(() => {
+    connector.reconnectTimer = null;
+    startTakConnector(connector);
+  }, Math.min(30000, 2000 * Math.max(1, connector.reconnectAttempts)));
+}
+
+function connectTakSocket(connector) {
+  const { transport, tlsOptions, host, port } = connector.connection;
+  if (transport === "tcp" || transport === "plain") {
+    return net.connect({ host, port });
+  }
+  return tls.connect(tlsOptions);
+}
+
+function startTakConnector(connector) {
+  if (connector.manualStop || connector.socket) {
+    return connector;
+  }
+  connector.status = "connecting";
+  connector.statusMessage = `Connecting to ${connector.connection.host}:${connector.connection.port}...`;
+  connector.lastError = "";
+
+  let socket;
+  try {
+    socket = connectTakSocket(connector);
+  } catch (error) {
+    connector.lastError = error.message;
+    connector.status = "error";
+    connector.statusMessage = error.message;
+    scheduleTakConnectorReconnect(connector);
+    return connector;
+  }
+
+  connector.socket = socket;
+  socket.setKeepAlive?.(true, 10000);
+  socket.setEncoding?.("utf8");
+
+  const markConnected = () => {
+    connector.status = "connected";
+    connector.statusMessage = `Connected to ${connector.connection.host}:${connector.connection.port}.`;
+    connector.connectedAt = new Date().toISOString();
+    connector.lastError = "";
+    connector.reconnectAttempts = 0;
+  };
+
+  if (socket instanceof tls.TLSSocket) {
+    socket.once("secureConnect", markConnected);
+  } else {
+    socket.once("connect", markConnected);
+  }
+
+  socket.on("data", (chunk) => {
+    connector.lastAccessAt = Date.now();
+    connector.lastMessageAt = new Date().toISOString();
+    connector.buffer += String(chunk || "");
+    const parsed = extractCotEventsFromBuffer(connector.buffer);
+    connector.buffer = parsed.remainder;
+    parsed.events.forEach((xml) => {
+      const event = parseTakCotEvent(xml);
+      if (!event) {
+        return;
+      }
+      connector.contacts.set(event.uid, {
+        ...event,
+        lastSeenAt: new Date().toISOString(),
+      });
+    });
+    pruneTakConnectorContacts(connector);
+  });
+
+  socket.on("error", (error) => {
+    connector.lastError = error.message;
+    connector.status = "error";
+    connector.statusMessage = error.message;
+  });
+
+  socket.on("close", () => {
+    closeTakConnectorSocket(connector);
+    connector.reconnectAttempts += 1;
+    if (!connector.manualStop) {
+      scheduleTakConnectorReconnect(connector);
+    }
+  });
+
+  return connector;
+}
+
+function ensureTakConnector(userId, profileRow) {
+  const key = buildTakConnectorKey(userId, profileRow.id);
+  const version = String(profileRow.updated_at || "");
+  const existing = takConnectorState.get(key);
+  if (existing && existing.profileVersion !== version) {
+    stopTakConnector(existing, "profile-updated");
+    takConnectorState.delete(key);
+  } else if (existing) {
+    existing.lastAccessAt = Date.now();
+    if (!existing.socket && !existing.reconnectTimer && !existing.manualStop) {
+      startTakConnector(existing);
+    }
+    return existing;
+  }
+
+  const connection = buildTakSocketConfig(profileRow);
+  const connector = {
+    key,
+    userId,
+    profileId: profileRow.id,
+    profileVersion: version,
+    connection,
+    verificationMode: connection.verificationMode,
+    verificationNote: connection.verificationNote,
+    socket: null,
+    buffer: "",
+    contacts: new Map(),
+    status: "idle",
+    statusMessage: "",
+    lastError: "",
+    connectedAt: "",
+    lastMessageAt: "",
+    lastAccessAt: Date.now(),
+    reconnectAttempts: 0,
+    reconnectTimer: null,
+    manualStop: false,
+  };
+  takConnectorState.set(key, connector);
+  startTakConnector(connector);
+  return connector;
+}
+
+function stopIdleTakConnectors() {
+  const now = Date.now();
+  takConnectorState.forEach((connector, key) => {
+    if ((now - connector.lastAccessAt) > TAK_CONNECTOR_IDLE_MS) {
+      stopTakConnector(connector, "idle");
+      takConnectorState.delete(key);
+    }
+  });
+}
+
+setInterval(stopIdleTakConnectors, 30000).unref?.();
 
 function buildLoginIdentifierCandidates(rawIdentifier = "") {
   const trimmed = normalizeUsername(rawIdentifier);
@@ -1001,6 +1403,53 @@ app.put("/api/user/tak-project-bindings", authRequired, async (request, response
     response.status(500).json({ error: error.message });
   } finally {
     client.release();
+  }
+});
+
+app.get("/api/projects/:projectId/tak-contacts", authRequired, async (request, response) => {
+  try {
+    const projectResult = await query(
+      "select id from project where id = $1 and owner_user_id = $2",
+      [request.params.projectId, request.user.sub]
+    );
+    if (projectResult.rowCount === 0) {
+      response.status(404).json({ error: "Project not found." });
+      return;
+    }
+
+    const bindingResult = await query(
+      `select t.*, p.project_id
+       from project_tak_binding p
+       join user_tak_profile t
+         on t.id = p.tak_profile_id
+        and t.owner_user_id = p.owner_user_id
+       where p.project_id = $1
+         and p.owner_user_id = $2`,
+      [request.params.projectId, request.user.sub]
+    );
+
+    if (bindingResult.rowCount === 0) {
+      response.json({
+        linked: false,
+        status: "unlinked",
+        message: "This project is not linked to a TAK server.",
+        contacts: [],
+      });
+      return;
+    }
+
+    const profileRow = bindingResult.rows[0];
+    const connector = ensureTakConnector(request.user.sub, profileRow);
+    connector.lastAccessAt = Date.now();
+    const snapshot = summarizeTakConnector(connector);
+
+    response.json({
+      linked: true,
+      profile: summarizeTakProfileRow(profileRow),
+      ...snapshot,
+    });
+  } catch (error) {
+    response.status(500).json({ error: error.message });
   }
 });
 
