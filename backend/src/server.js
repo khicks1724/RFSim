@@ -149,6 +149,17 @@ function isPemLike(value = "", { kind = "generic" } = {}) {
   return /-----BEGIN [A-Z0-9 ]+-----[\s\S]+-----END [A-Z0-9 ]+-----/i.test(text);
 }
 
+function isTakCertUploadLike(value = "") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+  if (isPemLike(text)) {
+    return true;
+  }
+  return /^data:[^;]+;base64,[a-z0-9+/=\s]+$/i.test(text);
+}
+
 function summarizeTakProfileRow(row) {
   if (!row) {
     return null;
@@ -164,13 +175,12 @@ function summarizeTakProfileRow(row) {
     username: row.username,
     hasAuthSecret: Boolean(row.auth_secret),
     hasClientCert: Boolean(row.client_cert_pem),
-    hasClientKey: Boolean(row.client_key_pem),
+    hasClientCertPassword: Boolean(row.client_cert_password_secret),
     hasCaCert: Boolean(row.ca_cert_pem),
+    hasCaCertPassword: Boolean(row.ca_cert_password_secret),
     clientCertFileName: row.client_cert_file_name || "",
-    clientKeyFileName: row.client_key_file_name || "",
     caCertFileName: row.ca_cert_file_name || "",
     clientCertUpdatedAt: row.client_cert_updated_at,
-    clientKeyUpdatedAt: row.client_key_updated_at,
     caCertUpdatedAt: row.ca_cert_updated_at,
     lastTestedAt: row.last_tested_at,
     lastTestStatus: row.last_test_status || "",
@@ -295,14 +305,13 @@ const takProfileItemSchema = z.object({
   username: z.string().max(120).optional().default(""),
   authSecret: z.string().max(4096).optional(),
   deleteAuthSecret: z.boolean().optional().default(false),
-  clientCertPem: z.string().max(200000).optional(),
+  clientCertData: z.string().max(2000000).optional(),
   clientCertFileName: z.string().max(255).optional().default(""),
+  clientCertPassword: z.string().max(4096).optional(),
   deleteClientCert: z.boolean().optional().default(false),
-  clientKeyPem: z.string().max(200000).optional(),
-  clientKeyFileName: z.string().max(255).optional().default(""),
-  deleteClientKey: z.boolean().optional().default(false),
-  caCertPem: z.string().max(200000).optional(),
+  caCertData: z.string().max(2000000).optional(),
   caCertFileName: z.string().max(255).optional().default(""),
+  caCertPassword: z.string().max(4096).optional(),
   deleteCaCert: z.boolean().optional().default(false),
 });
 
@@ -699,49 +708,49 @@ app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
       let clientCertPem = existing?.client_cert_pem ?? "";
       let clientCertFileName = existing?.client_cert_file_name ?? "";
       let clientCertUpdatedAt = existing?.client_cert_updated_at ?? null;
+      let clientCertPasswordSecret = existing?.client_cert_password_secret ?? "";
       if (profile.deleteClientCert) {
         clientCertPem = "";
         clientCertFileName = "";
         clientCertUpdatedAt = null;
-      } else if (typeof profile.clientCertPem === "string") {
-        if (!isPemLike(profile.clientCertPem, { kind: "certificate" })) {
-          throw new Error(`Client certificate for "${profile.label || profile.serverHost}" must be a PEM certificate.`);
+        clientCertPasswordSecret = "";
+      } else if (typeof profile.clientCertData === "string") {
+        if (!isTakCertUploadLike(profile.clientCertData)) {
+          throw new Error(`Client certificate for "${profile.label || profile.serverHost}" must be a certificate bundle or PEM file.`);
         }
-        clientCertPem = encryptSecret(profile.clientCertPem.trim());
+        if (!String(profile.clientCertPassword || "").trim()) {
+          throw new Error(`Client certificate password is required for "${profile.label || profile.serverHost}".`);
+        }
+        clientCertPem = encryptSecret(profile.clientCertData.trim());
         clientCertFileName = profile.clientCertFileName ?? "";
         clientCertUpdatedAt = new Date().toISOString();
-      }
-
-      let clientKeyPem = existing?.client_key_pem ?? "";
-      let clientKeyFileName = existing?.client_key_file_name ?? "";
-      let clientKeyUpdatedAt = existing?.client_key_updated_at ?? null;
-      if (profile.deleteClientKey) {
-        clientKeyPem = "";
-        clientKeyFileName = "";
-        clientKeyUpdatedAt = null;
-      } else if (typeof profile.clientKeyPem === "string") {
-        if (!isPemLike(profile.clientKeyPem, { kind: "privateKey" })) {
-          throw new Error(`Client key for "${profile.label || profile.serverHost}" must be a PEM private key.`);
-        }
-        clientKeyPem = encryptSecret(profile.clientKeyPem.trim());
-        clientKeyFileName = profile.clientKeyFileName ?? "";
-        clientKeyUpdatedAt = new Date().toISOString();
+        clientCertPasswordSecret = encryptSecret(String(profile.clientCertPassword).trim());
+      } else if (typeof profile.clientCertPassword === "string" && profile.clientCertPassword.trim() && clientCertPem) {
+        clientCertPasswordSecret = encryptSecret(profile.clientCertPassword.trim());
       }
 
       let caCertPem = existing?.ca_cert_pem ?? "";
       let caCertFileName = existing?.ca_cert_file_name ?? "";
       let caCertUpdatedAt = existing?.ca_cert_updated_at ?? null;
+      let caCertPasswordSecret = existing?.ca_cert_password_secret ?? "";
       if (profile.deleteCaCert) {
         caCertPem = "";
         caCertFileName = "";
         caCertUpdatedAt = null;
-      } else if (typeof profile.caCertPem === "string") {
-        if (!isPemLike(profile.caCertPem, { kind: "certificate" })) {
-          throw new Error(`CA certificate for "${profile.label || profile.serverHost}" must be a PEM certificate.`);
+        caCertPasswordSecret = "";
+      } else if (typeof profile.caCertData === "string") {
+        if (!isTakCertUploadLike(profile.caCertData)) {
+          throw new Error(`CA certificate for "${profile.label || profile.serverHost}" must be a certificate bundle or PEM file.`);
         }
-        caCertPem = encryptSecret(profile.caCertPem.trim());
+        if (!String(profile.caCertPassword || "").trim()) {
+          throw new Error(`Certificate Authority password is required for "${profile.label || profile.serverHost}".`);
+        }
+        caCertPem = encryptSecret(profile.caCertData.trim());
         caCertFileName = profile.caCertFileName ?? "";
         caCertUpdatedAt = new Date().toISOString();
+        caCertPasswordSecret = encryptSecret(String(profile.caCertPassword).trim());
+      } else if (typeof profile.caCertPassword === "string" && profile.caCertPassword.trim() && caCertPem) {
+        caCertPasswordSecret = encryptSecret(profile.caCertPassword.trim());
       }
 
       await client.query(
@@ -750,6 +759,7 @@ app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
            client_cert_pem, client_key_pem, ca_cert_pem,
            client_cert_file_name, client_key_file_name, ca_cert_file_name,
            client_cert_updated_at, client_key_updated_at, ca_cert_updated_at,
+           client_cert_password_secret, ca_cert_password_secret,
            position, updated_at
          )
          values (
@@ -757,7 +767,8 @@ app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
            $11, $12, $13,
            $14, $15, $16,
            $17, $18, $19,
-           $20, now()
+           $20, $21,
+           $22, now()
          )
          on conflict (id) do update set
            label = excluded.label,
@@ -777,6 +788,8 @@ app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
            client_cert_updated_at = excluded.client_cert_updated_at,
            client_key_updated_at = excluded.client_key_updated_at,
            ca_cert_updated_at = excluded.ca_cert_updated_at,
+           client_cert_password_secret = excluded.client_cert_password_secret,
+           ca_cert_password_secret = excluded.ca_cert_password_secret,
            position = excluded.position,
            updated_at = now()
          where user_tak_profile.owner_user_id = excluded.owner_user_id`,
@@ -792,14 +805,16 @@ app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
           profile.username ?? "",
           authSecret,
           clientCertPem,
-          clientKeyPem,
+          "",
           caCertPem,
           clientCertFileName,
-          clientKeyFileName,
+          "",
           caCertFileName,
           clientCertUpdatedAt,
-          clientKeyUpdatedAt,
+          null,
           caCertUpdatedAt,
+          clientCertPasswordSecret,
+          caCertPasswordSecret,
           index,
         ]
       );
@@ -867,13 +882,18 @@ app.post("/api/user/tak-profiles/:profileId/test", authRequired, async (request,
     }
     const profile = result.rows[0];
     const hasCore = Boolean(profile.server_host && profile.server_port && profile.transport);
-    const hasMutualTls = Boolean(profile.client_cert_pem && profile.client_key_pem);
-    const status = hasCore ? (hasMutualTls ? "ready" : "incomplete") : "error";
+    const hasTakCerts = Boolean(
+      profile.client_cert_pem
+      && profile.ca_cert_pem
+      && profile.client_cert_password_secret
+      && profile.ca_cert_password_secret
+    );
+    const status = hasCore ? (hasTakCerts ? "ready" : "incomplete") : "error";
     const checkedAt = new Date().toISOString();
     const message = hasCore
-      ? (hasMutualTls
-        ? "Profile is bridge-ready. Live TAK transport can use this configuration."
-        : "Server settings are saved, but the mutual TLS certificate and key are not both present yet.")
+      ? (hasTakCerts
+        ? "Profile is bridge-ready. Live TAK transport can use this CA and client certificate bundle configuration."
+        : "Server settings are saved, but the CA certificate, client certificate, or their passwords are still missing.")
       : "Profile is missing required TAK server settings.";
 
     await query(
@@ -892,8 +912,9 @@ app.post("/api/user/tak-profiles/:profileId/test", authRequired, async (request,
         hasTransport: Boolean(profile.transport),
         hasAuthSecret: Boolean(profile.auth_secret),
         hasClientCert: Boolean(profile.client_cert_pem),
-        hasClientKey: Boolean(profile.client_key_pem),
+        hasClientCertPassword: Boolean(profile.client_cert_password_secret),
         hasCaCert: Boolean(profile.ca_cert_pem),
+        hasCaCertPassword: Boolean(profile.ca_cert_password_secret),
       },
     });
   } catch (error) {

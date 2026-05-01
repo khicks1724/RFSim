@@ -1257,13 +1257,14 @@ const dom = {
   takUsernameInput: document.querySelector("#takUsernameInput"),
   takAuthSecretInput: document.querySelector("#takAuthSecretInput"),
   takClientCertInput: document.querySelector("#takClientCertInput"),
-  takClientKeyInput: document.querySelector("#takClientKeyInput"),
   takCaCertInput: document.querySelector("#takCaCertInput"),
   takClientCertSummary: document.querySelector("#takClientCertSummary"),
-  takClientKeySummary: document.querySelector("#takClientKeySummary"),
   takCaCertSummary: document.querySelector("#takCaCertSummary"),
+  takClientCertPasswordRow: document.querySelector("#takClientCertPasswordRow"),
+  takClientCertPasswordInput: document.querySelector("#takClientCertPasswordInput"),
+  takCaCertPasswordRow: document.querySelector("#takCaCertPasswordRow"),
+  takCaCertPasswordInput: document.querySelector("#takCaCertPasswordInput"),
   takDeleteClientCertBtn: document.querySelector("#takDeleteClientCertBtn"),
-  takDeleteClientKeyBtn: document.querySelector("#takDeleteClientKeyBtn"),
   takDeleteCaCertBtn: document.querySelector("#takDeleteCaCertBtn"),
   takProjectChecklist: document.querySelector("#takProjectChecklist"),
   takProjectBindingHint: document.querySelector("#takProjectBindingHint"),
@@ -1271,6 +1272,13 @@ const dom = {
   testTakProfileBtn: document.querySelector("#testTakProfileBtn"),
   clearTakProfileBtn: document.querySelector("#clearTakProfileBtn"),
   takSettingsSummary: document.querySelector("#takSettingsSummary"),
+  takCertPasswordModal: document.querySelector("#takCertPasswordModal"),
+  takCertPasswordTitle: document.querySelector("#takCertPasswordTitle"),
+  takCertPasswordFileName: document.querySelector("#takCertPasswordFileName"),
+  takCertPasswordInputModal: document.querySelector("#takCertPasswordInputModal"),
+  takCertPasswordOkBtn: document.querySelector("#takCertPasswordOkBtn"),
+  takCertPasswordCancelBtn: document.querySelector("#takCertPasswordCancelBtn"),
+  takCertPasswordCloseBtn: document.querySelector("#takCertPasswordCloseBtn"),
   openAiPanelBtn: null, // removed from topbar — kept as null so refs don't throw
   aiChatToggleBtn: document.querySelector("#aiChatToggleBtn"),
   aiChatToggleValue: document.querySelector("#aiChatToggleValue"),
@@ -2017,6 +2025,8 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
+let _takCertPasswordPrompt = null;
+
 function createEmptyTakProfileDraft() {
   return {
     id: "",
@@ -2029,26 +2039,24 @@ function createEmptyTakProfileDraft() {
     username: "",
     hasAuthSecret: false,
     hasClientCert: false,
-    hasClientKey: false,
+    hasClientCertPassword: false,
     hasCaCert: false,
+    hasCaCertPassword: false,
     clientCertFileName: "",
-    clientKeyFileName: "",
     caCertFileName: "",
     clientCertUpdatedAt: "",
-    clientKeyUpdatedAt: "",
     caCertUpdatedAt: "",
     lastTestedAt: "",
     lastTestStatus: "",
     _authSecretDraft: "",
     _deleteAuthSecret: false,
-    _clientCertPemDraft: "",
+    _clientCertDataDraft: "",
     _clientCertFileNameDraft: "",
+    _clientCertPasswordDraft: "",
     _deleteClientCert: false,
-    _clientKeyPemDraft: "",
-    _clientKeyFileNameDraft: "",
-    _deleteClientKey: false,
-    _caCertPemDraft: "",
+    _caCertDataDraft: "",
     _caCertFileNameDraft: "",
+    _caCertPasswordDraft: "",
     _deleteCaCert: false,
   };
 }
@@ -2070,13 +2078,12 @@ function sanitizeTakProfileSummary(profile) {
     username: typeof profile.username === "string" ? profile.username : "",
     hasAuthSecret: Boolean(profile.hasAuthSecret),
     hasClientCert: Boolean(profile.hasClientCert),
-    hasClientKey: Boolean(profile.hasClientKey),
+    hasClientCertPassword: Boolean(profile.hasClientCertPassword),
     hasCaCert: Boolean(profile.hasCaCert),
+    hasCaCertPassword: Boolean(profile.hasCaCertPassword),
     clientCertFileName: typeof profile.clientCertFileName === "string" ? profile.clientCertFileName : "",
-    clientKeyFileName: typeof profile.clientKeyFileName === "string" ? profile.clientKeyFileName : "",
     caCertFileName: typeof profile.caCertFileName === "string" ? profile.caCertFileName : "",
     clientCertUpdatedAt: typeof profile.clientCertUpdatedAt === "string" ? profile.clientCertUpdatedAt : "",
-    clientKeyUpdatedAt: typeof profile.clientKeyUpdatedAt === "string" ? profile.clientKeyUpdatedAt : "",
     caCertUpdatedAt: typeof profile.caCertUpdatedAt === "string" ? profile.caCertUpdatedAt : "",
     lastTestedAt: typeof profile.lastTestedAt === "string" ? profile.lastTestedAt : "",
     lastTestStatus: typeof profile.lastTestStatus === "string" ? profile.lastTestStatus : "",
@@ -2128,7 +2135,7 @@ function formatTakCertSummary({ hasValue, fileName, updatedAt, pendingName, dele
     return "This file will be deleted when you save the TAK server.";
   }
   if (hasValue) {
-    const parts = [fileName || "Stored PEM"];
+    const parts = [fileName || "Stored certificate"];
     const ts = formatTakTimestamp(updatedAt);
     if (ts) parts.push(`updated ${ts}`);
     return parts.join(" • ");
@@ -2235,23 +2242,19 @@ function syncTakUi() {
       emptyText: "No client certificate stored.",
     });
   }
-  dom.takDeleteClientCertBtn?.classList.toggle(
+  dom.takClientCertPasswordRow?.classList.toggle(
     "hidden",
     !(draft.hasClientCert || draft._clientCertFileNameDraft) || Boolean(draft._deleteClientCert),
   );
-  if (dom.takClientKeySummary) {
-    dom.takClientKeySummary.textContent = formatTakCertSummary({
-      hasValue: draft.hasClientKey,
-      fileName: draft.clientKeyFileName,
-      updatedAt: draft.clientKeyUpdatedAt,
-      pendingName: draft._clientKeyFileNameDraft,
-      deleting: draft._deleteClientKey,
-      emptyText: "No client key stored.",
-    });
+  if (dom.takClientCertPasswordInput) {
+    dom.takClientCertPasswordInput.value = draft._clientCertPasswordDraft ?? "";
+    dom.takClientCertPasswordInput.placeholder = draft.hasClientCertPassword
+      ? "Leave blank to keep stored certificate password"
+      : "Enter certificate password";
   }
-  dom.takDeleteClientKeyBtn?.classList.toggle(
+  dom.takDeleteClientCertBtn?.classList.toggle(
     "hidden",
-    !(draft.hasClientKey || draft._clientKeyFileNameDraft) || Boolean(draft._deleteClientKey),
+    !(draft.hasClientCert || draft._clientCertFileNameDraft) || Boolean(draft._deleteClientCert),
   );
   if (dom.takCaCertSummary) {
     dom.takCaCertSummary.textContent = formatTakCertSummary({
@@ -2263,12 +2266,21 @@ function syncTakUi() {
       emptyText: "No CA certificate stored.",
     });
   }
+  dom.takCaCertPasswordRow?.classList.toggle(
+    "hidden",
+    !(draft.hasCaCert || draft._caCertFileNameDraft) || Boolean(draft._deleteCaCert),
+  );
+  if (dom.takCaCertPasswordInput) {
+    dom.takCaCertPasswordInput.value = draft._caCertPasswordDraft ?? "";
+    dom.takCaCertPasswordInput.placeholder = draft.hasCaCertPassword
+      ? "Leave blank to keep stored certificate password"
+      : "Enter certificate password";
+  }
   dom.takDeleteCaCertBtn?.classList.toggle(
     "hidden",
     !(draft.hasCaCert || draft._caCertFileNameDraft) || Boolean(draft._deleteCaCert),
   );
   if (dom.takClientCertInput) dom.takClientCertInput.value = "";
-  if (dom.takClientKeyInput) dom.takClientKeyInput.value = "";
   if (dom.takCaCertInput) dom.takCaCertInput.value = "";
 
   const hasActiveSavedProfile = Boolean(getTakProfile());
@@ -2357,21 +2369,22 @@ function buildTakProfilesPayload() {
       username: profile.username || "",
       deleteAuthSecret: Boolean(profile._deleteAuthSecret),
       deleteClientCert: Boolean(profile._deleteClientCert),
-      deleteClientKey: Boolean(profile._deleteClientKey),
       deleteCaCert: Boolean(profile._deleteCaCert),
     };
     if (profile._authSecretDraft) payload.authSecret = profile._authSecretDraft;
-    if (profile._clientCertPemDraft) {
-      payload.clientCertPem = profile._clientCertPemDraft;
+    if (profile._clientCertDataDraft) {
+      payload.clientCertData = profile._clientCertDataDraft;
       payload.clientCertFileName = profile._clientCertFileNameDraft || "";
+      payload.clientCertPassword = profile._clientCertPasswordDraft || "";
+    } else if (profile._clientCertPasswordDraft && profile.hasClientCert) {
+      payload.clientCertPassword = profile._clientCertPasswordDraft || "";
     }
-    if (profile._clientKeyPemDraft) {
-      payload.clientKeyPem = profile._clientKeyPemDraft;
-      payload.clientKeyFileName = profile._clientKeyFileNameDraft || "";
-    }
-    if (profile._caCertPemDraft) {
-      payload.caCertPem = profile._caCertPemDraft;
+    if (profile._caCertDataDraft) {
+      payload.caCertData = profile._caCertDataDraft;
       payload.caCertFileName = profile._caCertFileNameDraft || "";
+      payload.caCertPassword = profile._caCertPasswordDraft || "";
+    } else if (profile._caCertPasswordDraft && profile.hasCaCert) {
+      payload.caCertPassword = profile._caCertPasswordDraft || "";
     }
     return payload;
   });
@@ -2407,46 +2420,92 @@ async function readTextFile(file) {
   });
 }
 
-async function onTakPemSelected(slot, inputEl) {
+async function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function closeTakCertPasswordPrompt({ resolvedPassword = null } = {}) {
+  if (!_takCertPasswordPrompt) {
+    return;
+  }
+  const pending = _takCertPasswordPrompt;
+  _takCertPasswordPrompt = null;
+  dom.takCertPasswordModal?.classList.add("hidden");
+  if (dom.takCertPasswordInputModal) {
+    dom.takCertPasswordInputModal.value = "";
+  }
+  pending.resolve(resolvedPassword);
+}
+
+function promptTakCertificatePassword(title, fileName) {
+  if (!dom.takCertPasswordModal || !dom.takCertPasswordInputModal) {
+    return Promise.reject(new Error("Certificate password modal is unavailable."));
+  }
+  if (_takCertPasswordPrompt) {
+    _takCertPasswordPrompt.resolve(null);
+    _takCertPasswordPrompt = null;
+  }
+  dom.takCertPasswordTitle.textContent = title;
+  dom.takCertPasswordFileName.value = fileName;
+  dom.takCertPasswordInputModal.value = "";
+  dom.takCertPasswordModal.classList.remove("hidden");
+  window.setTimeout(() => dom.takCertPasswordInputModal?.focus(), 0);
+  return new Promise((resolve) => {
+    _takCertPasswordPrompt = { resolve };
+  });
+}
+
+async function onTakCertificateSelected(slot, inputEl) {
   const file = inputEl?.files?.[0];
   if (!file) {
     return;
   }
-  const text = await readTextFile(file);
-  if (!/-----BEGIN /i.test(text) || !/-----END /i.test(text)) {
-    throw new Error(`${file.name} does not look like a PEM file.`);
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const password = await promptTakCertificatePassword(
+      slot === "caCert" ? "Install Certificate Authority" : "Install Client Certificate",
+      file.name,
+    );
+    if (!password) {
+      throw new Error(`A password is required for ${file.name}.`);
+    }
+    const draft = state.takSettings.draft ?? createEmptyTakProfileDraft();
+    if (slot === "clientCert") {
+      draft._clientCertDataDraft = dataUrl.trim();
+      draft._clientCertFileNameDraft = file.name;
+      draft._clientCertPasswordDraft = password;
+      draft._deleteClientCert = false;
+    } else if (slot === "caCert") {
+      draft._caCertDataDraft = dataUrl.trim();
+      draft._caCertFileNameDraft = file.name;
+      draft._caCertPasswordDraft = password;
+      draft._deleteCaCert = false;
+    }
+    state.takSettings.draft = draft;
+    syncTakUi();
+  } finally {
+    if (inputEl) {
+      inputEl.value = "";
+    }
   }
-  const draft = state.takSettings.draft ?? createEmptyTakProfileDraft();
-  if (slot === "clientCert") {
-    draft._clientCertPemDraft = text.trim();
-    draft._clientCertFileNameDraft = file.name;
-    draft._deleteClientCert = false;
-  } else if (slot === "clientKey") {
-    draft._clientKeyPemDraft = text.trim();
-    draft._clientKeyFileNameDraft = file.name;
-    draft._deleteClientKey = false;
-  } else if (slot === "caCert") {
-    draft._caCertPemDraft = text.trim();
-    draft._caCertFileNameDraft = file.name;
-    draft._deleteCaCert = false;
-  }
-  state.takSettings.draft = draft;
-  syncTakUi();
 }
 
 function deleteTakDraftCertificate(slot) {
   const draft = state.takSettings.draft ?? createEmptyTakProfileDraft();
   if (slot === "clientCert") {
-    draft._clientCertPemDraft = "";
+    draft._clientCertDataDraft = "";
     draft._clientCertFileNameDraft = "";
+    draft._clientCertPasswordDraft = "";
     draft._deleteClientCert = draft.hasClientCert;
-  } else if (slot === "clientKey") {
-    draft._clientKeyPemDraft = "";
-    draft._clientKeyFileNameDraft = "";
-    draft._deleteClientKey = draft.hasClientKey;
   } else if (slot === "caCert") {
-    draft._caCertPemDraft = "";
+    draft._caCertDataDraft = "";
     draft._caCertFileNameDraft = "";
+    draft._caCertPasswordDraft = "";
     draft._deleteCaCert = draft.hasCaCert;
   }
   state.takSettings.draft = draft;
@@ -4492,15 +4551,36 @@ function wireEvents() {
   dom.takUseAuthenticationToggle?.addEventListener("change", () => { onTakDraftFieldChanged(); syncTakUi(); });
   dom.takUsernameInput?.addEventListener("change", onTakDraftFieldChanged);
   dom.takAuthSecretInput?.addEventListener("change", onTakDraftFieldChanged);
-  dom.takClientCertInput?.addEventListener("change", () => onTakPemSelected("clientCert", dom.takClientCertInput).catch((error) => setStatus(error.message, true)));
-  dom.takClientKeyInput?.addEventListener("change", () => onTakPemSelected("clientKey", dom.takClientKeyInput).catch((error) => setStatus(error.message, true)));
-  dom.takCaCertInput?.addEventListener("change", () => onTakPemSelected("caCert", dom.takCaCertInput).catch((error) => setStatus(error.message, true)));
+  dom.takClientCertPasswordInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takCaCertPasswordInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takClientCertInput?.addEventListener("change", () => onTakCertificateSelected("clientCert", dom.takClientCertInput).catch((error) => setStatus(error.message, true)));
+  dom.takCaCertInput?.addEventListener("change", () => onTakCertificateSelected("caCert", dom.takCaCertInput).catch((error) => setStatus(error.message, true)));
   dom.takDeleteClientCertBtn?.addEventListener("click", () => deleteTakDraftCertificate("clientCert"));
-  dom.takDeleteClientKeyBtn?.addEventListener("click", () => deleteTakDraftCertificate("clientKey"));
   dom.takDeleteCaCertBtn?.addEventListener("click", () => deleteTakDraftCertificate("caCert"));
   dom.saveTakProfileBtn?.addEventListener("click", () => saveTakProfile().catch((error) => setStatus(error.message, true)));
   dom.testTakProfileBtn?.addEventListener("click", () => testTakProfileConnection().catch((error) => setStatus(error.message, true)));
   dom.clearTakProfileBtn?.addEventListener("click", clearTakProfile);
+  dom.takCertPasswordOkBtn?.addEventListener("click", () => closeTakCertPasswordPrompt({
+    resolvedPassword: (dom.takCertPasswordInputModal?.value ?? "").trim(),
+  }));
+  dom.takCertPasswordCancelBtn?.addEventListener("click", () => closeTakCertPasswordPrompt({ resolvedPassword: null }));
+  dom.takCertPasswordCloseBtn?.addEventListener("click", () => closeTakCertPasswordPrompt({ resolvedPassword: null }));
+  dom.takCertPasswordModal?.addEventListener("click", (event) => {
+    if (event.target === dom.takCertPasswordModal) {
+      closeTakCertPasswordPrompt({ resolvedPassword: null });
+    }
+  });
+  dom.takCertPasswordInputModal?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      closeTakCertPasswordPrompt({
+        resolvedPassword: (dom.takCertPasswordInputModal?.value ?? "").trim(),
+      });
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeTakCertPasswordPrompt({ resolvedPassword: null });
+    }
+  });
   dom.collapseAiPanelBtn.addEventListener("click", toggleAiPanelCollapse);
   dom.aiChatForm.addEventListener("submit", onAiChatSubmit);
   dom.aiChatModelSelect.addEventListener("change", onAiModelChanged);
@@ -6317,6 +6397,8 @@ function onTakDraftFieldChanged() {
   draft.useAuthentication = Boolean(dom.takUseAuthenticationToggle?.checked);
   draft.username = dom.takUsernameInput?.value.trim() ?? "";
   draft._authSecretDraft = draft.useAuthentication ? (dom.takAuthSecretInput?.value ?? "") : "";
+  draft._clientCertPasswordDraft = dom.takClientCertPasswordInput?.value ?? draft._clientCertPasswordDraft ?? "";
+  draft._caCertPasswordDraft = dom.takCaCertPasswordInput?.value ?? draft._caCertPasswordDraft ?? "";
   if (!draft.useAuthentication) {
     draft.username = "";
     draft._deleteAuthSecret = true;
@@ -6344,6 +6426,14 @@ async function saveTakProfile() {
     setStatus("Enter a TAK server host before saving.", true);
     return;
   }
+  if (draft._clientCertFileNameDraft && !String(draft._clientCertPasswordDraft || "").trim()) {
+    setStatus("Enter the client certificate password before saving.", true);
+    return;
+  }
+  if (draft._caCertFileNameDraft && !String(draft._caCertPasswordDraft || "").trim()) {
+    setStatus("Enter the Certificate Authority password before saving.", true);
+    return;
+  }
   const profileId = draft.id || generateId();
   const nextProfile = sanitizeTakProfileSummary({
     ...draft,
@@ -6351,14 +6441,13 @@ async function saveTakProfile() {
   });
   nextProfile._authSecretDraft = draft._authSecretDraft;
   nextProfile._deleteAuthSecret = draft._deleteAuthSecret;
-  nextProfile._clientCertPemDraft = draft._clientCertPemDraft;
+  nextProfile._clientCertDataDraft = draft._clientCertDataDraft;
   nextProfile._clientCertFileNameDraft = draft._clientCertFileNameDraft;
+  nextProfile._clientCertPasswordDraft = draft._clientCertPasswordDraft;
   nextProfile._deleteClientCert = draft._deleteClientCert;
-  nextProfile._clientKeyPemDraft = draft._clientKeyPemDraft;
-  nextProfile._clientKeyFileNameDraft = draft._clientKeyFileNameDraft;
-  nextProfile._deleteClientKey = draft._deleteClientKey;
-  nextProfile._caCertPemDraft = draft._caCertPemDraft;
+  nextProfile._caCertDataDraft = draft._caCertDataDraft;
   nextProfile._caCertFileNameDraft = draft._caCertFileNameDraft;
+  nextProfile._caCertPasswordDraft = draft._caCertPasswordDraft;
   nextProfile._deleteCaCert = draft._deleteCaCert;
 
   const existingIndex = state.takSettings.profiles.findIndex((profile) => profile.id === profileId);

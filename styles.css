@@ -4591,7 +4591,7 @@ button:focus {
 
 .tak-cert-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -4617,6 +4617,20 @@ button:focus {
   min-height: 36px;
   width: fit-content;
   cursor: pointer;
+}
+
+.tak-cert-password-row {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.tak-cert-password-row span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .tak-cert-summary,
@@ -4711,6 +4725,15 @@ body.settings-modal-open {
   .tak-cert-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.tak-cert-password-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.tak-cert-password-body {
+  display: block;
+  padding: 18px;
 }
 
 .emitter-modal-title-group {

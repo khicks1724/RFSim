@@ -2069,24 +2069,25 @@
               <div class="settings-span-2 tak-cert-grid">
                 <div class="tak-cert-card">
                   <strong>Install Certificate Authority</strong>
-                  <input id="takCaCertInput" class="hidden" type="file" accept=".pem,.crt,.cer,.txt">
+                  <input id="takCaCertInput" class="hidden" type="file" accept=".p12,.pfx,.pem,.crt,.cer,.txt">
                   <label for="takCaCertInput" class="ghost-button small tak-file-upload">Choose File</label>
                   <div id="takCaCertSummary" class="tak-cert-summary">No CA certificate stored.</div>
+                  <label id="takCaCertPasswordRow" class="tak-cert-password-row hidden">
+                    <span>Certificate Password</span>
+                    <input id="takCaCertPasswordInput" type="password" placeholder="Leave blank to keep stored certificate password">
+                  </label>
                   <button id="takDeleteCaCertBtn" class="ghost-button small" type="button">Delete CA</button>
                 </div>
                 <div class="tak-cert-card">
                   <strong>Install Client Certificate</strong>
-                  <input id="takClientCertInput" class="hidden" type="file" accept=".pem,.crt,.cer,.txt">
+                  <input id="takClientCertInput" class="hidden" type="file" accept=".p12,.pfx,.pem,.crt,.cer,.txt">
                   <label for="takClientCertInput" class="ghost-button small tak-file-upload">Choose File</label>
                   <div id="takClientCertSummary" class="tak-cert-summary">No client certificate stored.</div>
+                  <label id="takClientCertPasswordRow" class="tak-cert-password-row hidden">
+                    <span>Certificate Password</span>
+                    <input id="takClientCertPasswordInput" type="password" placeholder="Leave blank to keep stored certificate password">
+                  </label>
                   <button id="takDeleteClientCertBtn" class="ghost-button small" type="button">Delete Certificate</button>
-                </div>
-                <div class="tak-cert-card">
-                  <strong>Install Client Private Key (PEM)</strong>
-                  <input id="takClientKeyInput" class="hidden" type="file" accept=".pem,.key,.txt">
-                  <label for="takClientKeyInput" class="ghost-button small tak-file-upload">Choose File</label>
-                  <div id="takClientKeySummary" class="tak-cert-summary">No client key stored.</div>
-                  <button id="takDeleteClientKeyBtn" class="ghost-button small" type="button">Delete Key</button>
                 </div>
               </div>
 
@@ -2121,6 +2122,35 @@
             <div class="weather-summary ai-summary" id="takSettingsSummary">Save a TAK server profile to assign it to server-backed projects.</div>
           </div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="takCertPasswordModal" class="emitter-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="takCertPasswordTitle">
+    <div class="emitter-modal tak-cert-password-modal">
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <h2 id="takCertPasswordTitle">Install Certificate</h2>
+        </div>
+        <button id="takCertPasswordCloseBtn" class="ghost-button small icon-button" type="button" aria-label="Close">&#10005;</button>
+      </div>
+      <div class="emitter-modal-body tak-cert-password-body">
+        <div class="settings-modal-grid">
+          <label class="settings-span-2">
+            Certificate location
+            <input id="takCertPasswordFileName" type="text" readonly>
+          </label>
+          <label class="settings-span-2">
+            Password
+            <input id="takCertPasswordInputModal" type="password" placeholder="Enter certificate password">
+          </label>
+        </div>
+      </div>
+      <div class="emitter-modal-footer">
+        <div class="emitter-footer-actions">
+          <button id="takCertPasswordCancelBtn" class="ghost-button" type="button">Cancel</button>
+          <button id="takCertPasswordOkBtn" class="primary-button" type="button">OK</button>
+        </div>
       </div>
     </div>
   </div>
