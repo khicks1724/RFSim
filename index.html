@@ -869,6 +869,10 @@
 
           <!-- Step 3: Type selector -->
           <div id="tpalStep3" class="tpal-step-pane hidden">
+            <label class="tpal-name-field">
+              <span>Track Name</span>
+              <input id="tacticalPaletteName" type="text" maxlength="80" placeholder="Enter track name">
+            </label>
             <div class="tpal-type-layout">
               <div class="tpal-category-list" id="tpalCategoryList"></div>
               <div class="tpal-type-grid" id="tpalTypeGrid"></div>
@@ -1248,6 +1252,7 @@
     <button type="button" class="ghost-button small" data-map-content-action="edit">Edit</button>
     <button type="button" class="ghost-button small" data-map-content-action="simulate">Simulate</button>
     <button type="button" class="ghost-button small" data-map-content-action="relocate">Relocate</button>
+    <button type="button" class="ghost-button small hidden" data-map-content-action="toggle-tak-stream">Toggle TAK Stream</button>
     <button type="button" class="ghost-button small" data-map-content-action="rename">Rename</button>
     <button type="button" class="ghost-button small" data-map-content-action="delete">Delete</button>
   </div>
@@ -2276,6 +2281,10 @@
               <label class="settings-check-row">
                 <input id="takUseAuthenticationToggle" type="checkbox">
                 <span>Use Authentication</span>
+              </label>
+              <label class="settings-check-row settings-span-2">
+                <input id="takDefaultStreamToggle" type="checkbox" checked>
+                <span>Stream new RF Sim items to TAK by default</span>
               </label>
               <label id="takUsernameRow" class="settings-span-2 hidden">
                 Username

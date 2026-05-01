@@ -129,7 +129,7 @@ const BUILDING_MATERIAL_MODELS = {
 // Bump this integer whenever the serialized state shape changes in a way that
 // requires a migration. applySavedMapState() runs migrateStatePayload() first
 // so old saves are always upgraded before being applied.
-const STATE_SCHEMA_VERSION = 3;
+const STATE_SCHEMA_VERSION = 4;
 
 function nowIso() {
   return new Date().toISOString();
@@ -202,10 +202,31 @@ function migrateStatePayload(payload) {
     };
   }
 
+  if (from < 4) {
+    payload = {
+      ...payload,
+      schemaVersion: 4,
+      settings: {
+        ...(payload.settings && typeof payload.settings === "object" ? payload.settings : {}),
+        defaultTakStreamEnabled: typeof payload?.settings?.defaultTakStreamEnabled === "boolean"
+          ? payload.settings.defaultTakStreamEnabled
+          : true,
+      },
+      tacticalObjects: Array.isArray(payload.tacticalObjects)
+        ? payload.tacticalObjects.map((object) => ({
+            ...object,
+            streamToTak: typeof object?.streamToTak === "boolean"
+              ? object.streamToTak
+              : !Boolean(object?.readOnly),
+          }))
+        : payload.tacticalObjects,
+    };
+  }
+
   return payload;
 }
 
-function normalizeTakMetadata(value) {
+function normalizeTakMetadata(value, { defaultStreamEnabled = null } = {}) {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -216,10 +237,12 @@ function normalizeTakMetadata(value) {
   const staleAt = typeof value.staleAt === "string" && value.staleAt.trim() ? value.staleAt.trim() : "";
   const how = typeof value.how === "string" && value.how.trim() ? value.how.trim() : "";
   const detail = value.detail && typeof value.detail === "object" ? value.detail : null;
-  if (!uid && !profileId && !cotType && !source && !staleAt && !how && !detail) {
+  const hasExplicitStreamEnabled = typeof value.streamEnabled === "boolean";
+  const streamEnabled = hasExplicitStreamEnabled ? value.streamEnabled : defaultStreamEnabled;
+  if (!uid && !profileId && !cotType && !source && !staleAt && !how && !detail && typeof streamEnabled !== "boolean") {
     return null;
   }
-  return {
+  const normalized = {
     uid: uid || generateId(),
     profileId,
     cotType,
@@ -228,6 +251,10 @@ function normalizeTakMetadata(value) {
     how,
     detail,
   };
+  if (typeof streamEnabled === "boolean") {
+    normalized.streamEnabled = streamEnabled;
+  }
+  return normalized;
 }
 
 function inferImportedShapeKind(geometryType, properties = {}, hint = "") {
@@ -366,6 +393,10 @@ function deriveTacticalDomainFromCotType(cotType = "") {
   return "ground";
 }
 
+function getDefaultTakStreamingEnabled() {
+  return state?.settings?.defaultTakStreamEnabled !== false;
+}
+
 function deriveTacticalAffiliationFromCotType(cotType = "") {
   const normalized = String(cotType || "").toLowerCase();
   if (normalized.startsWith("a-f")) return "friendly";
@@ -483,6 +514,9 @@ function normalizeTacticalObject(raw = {}) {
     linkedPlanUnitId: Number.isFinite(Number(raw.linkedPlanUnitId)) ? Number(raw.linkedPlanUnitId) : null,
     linkedAssetIds: Array.isArray(raw.linkedAssetIds) ? raw.linkedAssetIds.map(String) : [],
     showLabel: raw.showLabel !== false,
+    streamToTak: typeof raw.streamToTak === "boolean"
+      ? raw.streamToTak
+      : (!Boolean(raw.readOnly) && getDefaultTakStreamingEnabled()),
     style: raw.style && typeof raw.style === "object" ? { ...raw.style } : null,
     lastModified: raw.lastModified || nowIso(),
   };
@@ -514,6 +548,7 @@ function serializeTacticalObject(object) {
     linkedPlanUnitId: normalized.linkedPlanUnitId,
     linkedAssetIds: normalized.linkedAssetIds,
     showLabel: normalized.showLabel,
+    streamToTak: normalized.streamToTak,
     style: normalized.style,
     lastModified: normalized.lastModified,
   };
@@ -1638,6 +1673,7 @@ const dom = {
   testTakProfileBtn: document.querySelector("#testTakProfileBtn"),
   clearTakProfileBtn: document.querySelector("#clearTakProfileBtn"),
   takSettingsSummary: document.querySelector("#takSettingsSummary"),
+  takDefaultStreamToggle: document.querySelector("#takDefaultStreamToggle"),
   takCertPasswordModal: document.querySelector("#takCertPasswordModal"),
   takCertPasswordTitle: document.querySelector("#takCertPasswordTitle"),
   takCertPasswordFileName: document.querySelector("#takCertPasswordFileName"),
@@ -1760,6 +1796,7 @@ const dom = {
   tpalBackBtn: document.querySelector("#tpalBackBtn"),
   tpalCategoryList: document.querySelector("#tpalCategoryList"),
   tpalTypeGrid: document.querySelector("#tpalTypeGrid"),
+  tacticalPaletteName: document.querySelector("#tacticalPaletteName"),
   tacticalEditorModal: document.querySelector("#tacticalEditorModal"),
   tacticalEditorCloseBtn: document.querySelector("#tacticalEditorCloseBtn"),
   tacticalEditorCancelBtn: document.querySelector("#tacticalEditorCancelBtn"),
@@ -2012,6 +2049,7 @@ const state = {
     labelDefaultPoint: true,
     labelDefaultPolygon: false,
     labelDefaultLine: false,
+    defaultTakStreamEnabled: true,
   },
   weather: {
     temperatureC: 20,
@@ -3068,18 +3106,301 @@ function buildTakTacticalCotEvent(object) {
   return `<event version="2.0" uid="${escapeHtml(tactical.uid)}" type="${escapeHtml(tactical.cotType)}" how="h-g-i-g-o" time="${now.toISOString()}" start="${now.toISOString()}" stale="${stale.toISOString()}"><point lat="${Number(lat).toFixed(6)}" lon="${Number(lon).toFixed(6)}" hae="0.0" ce="25.0" le="35.0"/><detail>${detailNodes}</detail></event>`;
 }
 
+function getDefaultTakCotTypeForImportedItem(item) {
+  if (item?.geometryType === "Point") return "b-m-p-s-m";
+  if (item?.geometryType === "LineString") return "b-m-r";
+  return "u-d-f";
+}
+
+function getTakStreamTargetForContent(contentId) {
+  if (!contentId) {
+    return null;
+  }
+  if (contentId.startsWith("asset:")) {
+    const asset = state.assets.find((entry) => `asset:${entry.id}` === contentId);
+    return asset ? { kind: "asset", item: asset } : null;
+  }
+  if (contentId.startsWith("imported:")) {
+    const item = state.importedItems.find((entry) => `imported:${entry.id}` === contentId);
+    return item ? { kind: "imported", item } : null;
+  }
+  if (contentId.startsWith("tactical:")) {
+    const item = getTacticalObjectById(contentId.slice("tactical:".length));
+    return item ? { kind: "tactical", item } : null;
+  }
+  return null;
+}
+
+function isTakStreamingSupportedContent(contentId) {
+  const target = getTakStreamTargetForContent(contentId);
+  if (!target) {
+    return false;
+  }
+  if (target.kind === "asset") {
+    return true;
+  }
+  if (target.kind === "tactical") {
+    return !target.item.readOnly;
+  }
+  return Boolean(target.item.drawn || target.item.tak);
+}
+
+function isTakStreamingEnabledForContent(contentId) {
+  if (!isTakStreamingSupportedContent(contentId)) {
+    return false;
+  }
+  const target = getTakStreamTargetForContent(contentId);
+  if (!target) {
+    return false;
+  }
+  if (target.kind === "tactical") {
+    return target.item.streamToTak ?? getDefaultTakStreamingEnabled();
+  }
+  return target.item.tak?.streamEnabled ?? getDefaultTakStreamingEnabled();
+}
+
+function ensureTakMetadataForAsset(asset) {
+  const tak = normalizeTakMetadata(asset?.tak, { defaultStreamEnabled: getDefaultTakStreamingEnabled() }) ?? {};
+  tak.uid = tak.uid || `asset-${asset.id}`;
+  tak.cotType = tak.cotType || getDefaultTakTypeForForce(asset.force);
+  tak.source = tak.source || "rf-sim-asset";
+  tak.how = tak.how || "h-g-i-g-o";
+  if (typeof tak.streamEnabled !== "boolean") {
+    tak.streamEnabled = getDefaultTakStreamingEnabled();
+  }
+  asset.tak = tak;
+  return tak;
+}
+
+function ensureTakMetadataForImportedItem(item) {
+  const tak = normalizeTakMetadata(item?.tak, { defaultStreamEnabled: getDefaultTakStreamingEnabled() }) ?? {};
+  tak.uid = tak.uid || `imported-${item.id}`;
+  tak.cotType = tak.cotType || getDefaultTakCotTypeForImportedItem(item);
+  tak.source = tak.source || "rf-sim-imported";
+  tak.how = tak.how || "h-e";
+  if (typeof tak.streamEnabled !== "boolean") {
+    tak.streamEnabled = getDefaultTakStreamingEnabled();
+  }
+  item.tak = tak;
+  return tak;
+}
+
+function setTakStreamingForContent(contentId, enabled, { publish = true } = {}) {
+  if (!isTakStreamingSupportedContent(contentId)) {
+    return false;
+  }
+  const target = getTakStreamTargetForContent(contentId);
+  if (!target) {
+    return false;
+  }
+  if (target.kind === "tactical") {
+    target.item.streamToTak = enabled;
+  } else if (target.kind === "asset") {
+    ensureTakMetadataForAsset(target.item).streamEnabled = enabled;
+  } else if (target.kind === "imported") {
+    ensureTakMetadataForImportedItem(target.item).streamEnabled = enabled;
+  }
+  renderMapContents();
+  saveMapState();
+  if (enabled && publish) {
+    void publishTakContentById(contentId);
+  }
+  return true;
+}
+
+function toggleTakStreamingForContent(contentId) {
+  const nextEnabled = !isTakStreamingEnabledForContent(contentId);
+  if (!setTakStreamingForContent(contentId, nextEnabled)) {
+    return;
+  }
+  setStatus(`${getMapContentName(contentId) || "Item"} TAK streaming ${nextEnabled ? "enabled" : "disabled"}.`);
+}
+
+function buildTakDetailNodes({ callsign, team, role, remarks, usericonPath = "", extraNodes = [] } = {}) {
+  return [
+    callsign ? `<contact callsign="${escapeHtml(callsign)}"/>` : "",
+    team || role ? `<__group name="${escapeHtml(team || state.takIdentity.team || "Cyan")}" role="${escapeHtml(role || state.takIdentity.role || "Team Member")}"/>` : "",
+    usericonPath ? `<usericon iconsetpath="${escapeHtml(usericonPath)}"/>` : "",
+    remarks ? `<remarks>${escapeHtml(remarks)}</remarks>` : "",
+    ...extraNodes,
+  ].filter(Boolean).join("");
+}
+
+function getTakAnchorFromCoordinates(geometryType, coordinates) {
+  if (geometryType === "Point" && Array.isArray(coordinates) && coordinates.length >= 2) {
+    return [Number(coordinates[0]), Number(coordinates[1])];
+  }
+  if (!Array.isArray(coordinates) || !coordinates.length) {
+    return [NaN, NaN];
+  }
+  const points = coordinates
+    .map((entry) => [Number(entry?.[0]), Number(entry?.[1])])
+    .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
+  if (!points.length) {
+    return [NaN, NaN];
+  }
+  const [latSum, lonSum] = points.reduce((acc, [lat, lon]) => [acc[0] + lat, acc[1] + lon], [0, 0]);
+  return [latSum / points.length, lonSum / points.length];
+}
+
+function buildTakPointCotEvent({
+  uid = "",
+  cotType = "",
+  how = "h-g-i-g-o",
+  staleAt = "",
+  lat,
+  lon,
+  detailNodes = "",
+}) {
+  if (!uid || !cotType || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) {
+    return "";
+  }
+  const now = new Date();
+  const stale = staleAt ? new Date(staleAt) : new Date(now.getTime() + 300000);
+  return `<event version="2.0" uid="${escapeHtml(uid)}" type="${escapeHtml(cotType)}" how="${escapeHtml(how)}" time="${now.toISOString()}" start="${now.toISOString()}" stale="${stale.toISOString()}"><point lat="${Number(lat).toFixed(6)}" lon="${Number(lon).toFixed(6)}" hae="0.0" ce="25.0" le="35.0"/><detail>${detailNodes}</detail></event>`;
+}
+
+function buildTakAssetCotEvent(asset) {
+  const takObject = normalizeAssetToTakObject(asset);
+  if (!takObject) {
+    return "";
+  }
+  const tak = ensureTakMetadataForAsset(asset);
+  const [lat, lon] = takObject.coordinates;
+  return buildTakPointCotEvent({
+    uid: takObject.uid,
+    cotType: takObject.cotType,
+    how: takObject.how,
+    staleAt: tak.staleAt,
+    lat,
+    lon,
+    detailNodes: buildTakDetailNodes({
+      callsign: takObject.callsign,
+      remarks: asset.notes || takObject.detail?.remarks || "RF SIM Asset",
+      usericonPath: buildTakUserIconPath(takObject.cotType),
+      extraNodes: ["<track course=\"0\" speed=\"0\"/>"],
+    }),
+  });
+}
+
+function buildTakImportedCotEvent(item) {
+  const takObject = normalizeImportedItemToTakObject(item);
+  if (!takObject) {
+    return "";
+  }
+  const tak = ensureTakMetadataForImportedItem(item);
+  const [lat, lon] = getTakAnchorFromCoordinates(takObject.geometryType, takObject.coordinates);
+  const coordinatePairs = takObject.geometryType === "Point"
+    ? [[Number(takObject.coordinates[0]), Number(takObject.coordinates[1])]]
+    : takObject.coordinates
+      .map((entry) => [Number(entry?.[0]), Number(entry?.[1])])
+      .filter(([entryLat, entryLon]) => Number.isFinite(entryLat) && Number.isFinite(entryLon));
+  const extraNodes = coordinatePairs.length > 1
+    ? coordinatePairs.map(([entryLat, entryLon]) => `<link point="${entryLat.toFixed(6)},${entryLon.toFixed(6)}"/>`)
+    : [];
+  return buildTakPointCotEvent({
+    uid: takObject.uid,
+    cotType: takObject.cotType || getDefaultTakCotTypeForImportedItem(item),
+    how: takObject.how,
+    staleAt: tak.staleAt,
+    lat,
+    lon,
+    detailNodes: buildTakDetailNodes({
+      callsign: takObject.callsign,
+      remarks: item.name || "RF SIM Drawing",
+      extraNodes,
+    }),
+  });
+}
+
+async function postTakCotEventXml(xml, { summary, sourceMode = "map-content", debugLabel, debugDetail } = {}) {
+  if (!xml || !state.session.token || !state.session.activeProjectId || !isTakEnabledForProject(state.session.activeProjectId)) {
+    return false;
+  }
+  const projectId = state.session.activeProjectId;
+  if (debugLabel) {
+    pushClientTakDebug("outbound", debugLabel, debugDetail || summary || "Publishing CoT", "info");
+  }
+  try {
+    const result = await apiFetch(`/projects/${projectId}/tak-event`, {
+      method: "POST",
+      body: JSON.stringify({
+        xml,
+        summary,
+        sourceMode,
+      }),
+    });
+    if (state.session.activeProjectId !== projectId) {
+      return false;
+    }
+    state.takRuntime.lastOutboundAt = result?.lastOutboundAt || nowIso();
+    state.takRuntime.debugEvents = Array.isArray(result?.debugEvents) ? result.debugEvents : state.takRuntime.debugEvents;
+    state.takRuntime.lastContactCount = Number(result?.contactCount ?? state.takRuntime.lastContactCount) || 0;
+    if (debugLabel) {
+      pushClientTakDebug("outbound", `${debugLabel} sent`, summary || "CoT published to TAK.", "info");
+    }
+    return true;
+  } catch (error) {
+    if (debugLabel) {
+      pushClientTakDebug("outbound", `${debugLabel} failed`, error.message, "error");
+    }
+    return false;
+  } finally {
+    renderMapTakDebugPanel();
+  }
+}
+
+async function publishTakContentById(contentId) {
+  if (!isTakStreamingSupportedContent(contentId) || !isTakStreamingEnabledForContent(contentId)) {
+    return false;
+  }
+  const target = getTakStreamTargetForContent(contentId);
+  if (!target) {
+    return false;
+  }
+  if (target.kind === "asset") {
+    const xml = buildTakAssetCotEvent(target.item);
+    return postTakCotEventXml(xml, {
+      summary: `Asset CoT ${target.item.name || target.item.id}`,
+      sourceMode: "asset",
+      debugLabel: "Publishing asset CoT",
+      debugDetail: `${target.item.name || target.item.id} • ${ensureTakMetadataForAsset(target.item).cotType}`,
+    });
+  }
+  if (target.kind === "imported") {
+    const xml = buildTakImportedCotEvent(target.item);
+    return postTakCotEventXml(xml, {
+      summary: `Map item CoT ${target.item.name || target.item.id}`,
+      sourceMode: "drawn-item",
+      debugLabel: "Publishing drawn-item CoT",
+      debugDetail: `${target.item.name || target.item.id} • ${ensureTakMetadataForImportedItem(target.item).cotType}`,
+    });
+  }
+  if (target.kind === "tactical") {
+    return publishTakTacticalObject(target.item);
+  }
+  return false;
+}
+
 async function publishTakTacticalObject(object) {
   if (!state.session.token || !state.session.activeProjectId || !isTakEnabledForProject(state.session.activeProjectId)) {
     return;
   }
   const tactical = normalizeTacticalObject(object);
-  if (tactical.readOnly || tactical.geometryType !== "Point" || !String(tactical.cotType || "").toLowerCase().startsWith("a-")) {
+  if (tactical.readOnly || tactical.streamToTak === false || tactical.geometryType !== "Point" || !String(tactical.cotType || "").toLowerCase().startsWith("a-")) {
     return;
   }
   const xml = buildTakTacticalCotEvent(tactical);
   if (!xml) {
     return;
   }
+  await postTakCotEventXml(xml, {
+    summary: `Tactical CoT ${tactical.name || tactical.uid}`,
+    sourceMode: "tactical",
+    debugLabel: "Publishing tactical CoT",
+    debugDetail: `${tactical.cotType} • ${tactical.name || tactical.uid}`,
+  });
+  return;
   const projectId = state.session.activeProjectId;
   const summary = `Tactical CoT ${tactical.name || tactical.uid}`;
   pushClientTakDebug("outbound", "Publishing tactical CoT", `${tactical.cotType} • ${tactical.name || tactical.uid}`, "info");
@@ -3563,7 +3884,9 @@ function saveTacticalEditor() {
   renderMapContents();
   syncCesiumEntities();
   saveMapState();
-  void publishTakTacticalObject(updated);
+  if (updated.streamToTak !== false) {
+    void publishTakTacticalObject(updated);
+  }
   closeTacticalEditorModal();
   setStatus(`${updated.name} saved as tactical content.`);
 }
@@ -3691,6 +4014,11 @@ function buildTpalPreviewUnit({ cotType = "", domain = "ground", unitType = "", 
   });
 }
 
+function getTacticalPaletteCustomName(fallback = "") {
+  const value = String(dom.tacticalPaletteName?.value || "").trim();
+  return value || String(fallback || "").trim();
+}
+
 function renderTpalSymbol(entry, options = {}) {
   const cotType = entry?.cotType || buildTpalCotType(entry?.cotTail, options.affiliation);
   const previewUnit = buildTpalPreviewUnit({
@@ -3718,6 +4046,9 @@ function _tpalSetStep(step) {
   const subtitles = ["Select affiliation to begin.", "Select a CoT track family.", "Select the schema branch and symbol."];
   if (dom.tacticalPaletteSubtitle) dom.tacticalPaletteSubtitle.textContent = subtitles[step - 1] || "";
   if (dom.tacticalPaletteStatus) dom.tacticalPaletteStatus.textContent = "";
+  if (step === 3) {
+    requestAnimationFrame(() => dom.tacticalPaletteName?.focus());
+  }
 }
 
 function _tpalRenderTrackChoices() {
@@ -3781,6 +4112,9 @@ function openTacticalPaletteModal() {
   _tpalState.domain = null;
   _tpalState.selection = null;
   _tpalState.category = null;
+  if (dom.tacticalPaletteName) {
+    dom.tacticalPaletteName.value = "";
+  }
   _tpalSetStep(1);
   dom.tacticalPaletteModal?.classList.remove("hidden");
   updateModalBodyState();
@@ -6132,7 +6466,7 @@ function wireEvents() {
     if (!TPAL_BRANCHES[selection.id]?.length) {
       beginTacticalPlacement({
         id: generateId(),
-        name: selection.label,
+        name: getTacticalPaletteCustomName(selection.label),
         objectClass: selection.objectClass || "unit",
         domain: selection.domain,
         unitType: selection.unitType || deriveTacticalUnitTypeFromCotType(buildTpalCotType(selection.cotTail, aff), selection.domain),
@@ -6166,7 +6500,7 @@ function wireEvents() {
     const aff = _tpalState.affiliation || "friendly";
     beginTacticalPlacement({
       id: generateId(),
-      name: typeBtn.dataset.name || "Tactical Item",
+      name: getTacticalPaletteCustomName(typeBtn.dataset.name || "Tactical Item"),
       objectClass: typeBtn.dataset.objectClass || "unit",
       domain: typeBtn.dataset.domain || _tpalState.domain || "ground",
       unitType: typeBtn.dataset.unitType || "infantry",
@@ -6381,6 +6715,7 @@ function wireEvents() {
   dom.takAuthSecretInput?.addEventListener("change", onTakDraftFieldChanged);
   dom.takClientCertPasswordInput?.addEventListener("change", onTakDraftFieldChanged);
   dom.takCaCertPasswordInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takDefaultStreamToggle?.addEventListener("change", onSettingsChanged);
   dom.takClientCertInput?.addEventListener("change", () => onTakCertificateSelected("clientCert", dom.takClientCertInput).catch((error) => setStatus(error.message, true)));
   dom.takCaCertInput?.addEventListener("change", () => onTakCertificateSelected("caCert", dom.takCaCertInput).catch((error) => setStatus(error.message, true)));
   dom.takDeleteClientCertBtn?.addEventListener("click", () => deleteTakDraftCertificate("clientCert"));
@@ -6543,6 +6878,7 @@ function loadSettings() {
     if (typeof parsed.labelDefaultPoint === "boolean") state.settings.labelDefaultPoint = parsed.labelDefaultPoint;
     if (typeof parsed.labelDefaultPolygon === "boolean") state.settings.labelDefaultPolygon = parsed.labelDefaultPolygon;
     if (typeof parsed.labelDefaultLine === "boolean") state.settings.labelDefaultLine = parsed.labelDefaultLine;
+    if (typeof parsed.defaultTakStreamEnabled === "boolean") state.settings.defaultTakStreamEnabled = parsed.defaultTakStreamEnabled;
   } catch {
     window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
   }
@@ -7132,6 +7468,7 @@ function onSettingsChanged() {
   if (dom.labelDefaultPointToggle) state.settings.labelDefaultPoint = dom.labelDefaultPointToggle.checked;
   if (dom.labelDefaultPolygonToggle) state.settings.labelDefaultPolygon = dom.labelDefaultPolygonToggle.checked;
   if (dom.labelDefaultLineToggle) state.settings.labelDefaultLine = dom.labelDefaultLineToggle.checked;
+  if (dom.takDefaultStreamToggle) state.settings.defaultTakStreamEnabled = dom.takDefaultStreamToggle.checked;
   persistSettings();
   applySettings();
 }
@@ -7146,6 +7483,7 @@ function applySettings() {
   if (dom.labelDefaultPointToggle) dom.labelDefaultPointToggle.checked = state.settings.labelDefaultPoint ?? true;
   if (dom.labelDefaultPolygonToggle) dom.labelDefaultPolygonToggle.checked = state.settings.labelDefaultPolygon ?? false;
   if (dom.labelDefaultLineToggle) dom.labelDefaultLineToggle.checked = state.settings.labelDefaultLine ?? false;
+  if (dom.takDefaultStreamToggle) dom.takDefaultStreamToggle.checked = state.settings.defaultTakStreamEnabled !== false;
   dom.cesiumPhotorealisticTilesToggle.value = state.settings.cesiumPhotorealisticTilesEnabled ? "on" : "off";
   dom.cesiumOsmBuildingsToggle.value = state.settings.cesiumOsmBuildingsEnabled ? "on" : "off";
   dom.buildingMaterialPreset.value = state.settings.buildingMaterialPreset;
@@ -12824,11 +13162,15 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     marker.bindPopup(renderAssetPopup(newAsset));
     marker.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(`asset:${newAsset.id}`); });
     state.assetMarkers.set(newAsset.id, marker);
+    ensureTakMetadataForAsset(newAsset);
     state.assets.push(newAsset);
     renderAssets();
     syncCesiumEntities();
     renderMapContents();
     saveMapState();
+    if (isTakStreamingEnabledForContent(`asset:${newAsset.id}`)) {
+      void publishTakContentById(`asset:${newAsset.id}`);
+    }
     if (!Number.isFinite(newAsset.groundElevationM) && usesConfiguredCesiumTerrain()) {
       refreshAssetGroundElevation(newAsset).catch(() => {});
     }
@@ -12858,6 +13200,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
     asset.version = (asset.version ?? 1) + 1;
     asset.lastModified = nowIso();
+    ensureTakMetadataForAsset(asset);
     const marker = state.assetMarkers.get(asset.id);
     if (marker) {
       marker.setLatLng([asset.lat, asset.lon]);
@@ -12870,6 +13213,9 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
       refreshAssetGroundElevation(asset).catch(() => {});
     }
     scheduleTopoRefresh();
+    if (isTakStreamingEnabledForContent(`asset:${asset.id}`)) {
+      void publishTakContentById(`asset:${asset.id}`);
+    }
     return `Updated ${asset.name}.`;
   }
 
@@ -13898,6 +14244,7 @@ function finishAssetRelocation(latlng) {
   asset.lat = latlng.lat;
   asset.lon = latlng.lng;
   asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+  ensureTakMetadataForAsset(asset);
   const marker = state.assetMarkers.get(asset.id);
   if (marker) marker.setLatLng([asset.lat, asset.lon]);
   updateAssetMarker(asset);
@@ -13912,6 +14259,9 @@ function finishAssetRelocation(latlng) {
     pushEditUndoEntry(`Relocated ${asset.name}`, [preRelocateSnapshot], () => [after]);
   }
   saveMapState();
+  if (isTakStreamingEnabledForContent(`asset:${asset.id}`)) {
+    void publishTakContentById(`asset:${asset.id}`);
+  }
   setStatus(`${asset.name} relocated.`);
 }
 
@@ -14089,11 +14439,15 @@ function addAsset(latlng) {
   marker.bindPopup(renderAssetPopup(asset));
   marker.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(`asset:${asset.id}`); });
   state.assetMarkers.set(asset.id, marker);
+  ensureTakMetadataForAsset(asset);
   state.assets.push(asset);
   renderAssets();
   syncCesiumEntities();
 
   saveMapState();
+  if (isTakStreamingEnabledForContent(`asset:${asset.id}`)) {
+    void publishTakContentById(`asset:${asset.id}`);
+  }
   if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
     refreshAssetGroundElevation(asset).catch(() => {});
   }
@@ -14179,6 +14533,7 @@ function saveAssetEdits() {
 
   Object.assign(asset, getEmitterFormData());
   asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+  ensureTakMetadataForAsset(asset);
   updateAssetMarker(asset);
   renderAssets();
   renderMapContents();
@@ -14187,6 +14542,9 @@ function saveAssetEdits() {
     refreshAssetGroundElevation(asset).catch(() => {});
   }
   saveMapState();
+  if (isTakStreamingEnabledForContent(`asset:${asset.id}`)) {
+    void publishTakContentById(`asset:${asset.id}`);
+  }
   setStatus(`Updated ${asset.name}.`);
   state.editingAssetId = null;
   refreshActionButtons();
@@ -16942,6 +17300,11 @@ function buildMapContentRow(entry, isChild = false) {
   const eyeOff = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
   const chevronDown = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
   const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`;
+  const takStreamOn = `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 8-8"/><path d="M20 12a8 8 0 0 0-8-8"/><path d="M7 12a5 5 0 0 1 5-5"/><path d="M17 12a5 5 0 0 0-5-5"/><circle cx="12" cy="16.5" r="1.6" fill="currentColor" stroke="none"/></svg>`;
+  const takStreamOff = `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l14 14"/><path d="M9.2 5.7A8 8 0 0 1 20 12"/><path d="M4 12a8 8 0 0 1 2.3-5.6"/><circle cx="12" cy="16.5" r="1.6" fill="currentColor" stroke="none"/></svg>`;
+  const supportsTakStreaming = isTakStreamingSupportedContent(entry.id);
+  const takStreamingEnabled = supportsTakStreaming && isTakStreamingEnabledForContent(entry.id);
+  const takStreamLabel = takStreamingEnabled ? "Streaming to TAK" : "TAK streaming disabled";
 
   row.innerHTML = `
     <div class="map-content-row">
@@ -16952,6 +17315,7 @@ function buildMapContentRow(entry, isChild = false) {
         <strong>${escapeHtml(entry.name)}</strong>
         <span>${escapeHtml(entry.subtitle)}</span>
       </div>
+      ${supportsTakStreaming ? `<button class="map-content-tak-stream-indicator${takStreamingEnabled ? " is-on" : " is-off"}" type="button" aria-label="${takStreamLabel}" title="${takStreamLabel}">${takStreamingEnabled ? takStreamOn : takStreamOff}</button>` : ""}
       ${canFocus ? `<button class="ghost-button small map-content-focus-button" type="button" aria-label="Center map on ${escapeHtml(entry.name)}">
         <span class="map-content-focus-icon" aria-hidden="true">
           <span class="map-content-focus-ring outer"></span>
@@ -16983,6 +17347,10 @@ function buildMapContentRow(entry, isChild = false) {
   row.querySelector(".map-content-visibility-btn")?.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleContentVisibility(entry.id);
+  });
+  row.querySelector(".map-content-tak-stream-indicator")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleTakStreamingForContent(entry.id);
   });
   row.addEventListener("contextmenu", (event) => openMapContentsMenu(event, entry.id));
   row.addEventListener("dragstart", onMapContentDragStart);
@@ -17406,6 +17774,14 @@ function openMapContentsMenu(event, contentId) {
   if (relocateButton) {
     relocateButton.classList.toggle("hidden", !contentId.startsWith("asset:"));
   }
+  const takStreamButton = dom.mapContentsMenu.querySelector('[data-map-content-action="toggle-tak-stream"]');
+  if (takStreamButton) {
+    const supported = isTakStreamingSupportedContent(contentId);
+    takStreamButton.classList.toggle("hidden", !supported);
+    if (supported) {
+      takStreamButton.textContent = `Toggle TAK Stream ${isTakStreamingEnabledForContent(contentId) ? "Off" : "On"}`;
+    }
+  }
   const deleteButton = dom.mapContentsMenu.querySelector('[data-map-content-action="delete"]');
   if (deleteButton) {
     deleteButton.classList.toggle("hidden", isTakLive);
@@ -17465,6 +17841,11 @@ function onMapContentsMenuAction(event) {
 
   if (action === "relocate") {
     startAssetRelocation(contentId);
+    return;
+  }
+
+  if (action === "toggle-tak-stream") {
+    toggleTakStreamingForContent(contentId);
     return;
   }
 
@@ -18792,7 +19173,7 @@ function addDrawnFeature(feature, folderId = null) {
     geometryType: feature.geometryType,
     properties: feature.properties ?? {},
     drawn: true,
-    tak: normalizeTakMetadata(feature.tak),
+    tak: normalizeTakMetadata(feature.tak, { defaultStreamEnabled: getDefaultTakStreamingEnabled() }),
     shapeKind: typeof feature.shapeKind === "string" && feature.shapeKind
       ? feature.shapeKind
       : inferImportedShapeKind(feature.geometryType, feature.properties, feature.name),
@@ -18818,12 +19199,16 @@ function addDrawnFeature(feature, folderId = null) {
   item.layer.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(contentId); });
   attachImportedLayerEditUndo(item);
   applyItemLabel(item);
+  ensureTakMetadataForImportedItem(item);
   state.importedItems.push(item);
   setMapContentFolderId(contentId, folderId ?? null);
   state.mapContentOrder.push(contentId);
   renderMapContents();
   syncCesiumEntities();
   saveMapState();
+  if (isTakStreamingEnabledForContent(contentId)) {
+    void publishTakContentById(contentId);
+  }
 }
 
 // ── Edit-undo helpers ─────────────────────────────────────────────────────────
@@ -18843,8 +19228,14 @@ function attachImportedLayerEditUndo(item) {
     }
     item.layer.setPopupContent(renderImportedItemPopup(item));
     renderMapContents();
+    if (item.drawn) {
+      ensureTakMetadataForImportedItem(item);
+    }
     saveMapState();
     syncCesiumEntities();
+    if (isTakStreamingEnabledForContent(`imported:${item.id}`)) {
+      void publishTakContentById(`imported:${item.id}`);
+    }
     syncShapeVertexEditUi(item);
   });
 }
@@ -24755,24 +25146,36 @@ async function renderTopologyView() {
   // ── Nodes: unit cards or individual emitter cards ────────────────
   const displayMode = state.ui?.topologyDisplayMode === "emitters" ? "emitters" : "units";
   const toLinkedUnits = _toState.units.filter(u => linkedUnitIds.has(u.id));
+  const standaloneEmitterEntries = resolvedEmitterRecords
+    .filter((record) => !record.unitId)
+    .map((record) => ({
+      key: record.asset.id,
+      kind: "emitter",
+      unit: null,
+      emitters: [record.asset],
+      label: record.asset.emitterLabel || record.asset.name || "Emitter",
+      sublabel: "Unlinked emitter",
+    }));
   const posEntries = displayMode === "emitters"
     ? resolvedEmitterRecords
-        .filter((record) => record.unitId)
         .map((record) => ({
           key: record.asset.id,
           kind: "emitter",
           unit: record.unit,
           emitters: [record.asset],
           label: record.asset.emitterLabel || record.asset.name || "Emitter",
-          sublabel: record.unit?.label || record.unit?.designator || "",
+          sublabel: record.unit?.label || record.unit?.designator || "Unlinked emitter",
         }))
-    : toLinkedUnits.map((u) => ({
-        key: u.id,
-        kind: "unit",
-        unit: u,
-        label: u.label || u.designator || "Unit",
-        emitters: (unitEmittersMap.get(u.id) || []).slice().sort((a, b) => (a.frequencyMHz || 0) - (b.frequencyMHz || 0)),
-      }));
+    : [
+        ...toLinkedUnits.map((u) => ({
+          key: u.id,
+          kind: "unit",
+          unit: u,
+          label: u.label || u.designator || "Unit",
+          emitters: (unitEmittersMap.get(u.id) || []).slice().sort((a, b) => (a.frequencyMHz || 0) - (b.frequencyMHz || 0)),
+        })),
+        ...standaloneEmitterEntries,
+      ];
 
   if (!posEntries.length) {
     if (empty) empty.classList.remove("hidden");
