@@ -3926,6 +3926,11 @@ button:focus {
     grid-template-columns: 1fr;
   }
 
+  .map-tak-identity-btn {
+    top: 56px;
+    left: calc(138px + 340px + 8px);
+  }
+
   .app-content {
     display: flex;
     flex-direction: column;
@@ -5477,6 +5482,35 @@ body.emitter-modal-open {
   font-size: 12px;
 }
 
+.map-tak-identity-btn {
+  position: absolute;
+  top: 14px;
+  left: calc(138px + 340px + 8px + 86px + 8px);
+  z-index: 650;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow);
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.map-tak-identity-label {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.map-tak-identity-btn strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .offline-status-badge {
   position: absolute;
   top: 14px;
@@ -5501,6 +5535,16 @@ body.emitter-modal-open {
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
+}
+
+.tak-identity-modal {
+  width: min(540px, calc(100vw - 32px));
+}
+
+.tak-identity-body .fine-print {
+  display: block;
+  margin-top: 4px;
+  margin-bottom: 6px;
 }
 
 .offline-modal-body {

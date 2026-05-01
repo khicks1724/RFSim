@@ -31,6 +31,40 @@ const MILSTD_PALETTE = [
   "#e8710a",  // moderately bright orange
 ];
 
+const TAK_TEAM_OPTIONS = [
+  { value: "Cyan", label: "Cyan" },
+  { value: "Blue", label: "Blue" },
+  { value: "Green", label: "Green" },
+  { value: "Yellow", label: "Yellow" },
+  { value: "Orange", label: "Orange" },
+  { value: "Red", label: "Red" },
+  { value: "Maroon", label: "Maroon" },
+  { value: "Magenta", label: "Magenta" },
+  { value: "White", label: "White" },
+  { value: "Brown", label: "Brown" },
+];
+
+const TAK_DISPLAY_TYPE_OPTIONS = [
+  { value: "ground-troop", label: "Ground Troop", cotType: "a-f-G-U-C" },
+  { value: "armored-vehicle", label: "Armored Vehicle", cotType: "a-f-G-U-C-V" },
+  { value: "civilian-vehicle", label: "Civilian Vehicle", cotType: "a-f-G-E-V-C" },
+  { value: "generic-air-unit", label: "Generic Air Unit", cotType: "a-f-A-M-F-Q" },
+  { value: "generic-ground-unit", label: "Generic Ground Unit", cotType: "a-f-G-U-C" },
+  { value: "generic-sea-surface-unit", label: "Generic Sea Surface Unit", cotType: "a-f-S-X" },
+  { value: "generic-military-base-facility", label: "Generic Military Base/Facility", cotType: "a-f-G-I" },
+];
+
+const TAK_ROLE_OPTIONS = [
+  "Team Member",
+  "Team Lead",
+  "HQ",
+  "Sniper",
+  "Medic",
+  "Forward Observer",
+  "RTO",
+  "K9",
+];
+
 const BASEMAPS = {
   esri: {
     label: "Esri World Imagery",
@@ -1179,6 +1213,7 @@ const PROFILE_STORAGE_KEY = "ew-sim-emitter-profiles";
 const SETTINGS_STORAGE_KEY = "ew-sim-map-settings";
 const CESIUM_ION_TOKEN_STORAGE_KEY = "ew-sim-cesium-ion-token";
 const AI_PROVIDER_STORAGE_KEY = "ew-sim-ai-provider";
+const TAK_IDENTITY_STORAGE_KEY_PREFIX = "ew-sim-tak-identity";
 const MAP_STATE_STORAGE_KEY = "ew-sim-map-state";
 const MAP_STATE_STORAGE_KEY_LEGACY = null; // no prior keys to migrate
 const KMZ_ITEMS_STORAGE_KEY_PREFIX = "ew-sim-kmz-items";
@@ -1314,6 +1349,70 @@ function setSessionScopedItem(key, value) {
     window.sessionStorage.setItem(key, value);
   }
   window.localStorage.removeItem(key);
+}
+
+function getTakIdentityStorageKey(user = state.session.user) {
+  const rawIdentity = user?.email || user?.fullName || "session";
+  const normalized = String(rawIdentity)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "session";
+  return `${TAK_IDENTITY_STORAGE_KEY_PREFIX}:${normalized}`;
+}
+
+function deriveDefaultTakCallsign(user = state.session.user) {
+  const email = String(user?.email || "").trim();
+  if (email.includes("@")) {
+    const localPart = email.split("@")[0].trim();
+    if (localPart) {
+      return localPart.slice(0, 120);
+    }
+  }
+  const fullName = String(user?.fullName || "").trim();
+  if (fullName) {
+    return fullName.slice(0, 120);
+  }
+  return "RF SIM";
+}
+
+function normalizeTakIdentity(value = {}) {
+  const displayType = TAK_DISPLAY_TYPE_OPTIONS.some((option) => option.value === value?.displayType)
+    ? value.displayType
+    : "ground-troop";
+  const team = TAK_TEAM_OPTIONS.some((option) => option.value === value?.team)
+    ? value.team
+    : "Cyan";
+  const role = TAK_ROLE_OPTIONS.includes(value?.role)
+    ? value.role
+    : "Team Member";
+  const callsign = String(value?.callsign || "").trim().slice(0, 120) || deriveDefaultTakCallsign();
+  return { callsign, team, displayType, role };
+}
+
+function getTakDisplayTypeMeta(value = state.takIdentity.displayType) {
+  return TAK_DISPLAY_TYPE_OPTIONS.find((option) => option.value === value) || TAK_DISPLAY_TYPE_OPTIONS[0];
+}
+
+function loadTakIdentitySettings() {
+  state.takIdentity = normalizeTakIdentity({ callsign: deriveDefaultTakCallsign() });
+  if (!canUsePersistentBrowserStorage() || !state.session.user) {
+    return;
+  }
+  try {
+    const stored = window.localStorage.getItem(getTakIdentityStorageKey());
+    if (!stored) {
+      return;
+    }
+    state.takIdentity = normalizeTakIdentity(JSON.parse(stored));
+  } catch {}
+}
+
+function persistTakIdentitySettings() {
+  if (!canUsePersistentBrowserStorage() || !state.session.user) {
+    return;
+  }
+  window.localStorage.setItem(getTakIdentityStorageKey(), JSON.stringify(normalizeTakIdentity(state.takIdentity)));
 }
 const AI_PROVIDER_CATALOG = {
   "genai-mil": {
@@ -1485,6 +1584,16 @@ const dom = {
   takCertPasswordOkBtn: document.querySelector("#takCertPasswordOkBtn"),
   takCertPasswordCancelBtn: document.querySelector("#takCertPasswordCancelBtn"),
   takCertPasswordCloseBtn: document.querySelector("#takCertPasswordCloseBtn"),
+  takIdentityBtn: document.querySelector("#takIdentityBtn"),
+  takIdentityBtnValue: document.querySelector("#takIdentityBtnValue"),
+  takIdentityModal: document.querySelector("#takIdentityModal"),
+  takIdentityCallsignInput: document.querySelector("#takIdentityCallsignInput"),
+  takIdentityTeamSelect: document.querySelector("#takIdentityTeamSelect"),
+  takIdentityDisplayTypeSelect: document.querySelector("#takIdentityDisplayTypeSelect"),
+  takIdentityRoleSelect: document.querySelector("#takIdentityRoleSelect"),
+  takIdentitySaveBtn: document.querySelector("#takIdentitySaveBtn"),
+  takIdentityCancelBtn: document.querySelector("#takIdentityCancelBtn"),
+  takIdentityCloseBtn: document.querySelector("#takIdentityCloseBtn"),
   openAiPanelBtn: null, // removed from topbar — kept as null so refs don't throw
   aiChatToggleBtn: document.querySelector("#aiChatToggleBtn"),
   aiChatToggleValue: document.querySelector("#aiChatToggleValue"),
@@ -1945,6 +2054,12 @@ const state = {
     gpsLastPublishMessage: "",
     gpsLastSentFixKey: "",
   },
+  takIdentity: {
+    callsign: "RF SIM",
+    team: "Cyan",
+    displayType: "ground-troop",
+    role: "Team Member",
+  },
   tacticalEditor: {
     mode: null,
     targetId: null,
@@ -1971,6 +2086,7 @@ function updateModalBodyState() {
     || (dom.deleteProgressModal && !dom.deleteProgressModal.classList.contains("hidden"))
     || (dom.tacticalPaletteModal && !dom.tacticalPaletteModal.classList.contains("hidden"))
     || (dom.tacticalEditorModal && !dom.tacticalEditorModal.classList.contains("hidden"))
+    || (dom.takIdentityModal && !dom.takIdentityModal.classList.contains("hidden"))
     || (emitterBackdrop && !emitterBackdrop.classList.contains("hidden"))
   );
   document.body.classList.toggle("emitter-modal-open", hasOpenModal);
@@ -2773,15 +2889,11 @@ function buildTakGpsUid(projectId = state.session.activeProjectId) {
 }
 
 function getTakGpsCallsign() {
-  const fullName = state.session.user?.fullName?.trim();
-  if (fullName) {
-    return fullName.slice(0, 120);
+  const takCallsign = state.takIdentity?.callsign?.trim();
+  if (takCallsign) {
+    return takCallsign.slice(0, 120);
   }
-  const email = state.session.user?.email?.trim();
-  if (email) {
-    return email.split("@")[0].slice(0, 120);
-  }
-  return "RF SIM";
+  return deriveDefaultTakCallsign();
 }
 
 function queueTakGpsPublish({ immediate = false } = {}) {
@@ -2813,6 +2925,7 @@ async function publishTakGpsLocation() {
   const projectId = state.session.activeProjectId;
   const callsign = getTakGpsCallsign();
   const sourceMode = state.gps.mode || "gps";
+  const displayTypeMeta = getTakDisplayTypeMeta();
   const payload = {
     lat: Number(fix.lat),
     lon: Number(fix.lon),
@@ -2824,6 +2937,10 @@ async function publishTakGpsLocation() {
     uid: buildTakGpsUid(projectId),
     how: sourceMode === "usb" ? "m-p" : "m-g",
     sourceMode,
+    team: state.takIdentity.team,
+    role: state.takIdentity.role,
+    cotType: displayTypeMeta.cotType,
+    displayType: displayTypeMeta.label,
   };
 
   state.takRuntime.gpsPublishInFlight = true;
@@ -2870,6 +2987,86 @@ function formatTakTimestamp(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "";
   return parsed.toLocaleString();
+}
+
+function populateTakIdentityOptions() {
+  if (dom.takIdentityTeamSelect && !dom.takIdentityTeamSelect.options.length) {
+    dom.takIdentityTeamSelect.innerHTML = TAK_TEAM_OPTIONS
+      .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+      .join("");
+  }
+  if (dom.takIdentityDisplayTypeSelect && !dom.takIdentityDisplayTypeSelect.options.length) {
+    dom.takIdentityDisplayTypeSelect.innerHTML = TAK_DISPLAY_TYPE_OPTIONS
+      .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+      .join("");
+  }
+  if (dom.takIdentityRoleSelect && !dom.takIdentityRoleSelect.options.length) {
+    dom.takIdentityRoleSelect.innerHTML = TAK_ROLE_OPTIONS
+      .map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`)
+      .join("");
+  }
+}
+
+function shouldShowTakIdentityButton() {
+  return Boolean(state.session.token && state.session.activeProjectId && getTakProfileForProject(state.session.activeProjectId));
+}
+
+function syncTakIdentityUi() {
+  populateTakIdentityOptions();
+  const normalized = normalizeTakIdentity(state.takIdentity);
+  state.takIdentity = normalized;
+  if (dom.takIdentityBtn) {
+    dom.takIdentityBtn.classList.toggle("hidden", !shouldShowTakIdentityButton());
+  }
+  if (dom.takIdentityBtnValue) {
+    dom.takIdentityBtnValue.textContent = normalized.callsign;
+  }
+  if (dom.takIdentityCallsignInput) {
+    dom.takIdentityCallsignInput.value = normalized.callsign;
+  }
+  if (dom.takIdentityTeamSelect) {
+    dom.takIdentityTeamSelect.value = normalized.team;
+  }
+  if (dom.takIdentityDisplayTypeSelect) {
+    dom.takIdentityDisplayTypeSelect.value = normalized.displayType;
+  }
+  if (dom.takIdentityRoleSelect) {
+    dom.takIdentityRoleSelect.value = normalized.role;
+  }
+}
+
+function openTakIdentityModal() {
+  if (!dom.takIdentityModal) {
+    return;
+  }
+  syncTakIdentityUi();
+  dom.takIdentityModal.classList.remove("hidden");
+  updateModalBodyState();
+  dom.takIdentityCallsignInput?.focus();
+  dom.takIdentityCallsignInput?.select();
+}
+
+function closeTakIdentityModal() {
+  dom.takIdentityModal?.classList.add("hidden");
+  updateModalBodyState();
+}
+
+function saveTakIdentityModal() {
+  state.takIdentity = normalizeTakIdentity({
+    callsign: dom.takIdentityCallsignInput?.value,
+    team: dom.takIdentityTeamSelect?.value,
+    displayType: dom.takIdentityDisplayTypeSelect?.value,
+    role: dom.takIdentityRoleSelect?.value,
+  });
+  persistTakIdentitySettings();
+  syncTakIdentityUi();
+  pushClientTakDebug(
+    "status",
+    "TAK identity updated",
+    `${state.takIdentity.callsign} • ${state.takIdentity.team} • ${getTakDisplayTypeMeta().label} • ${state.takIdentity.role}`,
+    "info"
+  );
+  closeTakIdentityModal();
 }
 
 function getDefaultPlanSpawnPosition() {
@@ -3367,6 +3564,7 @@ function syncTakUi() {
 
   if (requiresLogin) {
     dom.takSettingsSummary.textContent = "TAK Integration requires a logged-in account and server-backed projects.";
+    syncTakIdentityUi();
     return;
   }
 
@@ -3453,6 +3651,7 @@ function syncTakUi() {
     ? `${state.takSettings.statusMessage} ${activeProjectStatus}`.trim()
     : activeProjectStatus;
   dom.takSettingsSummary.textContent = summary;
+  syncTakIdentityUi();
 }
 
 async function loadServerTakProfiles() {
@@ -4076,8 +4275,10 @@ function clearSessionState({ preserveGuest = false } = {}) {
   state.session.localSaveTimerId = null;
   state.takSettings.profiles = [];
   state.takSettings.projectAssignments = new Map();
+  state.takIdentity = normalizeTakIdentity({ callsign: "RF SIM" });
   resetTakDraft();
   persistSessionStorage();
+  syncTakIdentityUi();
 }
 
 async function hydrateSession() {
@@ -4093,6 +4294,7 @@ async function hydrateSession() {
   try {
     const payload = await apiFetch("/auth/me");
     state.session.user = payload.user;
+    loadTakIdentitySettings();
     await loadProjectList();
     await loadServerTakSettings();
     await loadServerAiProviderSettings();
@@ -4218,6 +4420,7 @@ function syncWorkspaceUi() {
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
     setAutosaveIndicator("hidden");
     syncTakUi();
+    syncTakIdentityUi();
     syncAuthScreenUi();
     return;
   }
@@ -4242,6 +4445,7 @@ function syncWorkspaceUi() {
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
     setAuthScreenStatus("", false);
     syncTakUi();
+    syncTakIdentityUi();
     syncAuthScreenUi();
     return;
   }
@@ -4284,6 +4488,7 @@ function syncWorkspaceUi() {
   }
   setAuthScreenStatus("", false);
   syncTakUi();
+  syncTakIdentityUi();
   syncAuthScreenUi();
 }
 
@@ -4303,6 +4508,7 @@ async function onWorkspaceLogin(credentials = null) {
   setGuestSessionEnabled(false);
   state.session.token = payload.token;
   state.session.user = payload.user;
+  loadTakIdentitySettings();
   persistSessionStorage();
   await loadProjectList();
   await loadServerTakSettings();
@@ -4330,6 +4536,7 @@ async function onWorkspaceRegister(credentials = null) {
   setGuestSessionEnabled(false);
   state.session.token = payload.token;
   state.session.user = payload.user;
+  loadTakIdentitySettings();
   persistSessionStorage();
   await loadProjectList();
   await loadServerTakSettings();
@@ -5219,6 +5426,8 @@ async function init() {
   initTopBarDropdowns();
   initColorSwatches();
   initRangeInputs();
+  loadTakIdentitySettings();
+  populateTakIdentityOptions();
   ensureMapContentsSearchUi();
   initEmitterModal();
   loadAiProviderSettings();
@@ -5245,6 +5454,7 @@ async function init() {
   updateWeatherState();
   applySettings();
   syncGpsUi();
+  syncTakIdentityUi();
   updateMapOverlayMetrics();
   updateClock();
   syncAiUi();
@@ -5612,6 +5822,15 @@ function wireEvents() {
   initMapGeoSearch();
   initAnalytics();
   initOfflineDownload();
+  dom.takIdentityBtn?.addEventListener("click", openTakIdentityModal);
+  dom.takIdentityCloseBtn?.addEventListener("click", closeTakIdentityModal);
+  dom.takIdentityCancelBtn?.addEventListener("click", closeTakIdentityModal);
+  dom.takIdentitySaveBtn?.addEventListener("click", saveTakIdentityModal);
+  dom.takIdentityModal?.addEventListener("click", (event) => {
+    if (event.target === dom.takIdentityModal) {
+      closeTakIdentityModal();
+    }
+  });
 
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
   document.querySelector("#drawPointBtn")?.addEventListener("click", (e) => { e.stopPropagation(); startDrawing("point"); });

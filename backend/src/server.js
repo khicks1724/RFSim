@@ -9,6 +9,7 @@ const net = require("net");
 const tls = require("tls");
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const { z } = require("zod");
 const { config } = require("./config");
 const { pool, query } = require("./db");
@@ -314,6 +315,90 @@ function decodeTakUploadBlob(rawValue = "") {
   };
 }
 
+function encodePowerShellCommand(script = "") {
+  return Buffer.from(String(script || ""), "utf16le").toString("base64");
+}
+
+function normalizePkcs12WithWindowsCrypto(bundleBuffer, password = "", { requirePrivateKey = false } = {}) {
+  if (!bundleBuffer?.length) {
+    throw new Error("PKCS12 bundle is empty.");
+  }
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const script = `
+$ErrorActionPreference = 'Stop'
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$bytes = [Convert]::FromBase64String([string]$payload.bundleBase64)
+$password = [string]$payload.password
+$requirePrivateKey = [bool]$payload.requirePrivateKey
+$flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+$collection = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2Collection
+$collection.Import($bytes, $password, $flags)
+$newline = [Environment]::NewLine
+$pemParts = New-Object System.Collections.Generic.List[string]
+$leaf = $null
+foreach ($cert in $collection) {
+  if (-not $leaf) { $leaf = $cert }
+  if ($cert.HasPrivateKey) { $leaf = $cert }
+  $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+  $pem = '-----BEGIN CERTIFICATE-----' + $newline + [Convert]::ToBase64String($certBytes, [System.Base64FormattingOptions]::InsertLineBreaks) + $newline + '-----END CERTIFICATE-----'
+  $pemParts.Add($pem)
+}
+if ($requirePrivateKey -and (-not $leaf -or -not $leaf.HasPrivateKey)) {
+  throw 'PKCS12 bundle does not contain an exportable private key.'
+}
+$normalizedPfxBase64 = ''
+if ($requirePrivateKey) {
+  $normalizedPfxBytes = $collection.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12, $password)
+  $normalizedPfxBase64 = [Convert]::ToBase64String($normalizedPfxBytes)
+}
+$result = @{
+  certificatesPem = ($pemParts -join $newline)
+  normalizedPfxBase64 = $normalizedPfxBase64
+  subject = if ($leaf) { $leaf.Subject } else { '' }
+  issuer = if ($leaf) { $leaf.Issuer } else { '' }
+  thumbprint = if ($leaf) { $leaf.Thumbprint } else { '' }
+  hasPrivateKey = [bool]($leaf -and $leaf.HasPrivateKey)
+}
+[Console]::Out.Write(($result | ConvertTo-Json -Compress))
+`;
+
+  const payload = JSON.stringify({
+    bundleBase64: Buffer.from(bundleBuffer).toString("base64"),
+    password: String(password || ""),
+    requirePrivateKey: Boolean(requirePrivateKey),
+  });
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(script)],
+    {
+      input: payload,
+      encoding: "utf8",
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024,
+    }
+  );
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const stderr = String(result.stderr || "").trim();
+    throw new Error(stderr || "Windows PKCS12 normalization failed.");
+  }
+  const parsed = JSON.parse(String(result.stdout || "{}"));
+  return {
+    certificatesPem: String(parsed.certificatesPem || ""),
+    pfxBuffer: parsed.normalizedPfxBase64 ? Buffer.from(parsed.normalizedPfxBase64, "base64") : null,
+    subject: String(parsed.subject || ""),
+    issuer: String(parsed.issuer || ""),
+    thumbprint: String(parsed.thumbprint || ""),
+    hasPrivateKey: Boolean(parsed.hasPrivateKey),
+  };
+}
+
 function buildTakSocketConfig(profileRow) {
   const host = String(profileRow?.server_host || "").trim();
   const port = Number(profileRow?.server_port || 0);
@@ -337,7 +422,8 @@ function buildTakSocketConfig(profileRow) {
   let verificationNote = "";
 
   if (clientCert.kind === "data-url") {
-    tlsOptions.pfx = clientCert.buffer;
+    const normalizedClientBundle = normalizePkcs12WithWindowsCrypto(clientCert.buffer, clientCertPassword, { requirePrivateKey: true });
+    tlsOptions.pfx = normalizedClientBundle?.pfxBuffer || clientCert.buffer;
     tlsOptions.passphrase = clientCertPassword;
   } else if (isPemLike(clientCert.text, { kind: "certificate" })) {
     tlsOptions.cert = clientCert.text;
@@ -355,6 +441,16 @@ function buildTakSocketConfig(profileRow) {
     tlsOptions.checkServerIdentity = () => undefined;
     verificationMode = "custom-ca";
     verificationNote = "The uploaded CA trust bundle is used, but hostname mismatch checks are relaxed so direct server IP connections can succeed.";
+  } else if (caCert.kind === "data-url") {
+    const normalizedCaBundle = normalizePkcs12WithWindowsCrypto(caCert.buffer, decryptSecret(profileRow.ca_cert_password_secret || ""), { requirePrivateKey: false });
+    if (!normalizedCaBundle?.certificatesPem) {
+      throw new Error("CA truststore could not be converted into certificates.");
+    }
+    tlsOptions.ca = normalizedCaBundle.certificatesPem;
+    tlsOptions.rejectUnauthorized = true;
+    tlsOptions.checkServerIdentity = () => undefined;
+    verificationMode = "custom-ca-p12";
+    verificationNote = "The uploaded PKCS12 CA truststore was converted through Windows crypto APIs and hostname mismatch checks are relaxed for direct server IP connections.";
   } else {
     tlsOptions.rejectUnauthorized = false;
     verificationMode = "p12-truststore-unverified";
@@ -458,6 +554,7 @@ function escapeXmlText(value = "") {
 function buildTakGpsCotEvent({
   uid,
   callsign,
+  cotType = "a-f-G-U-C",
   lat,
   lon,
   hae = 0,
@@ -466,10 +563,11 @@ function buildTakGpsCotEvent({
   team = "Cyan",
   role = "Team Member",
   how = "m-g",
+  displayType = "",
 } = {}) {
   const now = new Date();
   const stale = new Date(now.getTime() + 120000);
-  return `<event version="2.0" uid="${escapeXmlText(uid)}" type="a-f-G-U-C" how="${escapeXmlText(how)}" time="${now.toISOString()}" start="${now.toISOString()}" stale="${stale.toISOString()}"><point lat="${Number(lat).toFixed(6)}" lon="${Number(lon).toFixed(6)}" hae="${Number.isFinite(Number(hae)) ? Number(hae).toFixed(1) : "0.0"}" ce="${Number.isFinite(Number(ce)) ? Number(ce).toFixed(1) : "25.0"}" le="${Number.isFinite(Number(le)) ? Number(le).toFixed(1) : "35.0"}"/><detail><contact callsign="${escapeXmlText(callsign)}"/><__group name="${escapeXmlText(team)}" role="${escapeXmlText(role)}"/><remarks>RF SIM GPS PLI</remarks></detail></event>`;
+  return `<event version="2.0" uid="${escapeXmlText(uid)}" type="${escapeXmlText(cotType)}" how="${escapeXmlText(how)}" time="${now.toISOString()}" start="${now.toISOString()}" stale="${stale.toISOString()}"><point lat="${Number(lat).toFixed(6)}" lon="${Number(lon).toFixed(6)}" hae="${Number.isFinite(Number(hae)) ? Number(hae).toFixed(1) : "0.0"}" ce="${Number.isFinite(Number(ce)) ? Number(ce).toFixed(1) : "25.0"}" le="${Number.isFinite(Number(le)) ? Number(le).toFixed(1) : "35.0"}"/><detail><contact callsign="${escapeXmlText(callsign)}"/><__group name="${escapeXmlText(team)}" role="${escapeXmlText(role)}"/><remarks>${escapeXmlText(displayType ? `RF SIM GPS PLI • ${displayType}` : "RF SIM GPS PLI")}</remarks></detail></event>`;
 }
 
 function sendTakConnectorCot(connector, xml, summary = "Outbound CoT") {
@@ -833,6 +931,8 @@ const takLocationPublishSchema = z.object({
   uid: z.string().min(1).max(200).optional(),
   team: z.string().max(120).optional(),
   role: z.string().max(120).optional(),
+  cotType: z.string().max(120).optional(),
+  displayType: z.string().max(120).optional(),
   how: z.string().max(40).optional(),
   sourceMode: z.string().max(40).optional(),
 });
@@ -1399,13 +1499,30 @@ app.post("/api/user/tak-profiles/:profileId/test", authRequired, async (request,
       && profile.client_cert_password_secret
       && profile.ca_cert_password_secret
     );
-    const status = hasCore ? (hasTakCerts ? "ready" : "incomplete") : "error";
+    let socketConfig = null;
+    let configError = "";
+    if (hasCore && hasTakCerts) {
+      try {
+        socketConfig = buildTakSocketConfig(profile);
+      } catch (error) {
+        configError = error.message;
+      }
+    }
+    const status = !hasCore
+      ? "error"
+      : !hasTakCerts
+        ? "incomplete"
+        : socketConfig
+          ? "ready"
+          : "error";
     const checkedAt = new Date().toISOString();
-    const message = hasCore
-      ? (hasTakCerts
-        ? "Profile is bridge-ready. Live TAK transport can use this CA and client certificate bundle configuration."
-        : "Server settings are saved, but the CA certificate, client certificate, or their passwords are still missing.")
-      : "Profile is missing required TAK server settings.";
+    const message = !hasCore
+      ? "Profile is missing required TAK server settings."
+      : !hasTakCerts
+        ? "Server settings are saved, but the CA certificate, client certificate, or their passwords are still missing."
+        : socketConfig
+          ? "Profile is bridge-ready. Live TAK transport can use this CA and client certificate bundle configuration."
+          : `Certificate configuration is not usable yet: ${configError}`;
 
     await query(
       "update user_tak_profile set last_tested_at = $3, last_test_status = $4, updated_at = now() where id = $1 and owner_user_id = $2",
@@ -1417,6 +1534,8 @@ app.post("/api/user/tak-profiles/:profileId/test", authRequired, async (request,
       status,
       checkedAt,
       message,
+      verificationMode: socketConfig?.verificationMode || "",
+      verificationNote: socketConfig?.verificationNote || "",
       requirements: {
         hasServerHost: Boolean(profile.server_host),
         hasServerPort: Boolean(profile.server_port),
@@ -1622,6 +1741,7 @@ app.post("/api/projects/:projectId/tak-location", authRequired, async (request, 
     const xml = buildTakGpsCotEvent({
       uid,
       callsign: body.callsign,
+      cotType: body.cotType || "a-f-G-U-C",
       lat: body.lat,
       lon: body.lon,
       hae: body.hae,
@@ -1630,6 +1750,7 @@ app.post("/api/projects/:projectId/tak-location", authRequired, async (request, 
       team: body.team || "Cyan",
       role: body.role || "Team Member",
       how: body.how || "m-g",
+      displayType: body.displayType || "",
     });
     const summary = `GPS PLI ${body.callsign} ${Number(body.lat).toFixed(5)}, ${Number(body.lon).toFixed(5)}`;
     sendTakConnectorCot(connector, xml, summary);

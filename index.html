@@ -569,6 +569,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="21" x2="12" y2="3"/><rect x="2" y="3" width="8" height="6" rx="1"/><rect x="14" y="3" width="8" height="6" rx="1"/></svg>
           Offline
         </button>
+        <button id="takIdentityBtn" class="map-tak-identity-btn ghost-button small hidden" type="button" aria-label="Edit TAK identity">
+          <span class="map-tak-identity-label">TAK Callsign:</span>
+          <strong id="takIdentityBtnValue">RF SIM</strong>
+        </button>
         <div id="offlineStatusBadge" class="offline-status-badge hidden" title="Local data server connected — offline data available">&#x25CF; Local</div>
         <div class="map-geo-search-wrap">
           <label class="map-geo-search-shell" for="mapGeoSearchInput">
@@ -2319,6 +2323,44 @@
         <div class="emitter-footer-actions">
           <button id="takCertPasswordCancelBtn" class="ghost-button" type="button">Cancel</button>
           <button id="takCertPasswordOkBtn" class="primary-button" type="button">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="takIdentityModal" class="emitter-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="takIdentityModalTitle">
+    <div class="emitter-modal tak-identity-modal">
+      <div class="emitter-modal-header">
+        <div class="emitter-modal-title-group">
+          <h2 id="takIdentityModalTitle">TAK Identity</h2>
+        </div>
+        <button id="takIdentityCloseBtn" class="ghost-button small icon-button" type="button" aria-label="Close">&#10005;</button>
+      </div>
+      <div class="emitter-modal-body tak-identity-body">
+        <div class="settings-modal-grid">
+          <label class="settings-span-2">
+            My Callsign
+            <span class="fine-print">The callsign RF SIM will publish to the linked TAK server.</span>
+            <input id="takIdentityCallsignInput" type="text" maxlength="120" placeholder="RF SIM callsign">
+          </label>
+          <label>
+            My Team
+            <select id="takIdentityTeamSelect"></select>
+          </label>
+          <label>
+            My Display Type
+            <select id="takIdentityDisplayTypeSelect"></select>
+          </label>
+          <label class="settings-span-2">
+            My Role
+            <select id="takIdentityRoleSelect"></select>
+          </label>
+        </div>
+      </div>
+      <div class="emitter-modal-footer">
+        <div class="emitter-footer-actions">
+          <button id="takIdentityCancelBtn" class="ghost-button" type="button">Cancel</button>
+          <button id="takIdentitySaveBtn" class="primary-button" type="button">OK</button>
         </div>
       </div>
     </div>
