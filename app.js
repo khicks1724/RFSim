@@ -95,7 +95,7 @@ const BUILDING_MATERIAL_MODELS = {
 // Bump this integer whenever the serialized state shape changes in a way that
 // requires a migration. applySavedMapState() runs migrateStatePayload() first
 // so old saves are always upgraded before being applied.
-const STATE_SCHEMA_VERSION = 2;
+const STATE_SCHEMA_VERSION = 3;
 
 function nowIso() {
   return new Date().toISOString();
@@ -157,6 +157,14 @@ function migrateStatePayload(payload) {
                   : "polygon",
         }))
         : payload.importedItems,
+    };
+  }
+
+  if (from < 3) {
+    payload = {
+      ...payload,
+      schemaVersion: 3,
+      tacticalObjects: Array.isArray(payload.tacticalObjects) ? payload.tacticalObjects : [],
     };
   }
 
@@ -264,6 +272,204 @@ function normalizeImportedItemToTakObject(item) {
     source: tak?.source || "rf-sim-imported",
     detail: tak?.detail ?? null,
   };
+}
+
+const TACTICAL_OBJECT_CLASSES = ["unit", "track", "marker", "route", "geofence", "drawing", "shape"];
+const TACTICAL_LIVE_FOLDER_NAMES = {
+  unit: "Live Units",
+  track: "Live Units",
+  route: "Live Routes",
+  geofence: "Live Geofences",
+  drawing: "Live Drawings",
+  marker: "Live Markers",
+  shape: "Live Shapes",
+};
+
+function normalizeTacticalAffiliation(value = "friendly") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["friendly", "hostile", "neutral", "unknown"].includes(normalized)) {
+    return normalized;
+  }
+  if (normalized === "enemy") return "hostile";
+  if (normalized === "host-nation") return "neutral";
+  return "unknown";
+}
+
+function normalizeTacticalDomain(value = "ground") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["ground", "air", "sea_surface", "subsurface", "space"].includes(normalized)) {
+    return normalized;
+  }
+  if (normalized === "sea") return "sea_surface";
+  return "ground";
+}
+
+function isTacticalPointGeometry(geometryType = "") {
+  return String(geometryType || "").trim() === "Point";
+}
+
+function normalizeTacticalCoordinates(geometryType, coordinates) {
+  if (geometryType === "Point") {
+    if (Array.isArray(coordinates) && coordinates.length >= 2) {
+      return [Number(coordinates[0]), Number(coordinates[1])];
+    }
+    return [0, 0];
+  }
+  if (!Array.isArray(coordinates)) {
+    return [];
+  }
+  return coordinates
+    .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] : null)
+    .filter(Boolean);
+}
+
+function deriveTacticalDomainFromCotType(cotType = "") {
+  const normalized = String(cotType || "").toUpperCase();
+  if (normalized.includes("-A-")) return "air";
+  if (normalized.includes("-S-")) return "sea_surface";
+  if (normalized.includes("-U-")) return "subsurface";
+  if (normalized.includes("-P-")) return "space";
+  return "ground";
+}
+
+function deriveTacticalAffiliationFromCotType(cotType = "") {
+  const normalized = String(cotType || "").toLowerCase();
+  if (normalized.startsWith("a-f")) return "friendly";
+  if (normalized.startsWith("a-h")) return "hostile";
+  if (normalized.startsWith("a-n")) return "neutral";
+  return "unknown";
+}
+
+function deriveTacticalUnitTypeFromDomain(domain = "ground") {
+  if (domain === "air") return "aviation_fixed";
+  if (domain === "sea_surface") return "naval_surface";
+  if (domain === "subsurface") return "submarine";
+  if (domain === "space") return "space";
+  return "infantry";
+}
+
+function buildDefaultCotTypeForTacticalObject(objectClass, affiliation = "friendly", domain = "ground") {
+  const aff = normalizeTacticalAffiliation(affiliation);
+  const affCode = aff === "friendly" ? "f" : aff === "hostile" ? "h" : aff === "neutral" ? "n" : "u";
+  const domainCode = domain === "air" ? "A" : domain === "sea_surface" ? "S" : domain === "subsurface" ? "U" : domain === "space" ? "P" : "G";
+  if (objectClass === "route") return "b-m-r";
+  if (objectClass === "geofence") return "b-m-p-c";
+  if (objectClass === "drawing" || objectClass === "shape") return "u-d-f";
+  return `a-${affCode}-${domainCode}-U-C`;
+}
+
+function normalizeTacticalObject(raw = {}) {
+  const geometryType = String(raw.geometryType || "Point");
+  const objectClass = TACTICAL_OBJECT_CLASSES.includes(raw.objectClass) ? raw.objectClass : "unit";
+  const domain = normalizeTacticalDomain(raw.domain || deriveTacticalDomainFromCotType(raw.cotType));
+  const unitType = normalizeToUnitType(raw.unitType || deriveTacticalUnitTypeFromDomain(domain));
+  const size = raw.size || "battalion";
+  const affiliation = normalizeTacticalAffiliation(raw.affiliation || deriveTacticalAffiliationFromCotType(raw.cotType));
+  const coordinates = normalizeTacticalCoordinates(geometryType, raw.coordinates);
+  return {
+    id: raw.id || generateId(),
+    uid: String(raw.uid || raw.id || generateId()).trim(),
+    source: raw.source || "manual",
+    objectClass,
+    geometryType,
+    shapeKind: raw.shapeKind || (geometryType === "LineString" ? "route" : geometryType === "Polygon" ? "polygon" : "point"),
+    coordinates,
+    cotType: String(raw.cotType || buildDefaultCotTypeForTacticalObject(objectClass, affiliation, domain)).trim(),
+    sidc: String(raw.sidc || "").trim(),
+    domain,
+    affiliation,
+    size,
+    unitType,
+    name: String(raw.name || raw.label || buildDefaultToUnitLabel(size, unitType)).trim(),
+    designator: String(raw.designator || raw.callsign || "").trim(),
+    remarks: String(raw.remarks || "").trim(),
+    detail: raw.detail && typeof raw.detail === "object" ? raw.detail : {},
+    staleAt: String(raw.staleAt || "").trim(),
+    provider: String(raw.provider || "").trim(),
+    readOnly: Boolean(raw.readOnly),
+    linkedPlanUnitId: Number.isFinite(Number(raw.linkedPlanUnitId)) ? Number(raw.linkedPlanUnitId) : null,
+    linkedAssetIds: Array.isArray(raw.linkedAssetIds) ? raw.linkedAssetIds.map(String) : [],
+    showLabel: raw.showLabel !== false,
+    style: raw.style && typeof raw.style === "object" ? { ...raw.style } : null,
+    lastModified: raw.lastModified || nowIso(),
+  };
+}
+
+function serializeTacticalObject(object) {
+  const normalized = normalizeTacticalObject(object);
+  return {
+    id: normalized.id,
+    uid: normalized.uid,
+    source: normalized.source,
+    objectClass: normalized.objectClass,
+    geometryType: normalized.geometryType,
+    shapeKind: normalized.shapeKind,
+    coordinates: normalized.coordinates,
+    cotType: normalized.cotType,
+    sidc: normalized.sidc,
+    domain: normalized.domain,
+    affiliation: normalized.affiliation,
+    size: normalized.size,
+    unitType: normalized.unitType,
+    name: normalized.name,
+    designator: normalized.designator,
+    remarks: normalized.remarks,
+    detail: normalized.detail,
+    staleAt: normalized.staleAt,
+    provider: normalized.provider,
+    readOnly: normalized.readOnly,
+    linkedPlanUnitId: normalized.linkedPlanUnitId,
+    linkedAssetIds: normalized.linkedAssetIds,
+    showLabel: normalized.showLabel,
+    style: normalized.style,
+    lastModified: normalized.lastModified,
+  };
+}
+
+function getTacticalObjectById(id) {
+  return state.tacticalObjects.find((entry) => entry.id === id) ?? null;
+}
+
+function getTakLiveObjectByUid(uid) {
+  return state.takRuntime.objectsByUid.get(String(uid || "")) ?? null;
+}
+
+function isUnitTacticalObject(object) {
+  return String(object?.objectClass || "") === "unit";
+}
+
+function getLinkedPlanUnitForTacticalObject(object) {
+  if (!Number.isFinite(Number(object?.linkedPlanUnitId))) {
+    return null;
+  }
+  return _toState.units.find((unit) => unit.id === Number(object.linkedPlanUnitId)) ?? null;
+}
+
+function getTacticalDisplayUnit(object) {
+  const linked = getLinkedPlanUnitForTacticalObject(object);
+  return normalizeToUnit({
+    id: linked?.id ?? object?.linkedPlanUnitId ?? 0,
+    label: linked?.label || object?.name || "Tactical Unit",
+    designator: linked?.designator || object?.designator || "",
+    affiliation: normalizeTacticalAffiliation(linked?.affiliation || object?.affiliation || "friendly"),
+    type: linked?.type || object?.unitType || "infantry",
+    size: linked?.size || object?.size || "battalion",
+  });
+}
+
+function formatTacticalGeometrySummary(object) {
+  const coords = object?.coordinates;
+  if (object?.geometryType === "Point" && Array.isArray(coords) && coords.length >= 2) {
+    return `${Number(coords[0]).toFixed(6)}, ${Number(coords[1]).toFixed(6)}`;
+  }
+  if (object?.geometryType === "LineString") {
+    return `${Array.isArray(coords) ? coords.length : 0} route point(s)`;
+  }
+  const isCircle = object?.shapeKind === "circle" && Number.isFinite(Number(object?.detail?.radiusM));
+  if (isCircle) {
+    return `Circle • ${formatDistance(Number(object.detail.radiusM))}`;
+  }
+  return `${Array.isArray(coords) ? coords.length : 0} vertex/vertices`;
 }
 
 function generateId() {
@@ -1334,6 +1540,7 @@ const dom = {
   analyticsSortSelect: document.querySelector("#analyticsSortSelect"),
   analyticsRefreshBtn: document.querySelector("#analyticsRefreshBtn"),
   addMapFolderBtn: document.querySelector("#addMapFolderBtn"),
+  addTacticalItemBtn: document.querySelector("#addTacticalItemBtn"),
   drawShapeBtn: document.querySelector("#drawShapeBtn"),
   drawDropdown: document.querySelector("#drawDropdown"),
   drawCircleBtn: document.querySelector("#drawCircleBtn"),
@@ -1370,6 +1577,34 @@ const dom = {
   mapContentsRenameInput: document.querySelector("#mapContentsRenameInput"),
   mapContentsRenameSave: document.querySelector("#mapContentsRenameSave"),
   mapContentsRenameCancel: document.querySelector("#mapContentsRenameCancel"),
+  tacticalPaletteModal: document.querySelector("#tacticalPaletteModal"),
+  tacticalPaletteCloseBtn: document.querySelector("#tacticalPaletteCloseBtn"),
+  tacticalPaletteCancelBtn: document.querySelector("#tacticalPaletteCancelBtn"),
+  tacticalPaletteSearch: document.querySelector("#tacticalPaletteSearch"),
+  tacticalPaletteList: document.querySelector("#tacticalPaletteList"),
+  tacticalPaletteStatus: document.querySelector("#tacticalPaletteStatus"),
+  tacticalEditorModal: document.querySelector("#tacticalEditorModal"),
+  tacticalEditorCloseBtn: document.querySelector("#tacticalEditorCloseBtn"),
+  tacticalEditorCancelBtn: document.querySelector("#tacticalEditorCancelBtn"),
+  tacticalEditorSaveBtn: document.querySelector("#tacticalEditorSaveBtn"),
+  tacticalEditorSubtitle: document.querySelector("#tacticalEditorSubtitle"),
+  tacticalEditorName: document.querySelector("#tacticalEditorName"),
+  tacticalEditorDesignator: document.querySelector("#tacticalEditorDesignator"),
+  tacticalEditorObjectClass: document.querySelector("#tacticalEditorObjectClass"),
+  tacticalEditorAffiliation: document.querySelector("#tacticalEditorAffiliation"),
+  tacticalEditorDomain: document.querySelector("#tacticalEditorDomain"),
+  tacticalEditorUnitType: document.querySelector("#tacticalEditorUnitType"),
+  tacticalEditorUnitSize: document.querySelector("#tacticalEditorUnitSize"),
+  tacticalEditorCotType: document.querySelector("#tacticalEditorCotType"),
+  tacticalEditorSidc: document.querySelector("#tacticalEditorSidc"),
+  tacticalEditorLat: document.querySelector("#tacticalEditorLat"),
+  tacticalEditorLon: document.querySelector("#tacticalEditorLon"),
+  tacticalEditorGeometrySummary: document.querySelector("#tacticalEditorGeometrySummary"),
+  tacticalEditorRemarks: document.querySelector("#tacticalEditorRemarks"),
+  tacticalEditorAssetLinks: document.querySelector("#tacticalEditorAssetLinks"),
+  tacticalEditorPreview: document.querySelector("#tacticalEditorPreview"),
+  tacticalEditorPreviewLabel: document.querySelector("#tacticalEditorPreviewLabel"),
+  tacticalEditorValidation: document.querySelector("#tacticalEditorValidation"),
   fetchWeatherBtn: document.querySelector("#fetchWeatherBtn"),
   tempLabel: document.querySelector("#tempLabel"),
   tempC: document.querySelector("#tempC"),
@@ -1506,7 +1741,9 @@ const state = {
   map: null,
   baseLayer: null,
   placingAsset: false,
+  placingTactical: false,
   pendingEmitterData: null,
+  pendingTacticalPlacement: null,
   draw: {
     mode: null,        // "circle" | "rectangle" | "polyline" | null
     points: [],        // accumulated latlngs for polyline/rectangle
@@ -1518,6 +1755,8 @@ const state = {
   },
   assetMarkers: new Map(),
   assets: [],
+  tacticalObjects: [],
+  tacticalLayers: new Map(),
   importedItems: [],
   importProgress: {
     active: false,
@@ -1684,6 +1923,21 @@ const state = {
     message: "",
     lastPollAt: "",
   },
+  takRuntime: {
+    objectsByUid: new Map(),
+    layersByUid: new Map(),
+    status: "idle",
+    message: "",
+    profileId: "",
+    projectId: null,
+    provider: "backend-direct",
+    lastEventAt: "",
+  },
+  tacticalEditor: {
+    mode: null,
+    targetId: null,
+    workingCopy: null,
+  },
   authScreenMode: "login",
   canceledSimulationRequestIds: new Set(),
 };
@@ -1703,6 +1957,8 @@ function updateModalBodyState() {
     (dom.simulationModal && !dom.simulationModal.classList.contains("hidden"))
     || (dom.importProgressModal && !dom.importProgressModal.classList.contains("hidden"))
     || (dom.deleteProgressModal && !dom.deleteProgressModal.classList.contains("hidden"))
+    || (dom.tacticalPaletteModal && !dom.tacticalPaletteModal.classList.contains("hidden"))
+    || (dom.tacticalEditorModal && !dom.tacticalEditorModal.classList.contains("hidden"))
     || (emitterBackdrop && !emitterBackdrop.classList.contains("hidden"))
   );
   document.body.classList.toggle("emitter-modal-open", hasOpenModal);
@@ -2121,133 +2377,240 @@ function isTakLiveImportedItem(item) {
   return Boolean(item?.tak?.source === "tak-live-pli");
 }
 
-function getTakLiveItems() {
-  return state.importedItems.filter(isTakLiveImportedItem);
+function buildTacticalContentId(id) {
+  return `tactical:${id}`;
 }
 
-function ensureTakInboundFolder() {
+function buildTakLiveContentId(uid) {
+  return `taklive:${uid}`;
+}
+
+function getTakLiveRenderableObjects() {
+  return [...state.takRuntime.objectsByUid.values()];
+}
+
+function ensureTakLiveFolder(objectClass = "unit") {
   const takFolderId = createOrGetNestedMapContentFolder("TAK", null, { collapsed: false });
-  return createOrGetNestedMapContentFolder("Inbound", takFolderId, { collapsed: false });
+  const folderName = TACTICAL_LIVE_FOLDER_NAMES[objectClass] || "Live Units";
+  return createOrGetNestedMapContentFolder(folderName, takFolderId, { collapsed: false });
 }
 
-function buildTakLiveMarkerStyle(contact) {
-  const type = String(contact?.cotType || "").toLowerCase();
-  const isFriendly = type.startsWith("a-f");
-  const isHostNation = type.startsWith("a-n");
-  const isEnemy = type.startsWith("a-h");
-  const color = isEnemy ? "#ff8080" : isHostNation ? "#aaffaa" : isFriendly ? "#80c8ff" : "#7dd3fc";
-  return {
-    color,
-    size: 28,
-    scale: 1,
+function getTacticalAffiliationColor(affiliation = "friendly") {
+  if (affiliation === "hostile") return "#ff8080";
+  if (affiliation === "neutral") return "#aaffaa";
+  if (affiliation === "friendly") return "#80c8ff";
+  return "#fef08a";
+}
+
+function getTacticalShapeStyle(object) {
+  const color = getTacticalAffiliationColor(normalizeTacticalAffiliation(object?.affiliation));
+  const base = object?.style && typeof object.style === "object" ? object.style : {};
+  return normalizeImportedShapeStyle(object?.geometryType || "Polygon", {
+    color: base.color || color,
+    fillColor: base.fillColor || color,
+    fillOpacity: Number.isFinite(Number(base.fillOpacity))
+      ? Number(base.fillOpacity)
+      : object?.objectClass === "geofence" ? 0.08 : 0.14,
+    weight: Number.isFinite(Number(base.weight)) ? Number(base.weight) : 2,
+    lineStyle: base.lineStyle || (object?.objectClass === "route" ? "dashed" : "solid"),
+  });
+}
+
+function buildTacticalPointIcon(object) {
+  const unit = getTacticalDisplayUnit(object);
+  const html = `<div class="tactical-map-icon tactical-map-icon--labelled">${renderToUnitIcon(unit)}</div>`;
+  return L.divIcon({
+    className: "tactical-leaflet-icon",
+    html,
+    iconSize: [60, 60],
+    iconAnchor: [30, 30],
+    popupAnchor: [0, -20],
+  });
+}
+
+function renderTacticalPopup(object, { live = false } = {}) {
+  const lines = [];
+  if (object?.cotType) lines.push(`CoT: ${object.cotType}`);
+  if (object?.objectClass) lines.push(`Class: ${object.objectClass}`);
+  if (object?.designator) lines.push(`Designator: ${object.designator}`);
+  if (object?.remarks) lines.push(`Remarks: ${object.remarks}`);
+  if (live && object?.detail?.team) lines.push(`Team: ${object.detail.team}`);
+  if (live && object?.detail?.role) lines.push(`Role: ${object.detail.role}`);
+  if (live && object?.detail?.lastSeenAt) lines.push(`Last seen: ${formatTakTimestamp(object.detail.lastSeenAt)}`);
+  if (object?.staleAt) lines.push(`Stale: ${formatTakTimestamp(object.staleAt)}`);
+  return `
+    <strong>${escapeHtml(object?.name || object?.uid || "Tactical Item")}</strong><br>
+    ${escapeHtml(object?.designator || object?.uid || "")}
+    ${lines.length ? `<br>${lines.map((line) => escapeHtml(line)).join("<br>")}` : ""}
+  `;
+}
+
+function applyTacticalLabel(object, layer) {
+  if (!layer?.bindTooltip) return;
+  layer.unbindTooltip?.();
+  if (!object?.showLabel || !object?.name) return;
+  layer.bindTooltip(object.name, {
+    permanent: true,
+    direction: isTacticalPointGeometry(object.geometryType) ? "right" : "center",
+    className: `tactical-map-label${isTacticalPointGeometry(object.geometryType) ? " tactical-map-label--point" : ""}`,
+    offset: isTacticalPointGeometry(object.geometryType) ? [28, 0] : [0, 0],
+    interactive: false,
+  });
+}
+
+function createTacticalLeafletLayer(object, contentId, { live = false } = {}) {
+  const tactical = normalizeTacticalObject(object);
+  if (!state.map) return null;
+  if (tactical.geometryType === "Point") {
+    const layer = L.marker([Number(tactical.coordinates[0]), Number(tactical.coordinates[1])], {
+      icon: buildTacticalPointIcon(tactical),
+      draggable: !live && !tactical.readOnly,
+      pane: getMapContentPaneName(contentId),
+    });
+    layer.bindPopup(renderTacticalPopup(tactical, { live }));
+    layer.on("click", () => focusMapContent(contentId));
+    if (!live) {
+      layer.on("contextmenu", (event) => {
+        L.DomEvent.stopPropagation(event);
+        editMapContent(contentId);
+      });
+      layer.on("dragend", () => {
+        const markerLatLng = layer.getLatLng();
+        const existing = getTacticalObjectById(tactical.id);
+        if (!existing) return;
+        existing.coordinates = [Number(markerLatLng.lat), Number(markerLatLng.lng)];
+        existing.lastModified = nowIso();
+        layer.setPopupContent(renderTacticalPopup(existing));
+        saveMapState();
+        syncCesiumEntities();
+      });
+    }
+    applyTacticalLabel(tactical, layer);
+    return layer;
+  }
+
+  const layer = createImportedLayer({
+    contentId,
+    geometryType: tactical.geometryType,
+    coordinates: tactical.coordinates,
+    shapeStyle: getTacticalShapeStyle(tactical),
+    draggable: false,
+  });
+  layer.bindPopup(renderTacticalPopup(tactical, { live }));
+  layer.on("click", () => focusMapContent(contentId));
+  if (!live) {
+    layer.on("contextmenu", (event) => {
+      L.DomEvent.stopPropagation(event);
+      editMapContent(contentId);
+    });
+  }
+  applyTacticalLabel(tactical, layer);
+  return layer;
+}
+
+function renderTacticalObjectLayer(object) {
+  if (!state.map) return null;
+  const tactical = normalizeTacticalObject(object);
+  const existing = state.tacticalLayers.get(tactical.id);
+  existing?.remove?.();
+  const contentId = buildTacticalContentId(tactical.id);
+  const layer = createTacticalLeafletLayer(tactical, contentId, { live: false });
+  if (!layer) return null;
+  state.tacticalLayers.set(tactical.id, layer);
+  if (!isContentEffectivelyHidden(contentId)) {
+    layer.addTo(state.map);
+  }
+  return layer;
+}
+
+function removeTacticalObjectLayer(objectId) {
+  const layer = state.tacticalLayers.get(objectId);
+  layer?.remove?.();
+  state.tacticalLayers.delete(objectId);
+}
+
+function renderTakLiveLayer(object) {
+  if (!state.map) return null;
+  const contentId = buildTakLiveContentId(object.uid);
+  const existing = state.takRuntime.layersByUid.get(object.uid);
+  existing?.remove?.();
+  const layer = createTacticalLeafletLayer(object, contentId, { live: true });
+  if (!layer) return null;
+  state.takRuntime.layersByUid.set(object.uid, layer);
+  if (!isContentEffectivelyHidden(contentId)) {
+    layer.addTo(state.map);
+  }
+  return layer;
+}
+
+function removeTakLiveRuntimeObject(uid) {
+  const contentId = buildTakLiveContentId(uid);
+  state.takRuntime.layersByUid.get(uid)?.remove?.();
+  state.takRuntime.layersByUid.delete(uid);
+  state.takRuntime.objectsByUid.delete(uid);
+  state.mapContentAssignments.delete(contentId);
+  state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== contentId);
+  state.hiddenContentIds.delete(contentId);
+}
+
+function buildTakLiveObject(contact, profile) {
+  const cotType = String(contact?.cotType || "");
+  const domain = deriveTacticalDomainFromCotType(cotType);
+  const objectClass = String(cotType || "").toLowerCase().startsWith("a-") ? "unit" : "track";
+  const detail = {
+    team: contact?.team || "",
+    role: contact?.role || "",
+    lastSeenAt: contact?.lastSeenAt || "",
   };
-}
-
-function buildTakLiveSubtitle(contact, profile) {
-  const parts = ["TAK Live PLI"];
-  if (profile?.label) parts.push(profile.label);
-  if (contact?.role) parts.push(contact.role);
-  return parts.join(" | ");
+  return normalizeTacticalObject({
+    id: `live-${contact.uid}`,
+    uid: contact.uid,
+    source: "tak-live",
+    objectClass,
+    geometryType: "Point",
+    coordinates: [Number(contact.lat), Number(contact.lon)],
+    cotType,
+    domain,
+    affiliation: deriveTacticalAffiliationFromCotType(cotType),
+    unitType: deriveTacticalUnitTypeFromDomain(domain),
+    size: "team",
+    name: contact.callsign || contact.uid,
+    designator: contact.callsign || "",
+    detail,
+    staleAt: contact.stale || "",
+    provider: profile?.label || "TAK",
+    readOnly: true,
+    showLabel: true,
+  });
 }
 
 function upsertTakLiveContact(contact, profile) {
   if (!Number.isFinite(Number(contact?.lat)) || !Number.isFinite(Number(contact?.lon)) || !contact?.uid) {
     return null;
   }
-
-  const existing = state.importedItems.find((item) => isTakLiveImportedItem(item) && item.tak?.uid === contact.uid) ?? null;
-  const folderId = ensureTakInboundFolder();
-  const markerStyle = buildTakLiveMarkerStyle(contact);
-  const tak = normalizeTakMetadata({
-    uid: contact.uid,
-    profileId: profile?.id || "",
-    cotType: contact.cotType || "",
-    source: "tak-live-pli",
-    staleAt: contact.stale || "",
-    how: contact.how || "",
-    detail: {
-      callsign: contact.callsign || contact.uid,
-      role: contact.role || "",
-      team: contact.team || "",
-      lastSeenAt: contact.lastSeenAt || "",
-    },
-  });
-
-  if (existing) {
-    existing.name = contact.callsign || existing.name || contact.uid;
-    existing.subtitle = buildTakLiveSubtitle(contact, profile);
-    existing.properties = {
-      ...(existing.properties ?? {}),
-      cotType: contact.cotType || "",
-      role: contact.role || "",
-      team: contact.team || "",
-      lastSeenAt: contact.lastSeenAt || "",
-      stale: contact.stale || "",
-    };
-    existing.markerStyle = markerStyle;
-    existing.tak = tak;
-    existing.lastModified = nowIso();
-    existing.layer.setLatLng([Number(contact.lat), Number(contact.lon)]);
-    const icon = buildImportedPointIcon(existing.markerStyle);
-    if (icon) existing.layer.setIcon(icon);
-    existing.layer.setPopupContent(renderImportedItemPopup(existing));
-    applyItemLabel(existing);
-    setMapContentFolderId(`imported:${existing.id}`, folderId);
-    return existing;
-  }
-
-  const item = stampContentRecord({
-    id: generateId(),
-    name: contact.callsign || contact.uid,
-    subtitle: buildTakLiveSubtitle(contact, profile),
-    kind: "tak-live-point",
-    geometryType: "Point",
-    folderPath: ["TAK", "Inbound"],
-    sourceLabel: "TAK Live",
-    properties: {
-      cotType: contact.cotType || "",
-      role: contact.role || "",
-      team: contact.team || "",
-      lastSeenAt: contact.lastSeenAt || "",
-      stale: contact.stale || "",
-    },
-    drawn: false,
-    tak,
-    shapeKind: "point",
-    markerStyle,
-    showLabel: true,
-    layer: null,
-  });
-
-  const contentId = `imported:${item.id}`;
-  item.layer = createImportedLayer({
-    contentId,
-    geometryType: "Point",
-    coordinates: [Number(contact.lat), Number(contact.lon)],
-    markerStyle,
-  });
-  item.layer.addTo(state.map);
-  item.layer.bindPopup(renderImportedItemPopup(item));
-  item.layer.on?.("click", () => focusMapContent(contentId));
-  state.importedItems.push(item);
+  const object = buildTakLiveObject(contact, profile);
+  state.takRuntime.objectsByUid.set(object.uid, object);
+  state.takRuntime.lastEventAt = nowIso();
+  const folderId = ensureTakLiveFolder(object.objectClass);
+  const contentId = buildTakLiveContentId(object.uid);
   setMapContentFolderId(contentId, folderId);
-  state.mapContentOrder.push(contentId);
-  applyItemLabel(item);
-  return item;
+  if (!state.mapContentOrder.includes(contentId)) {
+    state.mapContentOrder.push(contentId);
+  }
+  renderTakLiveLayer(object);
+  return object;
 }
 
 function removeTakLiveContactsNotIn(seenUids = new Set()) {
-  getTakLiveItems().forEach((item) => {
-    if (!seenUids.has(item?.tak?.uid)) {
-      removeImportedItem(item.id, { deferFinalize: true, silent: true });
+  [...state.takRuntime.objectsByUid.keys()].forEach((uid) => {
+    if (!seenUids.has(uid)) {
+      removeTakLiveRuntimeObject(uid);
     }
   });
 }
 
 function clearTakLiveContacts() {
-  getTakLiveItems().forEach((item) => {
-    removeImportedItem(item.id, { deferFinalize: true, silent: true });
-  });
+  [...state.takRuntime.objectsByUid.keys()].forEach((uid) => removeTakLiveRuntimeObject(uid));
   renderMapContents();
   syncCesiumEntities();
 }
@@ -2261,6 +2624,10 @@ function stopTakLivePolling({ clearContacts = false } = {}) {
   state.takLive.status = "idle";
   state.takLive.message = "";
   state.takLive.lastPollAt = "";
+  state.takRuntime.projectId = null;
+  state.takRuntime.status = "idle";
+  state.takRuntime.message = "";
+  state.takRuntime.profileId = "";
   if (clearContacts) {
     clearTakLiveContacts();
   }
@@ -2287,11 +2654,15 @@ async function pollTakLiveContacts({ immediate = false } = {}) {
     state.takLive.status = payload.status || (payload.linked ? "connected" : "unlinked");
     state.takLive.message = payload.message || "";
     state.takLive.lastPollAt = nowIso();
+    state.takRuntime.status = state.takLive.status;
+    state.takRuntime.message = state.takLive.message;
 
     if (!payload.linked) {
       clearTakLiveContacts();
     } else {
       const profile = payload.profile ?? getTakProfileForProject(currentProjectId);
+      state.takRuntime.profileId = profile?.id || "";
+      state.takRuntime.projectId = currentProjectId;
       const seen = new Set();
       (Array.isArray(payload.contacts) ? payload.contacts : []).forEach((contact) => {
         if (!contact?.uid) return;
@@ -2305,6 +2676,8 @@ async function pollTakLiveContacts({ immediate = false } = {}) {
   } catch (error) {
     state.takLive.status = "error";
     state.takLive.message = error.message;
+    state.takRuntime.status = "error";
+    state.takRuntime.message = error.message;
   } finally {
     if (state.session.token && state.session.activeProjectId === currentProjectId && isTakEnabledForProject(currentProjectId)) {
       state.takLive.pollTimerId = window.setTimeout(() => {
@@ -2337,6 +2710,416 @@ function formatTakTimestamp(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "";
   return parsed.toLocaleString();
+}
+
+function getDefaultPlanSpawnPosition() {
+  const canvas = document.getElementById("toCanvas");
+  if (!canvas) {
+    return { x: 240, y: 160 };
+  }
+  return {
+    x: Math.max(80, (canvas.clientWidth / 2) - (_toState.panX / Math.max(_toState.zoom, 0.01))),
+    y: Math.max(80, (canvas.clientHeight / 2) - (_toState.panY / Math.max(_toState.zoom, 0.01))),
+  };
+}
+
+function getTacticalObjectByPlanUnitId(unitId) {
+  return state.tacticalObjects.find((entry) => Number(entry.linkedPlanUnitId) === Number(unitId)) ?? null;
+}
+
+function ensureLinkedPlanUnitForTacticalObject(object) {
+  if (!isUnitTacticalObject(object)) {
+    return null;
+  }
+  const existing = getLinkedPlanUnitForTacticalObject(object);
+  if (existing) {
+    existing.label = object.name || existing.label;
+    existing.designator = object.designator || existing.designator;
+    existing.affiliation = normalizeTacticalAffiliation(object.affiliation);
+    existing.type = normalizeToUnitType(object.unitType);
+    existing.size = object.size || existing.size;
+    return existing;
+  }
+  const spawn = getDefaultPlanSpawnPosition();
+  const unit = addToUnit({
+    label: object.name,
+    designator: object.designator,
+    affiliation: normalizeTacticalAffiliation(object.affiliation),
+    type: normalizeToUnitType(object.unitType),
+    size: object.size || "battalion",
+    x: spawn.x,
+    y: spawn.y,
+  });
+  object.linkedPlanUnitId = unit.id;
+  return unit;
+}
+
+function syncTacticalObjectFromPlanUnit(unitId) {
+  const object = getTacticalObjectByPlanUnitId(unitId);
+  const unit = _toState.units.find((entry) => entry.id === Number(unitId));
+  if (!object || !unit) {
+    return;
+  }
+  object.name = unit.label || object.name;
+  object.designator = unit.designator || object.designator;
+  object.affiliation = normalizeTacticalAffiliation(unit.affiliation);
+  object.unitType = normalizeToUnitType(unit.type);
+  object.size = unit.size || object.size;
+  object.domain = normalizeTacticalDomain(resolveMilstdDomain(unit));
+  object.cotType = object.cotType || buildDefaultCotTypeForTacticalObject(object.objectClass, object.affiliation, object.domain);
+  object.lastModified = nowIso();
+  renderTacticalObjectLayer(object);
+  renderMapContents();
+  syncCesiumEntities();
+}
+
+function syncAllTacticalObjectsFromPlan() {
+  state.tacticalObjects = state.tacticalObjects.filter((object) => {
+    if (!Number.isFinite(Number(object.linkedPlanUnitId))) {
+      return true;
+    }
+    const unit = _toState.units.find((entry) => entry.id === Number(object.linkedPlanUnitId));
+    if (!unit) {
+      removeTacticalObjectLayer(object.id);
+      state.mapContentAssignments.delete(buildTacticalContentId(object.id));
+      state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== buildTacticalContentId(object.id));
+      return false;
+    }
+    return true;
+  });
+  state.tacticalObjects
+    .filter((object) => Number.isFinite(Number(object.linkedPlanUnitId)))
+    .forEach((object) => syncTacticalObjectFromPlanUnit(object.linkedPlanUnitId));
+}
+
+function updateLinkedAssetsForTacticalUnit(object, linkedAssetIds = []) {
+  const nextIds = new Set((linkedAssetIds || []).map(String));
+  if (!Number.isFinite(Number(object?.linkedPlanUnitId))) {
+    return;
+  }
+  state.assets.forEach((asset) => {
+    if (nextIds.has(String(asset.id))) {
+      asset.toUnitId = Number(object.linkedPlanUnitId);
+    } else if (Number(asset.toUnitId) === Number(object.linkedPlanUnitId)) {
+      asset.toUnitId = null;
+    }
+  });
+  object.linkedAssetIds = [...nextIds];
+  renderAssets();
+}
+
+function deleteTacticalObject(objectId, { silent = false } = {}) {
+  const object = getTacticalObjectById(objectId);
+  if (!object) return;
+  if (Number.isFinite(Number(object.linkedPlanUnitId))) {
+    const linkedAssets = state.assets.filter((asset) => Number(asset.toUnitId) === Number(object.linkedPlanUnitId));
+    if (linkedAssets.length) {
+      const confirmed = confirm(`Remove ${object.name} and clear ${linkedAssets.length} linked RF emitter${linkedAssets.length === 1 ? "" : "s"} from this unit?`);
+      if (!confirmed) {
+        return;
+      }
+      linkedAssets.forEach((asset) => { asset.toUnitId = null; });
+      renderAssets();
+    }
+    _toState.links = _toState.links.filter((link) => link.parentId !== Number(object.linkedPlanUnitId) && link.childId !== Number(object.linkedPlanUnitId));
+    _toState.units = _toState.units.filter((unit) => unit.id !== Number(object.linkedPlanUnitId));
+    clearToSelection();
+    renderToView();
+  }
+  removeTacticalObjectLayer(object.id);
+  state.tacticalObjects = state.tacticalObjects.filter((entry) => entry.id !== object.id);
+  const contentId = buildTacticalContentId(object.id);
+  state.mapContentAssignments.delete(contentId);
+  state.mapContentOrder = state.mapContentOrder.filter((entryId) => entryId !== contentId);
+  state.hiddenContentIds.delete(contentId);
+  renderMapContents();
+  syncCesiumEntities();
+  saveMapState();
+  if (!silent) {
+    setStatus(`Removed ${object.name}.`);
+  }
+}
+
+function buildTacticalEditorAssetLinks(selectedIds = []) {
+  if (!dom.tacticalEditorAssetLinks) return;
+  const selected = new Set((selectedIds || []).map(String));
+  if (!state.assets.length) {
+    dom.tacticalEditorAssetLinks.innerHTML = '<div class="tactical-asset-link-empty">No RF emitters are available to link.</div>';
+    return;
+  }
+  dom.tacticalEditorAssetLinks.innerHTML = state.assets.map((asset) => `
+    <label class="tactical-asset-link-row">
+      <input type="checkbox" value="${escapeHtml(asset.id)}" ${selected.has(String(asset.id)) ? "checked" : ""}>
+      <span>${escapeHtml(asset.name || asset.emitterLabel || asset.unit || asset.id)} <span class="fine-print">(${escapeHtml(asset.type || "asset")})</span></span>
+    </label>
+  `).join("");
+}
+
+function getSelectedTacticalEditorAssetIds() {
+  return [...(dom.tacticalEditorAssetLinks?.querySelectorAll('input[type="checkbox"]:checked') ?? [])]
+    .map((input) => String(input.value));
+}
+
+function updateTacticalEditorPreview() {
+  const previewAffiliation = normalizeTacticalAffiliation(dom.tacticalEditorAffiliation?.value || "friendly");
+  const previewType = normalizeToUnitType(dom.tacticalEditorUnitType?.value || "infantry");
+  const previewSize = dom.tacticalEditorUnitSize?.value || "battalion";
+  const previewUnit = normalizeToUnit({
+    id: 0,
+    label: dom.tacticalEditorName?.value?.trim() || buildDefaultToUnitLabel(previewSize, previewType),
+    designator: dom.tacticalEditorDesignator?.value?.trim() || "",
+    affiliation: previewAffiliation,
+    type: previewType,
+    size: previewSize,
+  });
+  if (dom.tacticalEditorPreview) {
+    dom.tacticalEditorPreview.innerHTML = `<div class="tactical-map-icon">${renderToUnitIcon(previewUnit)}</div>`;
+  }
+  if (dom.tacticalEditorPreviewLabel) {
+    const cotType = (dom.tacticalEditorCotType?.value || "").trim();
+    const objectClass = dom.tacticalEditorObjectClass?.value || "unit";
+    dom.tacticalEditorPreviewLabel.textContent = `${previewUnit.label || "Tactical Item"} • ${objectClass}${cotType ? ` • ${cotType}` : ""}`;
+  }
+}
+
+function syncTacticalEditorUi() {
+  const objectClass = dom.tacticalEditorObjectClass?.value || "unit";
+  const isUnit = objectClass === "unit";
+  const isPoint = state.tacticalEditor.workingCopy?.geometryType === "Point";
+  if (dom.tacticalEditorCotType && !dom.tacticalEditorCotType.value.trim()) {
+    dom.tacticalEditorCotType.value = buildDefaultCotTypeForTacticalObject(
+      objectClass,
+      dom.tacticalEditorAffiliation?.value || "friendly",
+      dom.tacticalEditorDomain?.value || "ground",
+    );
+  }
+  const linkPanel = dom.tacticalEditorAssetLinks?.closest(".tactical-asset-link-panel");
+  linkPanel?.classList.toggle("hidden", !isUnit);
+  dom.tacticalEditorUnitType?.closest("label")?.classList.toggle("hidden", objectClass === "route" || objectClass === "geofence" || objectClass === "drawing" || objectClass === "shape");
+  dom.tacticalEditorUnitSize?.closest("label")?.classList.toggle("hidden", !isUnit);
+  dom.tacticalEditorLat?.closest("label")?.classList.toggle("hidden", !isPoint);
+  dom.tacticalEditorLon?.closest("label")?.classList.toggle("hidden", !isPoint);
+  updateTacticalEditorPreview();
+}
+
+function closeTacticalEditorModal() {
+  dom.tacticalEditorModal?.classList.add("hidden");
+  updateModalBodyState();
+  state.tacticalEditor.mode = null;
+  state.tacticalEditor.targetId = null;
+  state.tacticalEditor.workingCopy = null;
+}
+
+function openTacticalEditorModal(object, { mode = "create", live = false } = {}) {
+  const tactical = normalizeTacticalObject(object);
+  state.tacticalEditor.mode = mode;
+  state.tacticalEditor.targetId = tactical.id;
+  state.tacticalEditor.workingCopy = tactical;
+  if (dom.tacticalEditorSubtitle) {
+    dom.tacticalEditorSubtitle.textContent = live
+      ? "Reviewing a live TAK object. Runtime tracks are read-only."
+      : mode === "edit"
+        ? "Update the tactical item, shared unit metadata, and map symbology."
+        : "Configure the symbology, identity, and map placement.";
+  }
+  dom.tacticalEditorName.value = tactical.name || "";
+  dom.tacticalEditorDesignator.value = tactical.designator || "";
+  dom.tacticalEditorObjectClass.value = tactical.objectClass || "unit";
+  dom.tacticalEditorAffiliation.value = normalizeTacticalAffiliation(tactical.affiliation);
+  dom.tacticalEditorDomain.value = normalizeTacticalDomain(tactical.domain);
+  dom.tacticalEditorUnitType.value = normalizeToUnitType(tactical.unitType);
+  dom.tacticalEditorUnitSize.value = tactical.size || "battalion";
+  dom.tacticalEditorCotType.value = tactical.cotType || "";
+  dom.tacticalEditorSidc.value = tactical.sidc || "";
+  dom.tacticalEditorLat.value = tactical.geometryType === "Point" ? Number(tactical.coordinates[0] ?? 0).toFixed(6) : "";
+  dom.tacticalEditorLon.value = tactical.geometryType === "Point" ? Number(tactical.coordinates[1] ?? 0).toFixed(6) : "";
+  dom.tacticalEditorGeometrySummary.value = formatTacticalGeometrySummary(tactical);
+  dom.tacticalEditorRemarks.value = tactical.remarks || "";
+  dom.tacticalEditorValidation.textContent = live ? "Live TAK items are rendered read-only. Use Promote later if you want persistence." : "";
+  buildTacticalEditorAssetLinks(tactical.linkedAssetIds);
+  syncTacticalEditorUi();
+  dom.tacticalEditorModal?.classList.remove("hidden");
+  updateModalBodyState();
+  dom.tacticalEditorName?.focus();
+  dom.tacticalEditorName?.select();
+}
+
+function beginTacticalPlacement(template) {
+  if (!template) return;
+  state.pendingTacticalPlacement = template;
+  closeTacticalPaletteModal();
+  if (template.drawMode) {
+    setAssetPlacementMode(false);
+    setTacticalPlacementMode(false);
+    startDrawing(template.drawMode);
+    setStatus(`Draw the ${template.name.toLowerCase()} geometry on the map.`);
+    return;
+  }
+  setAssetPlacementMode(false);
+  setTacticalPlacementMode(true);
+  setStatus(`Click ${state.view3dEnabled ? "the scene" : "the map"} to place ${template.name}.`);
+}
+
+function createTacticalDraftFromPlacement(template, geometryType, coordinates, extra = {}) {
+  const objectClass = template.objectClass || "unit";
+  const domain = normalizeTacticalDomain(template.domain || deriveTacticalDomainFromCotType(template.cotType));
+  const unitType = normalizeToUnitType(template.unitType || deriveTacticalUnitTypeFromDomain(domain));
+  const size = objectClass === "unit" ? "battalion" : "team";
+  const name = template.name || buildDefaultToUnitLabel(size, unitType);
+  return normalizeTacticalObject({
+    source: "manual",
+    objectClass,
+    geometryType,
+    shapeKind: extra.shapeKind || template.shapeKind || (geometryType === "LineString" ? "route" : geometryType === "Polygon" ? "polygon" : "point"),
+    coordinates,
+    cotType: template.cotType || buildDefaultCotTypeForTacticalObject(objectClass, "friendly", domain),
+    domain,
+    affiliation: "friendly",
+    unitType,
+    size,
+    name,
+    designator: "",
+    remarks: "",
+    detail: extra.isCircle
+      ? {
+          ...(extra.detail || {}),
+          radiusM: Number(extra.radiusM) || 0,
+          center: extra.center ? { lat: Number(extra.center.lat), lng: Number(extra.center.lng) } : null,
+        }
+      : (extra.detail || {}),
+    linkedAssetIds: [],
+    showLabel: true,
+  });
+}
+
+function finalizePendingTacticalPlacement(geometryType, coordinates, extra = {}) {
+  const template = state.pendingTacticalPlacement;
+  state.pendingTacticalPlacement = null;
+  setTacticalPlacementMode(false);
+  if (!template) {
+    return false;
+  }
+  const draft = createTacticalDraftFromPlacement(template, geometryType, coordinates, extra);
+  openTacticalEditorModal(draft, { mode: "create" });
+  return true;
+}
+
+function saveTacticalEditor() {
+  if (!state.tacticalEditor.workingCopy) {
+    closeTacticalEditorModal();
+    return;
+  }
+  const original = state.tacticalEditor.workingCopy;
+  const geometryType = original.geometryType;
+  const coordinates = geometryType === "Point"
+    ? [Number(dom.tacticalEditorLat.value), Number(dom.tacticalEditorLon.value)]
+    : original.coordinates;
+  if (geometryType === "Point" && (!Number.isFinite(coordinates[0]) || !Number.isFinite(coordinates[1]))) {
+    dom.tacticalEditorValidation.textContent = "Latitude and longitude are required for point items.";
+    return;
+  }
+  const updated = normalizeTacticalObject({
+    ...original,
+    objectClass: dom.tacticalEditorObjectClass.value,
+    name: dom.tacticalEditorName.value.trim() || original.name,
+    designator: dom.tacticalEditorDesignator.value.trim(),
+    affiliation: dom.tacticalEditorAffiliation.value,
+    domain: dom.tacticalEditorDomain.value,
+    unitType: dom.tacticalEditorUnitType.value,
+    size: dom.tacticalEditorUnitSize.value,
+    cotType: dom.tacticalEditorCotType.value.trim(),
+    sidc: dom.tacticalEditorSidc.value.trim(),
+    coordinates,
+    remarks: dom.tacticalEditorRemarks.value.trim(),
+    linkedAssetIds: getSelectedTacticalEditorAssetIds(),
+    lastModified: nowIso(),
+  });
+  if (!isUnitTacticalObject(updated) && Number.isFinite(Number(original.linkedPlanUnitId))) {
+    state.assets.forEach((asset) => {
+      if (Number(asset.toUnitId) === Number(original.linkedPlanUnitId)) {
+        asset.toUnitId = null;
+      }
+    });
+    _toState.links = _toState.links.filter((link) => link.parentId !== Number(original.linkedPlanUnitId) && link.childId !== Number(original.linkedPlanUnitId));
+    _toState.units = _toState.units.filter((unit) => unit.id !== Number(original.linkedPlanUnitId));
+    updated.linkedPlanUnitId = null;
+    updated.linkedAssetIds = [];
+    renderToView();
+    renderAssets();
+  }
+  if (isUnitTacticalObject(updated)) {
+    const planUnit = ensureLinkedPlanUnitForTacticalObject(updated);
+    updated.linkedPlanUnitId = planUnit?.id ?? updated.linkedPlanUnitId;
+    updateLinkedAssetsForTacticalUnit(updated, updated.linkedAssetIds);
+  }
+
+  const existingIndex = state.tacticalObjects.findIndex((entry) => entry.id === updated.id);
+  if (existingIndex >= 0) {
+    state.tacticalObjects.splice(existingIndex, 1, updated);
+  } else {
+    state.tacticalObjects.push(updated);
+    const contentId = buildTacticalContentId(updated.id);
+    if (!state.mapContentOrder.includes(contentId)) {
+      state.mapContentOrder.push(contentId);
+    }
+  }
+  renderTacticalObjectLayer(updated);
+  renderMapContents();
+  syncCesiumEntities();
+  saveMapState();
+  closeTacticalEditorModal();
+  setStatus(`${updated.name} saved as tactical content.`);
+}
+
+function openTacticalPaletteModal() {
+  renderTacticalPalette();
+  dom.tacticalPaletteModal?.classList.remove("hidden");
+  updateModalBodyState();
+  dom.tacticalPaletteSearch?.focus();
+}
+
+function closeTacticalPaletteModal() {
+  dom.tacticalPaletteModal?.classList.add("hidden");
+  updateModalBodyState();
+}
+
+function renderTacticalPalette() {
+  const query = normalizeMapContentsSearchText(dom.tacticalPaletteSearch?.value || "");
+  const buttons = [...(dom.tacticalPaletteList?.querySelectorAll(".tactical-template-btn") ?? [])];
+  let visibleCount = 0;
+  buttons.forEach((button) => {
+    const fields = [
+      button.dataset.name,
+      button.dataset.objectClass,
+      button.dataset.domain,
+      button.textContent,
+    ];
+    const matches = !query || smartMapContentsMatch(query, fields);
+    button.classList.toggle("hidden", !matches);
+    if (matches) visibleCount += 1;
+  });
+  if (dom.tacticalPaletteStatus) {
+    dom.tacticalPaletteStatus.textContent = visibleCount
+      ? "Choose a template to start placing tactical content."
+      : "No tactical templates matched that search.";
+  }
+}
+
+function cancelPendingTacticalPlacement() {
+  state.pendingTacticalPlacement = null;
+  setTacticalPlacementMode(false);
+}
+
+function initTacticalEditorFormOptions() {
+  if (dom.tacticalEditorAffiliation && document.getElementById("toAffiliation")) {
+    dom.tacticalEditorAffiliation.innerHTML = document.getElementById("toAffiliation").innerHTML;
+  }
+  if (dom.tacticalEditorUnitType && document.getElementById("toUnitType")) {
+    dom.tacticalEditorUnitType.innerHTML = document.getElementById("toUnitType").innerHTML;
+  }
+  if (dom.tacticalEditorUnitSize && document.getElementById("toUnitSize")) {
+    dom.tacticalEditorUnitSize.innerHTML = document.getElementById("toUnitSize").innerHTML;
+  }
 }
 
 function formatTakCertSummary({ hasValue, fileName, updatedAt, pendingName, deleting, emptyText }) {
@@ -4328,14 +5111,18 @@ async function init() {
     if (document.visibilityState === "hidden") flushPendingAutosave();
   });
   dom.map.addEventListener("click", (event) => {
-    if (!state.placingAsset || state.view3dEnabled) {
+    if ((!state.placingAsset && !state.placingTactical) || state.view3dEnabled) {
       return;
     }
     if (event.target.closest(".leaflet-control, .leaflet-popup, .map-overlay, .map-view-toggle")) {
       return;
     }
     const latlng = state.map.mouseEventToLatLng(event);
-    placePendingAssetAt(latlng, "2D map");
+    if (state.placingAsset) {
+      placePendingAssetAt(latlng, "2D map");
+    } else {
+      placePendingTacticalAt(latlng, "2D map");
+    }
   }, true);
 
   // Middle-mouse click on Leaflet map: switch to 3D with a tilted perspective
@@ -4591,6 +5378,52 @@ function wireEvents() {
     }
   });
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
+  dom.addTacticalItemBtn?.addEventListener("click", openTacticalPaletteModal);
+  dom.tacticalPaletteCloseBtn?.addEventListener("click", closeTacticalPaletteModal);
+  dom.tacticalPaletteCancelBtn?.addEventListener("click", closeTacticalPaletteModal);
+  dom.tacticalPaletteModal?.addEventListener("click", (event) => {
+    if (event.target === dom.tacticalPaletteModal) {
+      closeTacticalPaletteModal();
+    }
+  });
+  dom.tacticalPaletteSearch?.addEventListener("input", renderTacticalPalette);
+  dom.tacticalPaletteList?.addEventListener("click", (event) => {
+    const button = event.target.closest(".tactical-template-btn");
+    if (!button) return;
+    beginTacticalPlacement({
+      id: button.dataset.templateId || generateId(),
+      name: button.dataset.name || "Tactical Item",
+      objectClass: button.dataset.objectClass || "unit",
+      domain: button.dataset.domain || "ground",
+      unitType: button.dataset.unitType || "infantry",
+      cotType: button.dataset.cotType || "",
+      geometryType: button.dataset.geometryType || "Point",
+      drawMode: button.dataset.drawMode || "",
+      shapeKind: button.dataset.shapeKind || "",
+    });
+  });
+  initTacticalEditorFormOptions();
+  [
+    dom.tacticalEditorName,
+    dom.tacticalEditorDesignator,
+    dom.tacticalEditorObjectClass,
+    dom.tacticalEditorAffiliation,
+    dom.tacticalEditorDomain,
+    dom.tacticalEditorUnitType,
+    dom.tacticalEditorUnitSize,
+    dom.tacticalEditorCotType,
+  ].filter(Boolean).forEach((input) => {
+    input.addEventListener("input", syncTacticalEditorUi);
+    input.addEventListener("change", syncTacticalEditorUi);
+  });
+  dom.tacticalEditorCloseBtn?.addEventListener("click", closeTacticalEditorModal);
+  dom.tacticalEditorCancelBtn?.addEventListener("click", closeTacticalEditorModal);
+  dom.tacticalEditorSaveBtn?.addEventListener("click", saveTacticalEditor);
+  dom.tacticalEditorModal?.addEventListener("click", (event) => {
+    if (event.target === dom.tacticalEditorModal) {
+      closeTacticalEditorModal();
+    }
+  });
 
   const importFileInput = document.querySelector("#importFileInput");
   if (importFileInput) {
@@ -4682,9 +5515,12 @@ function wireEvents() {
       if (state.relocatingAssetId) { finishAssetRelocation(null); }
       else if (state.relocatingImportedItemId) { finishImportedPointRelocation(null); }
       else if (state.relocatingCircleItemId) { finishCircleRelocation(null); }
+      else if (state.placingTactical || state.pendingTacticalPlacement) { cancelPendingTacticalPlacement(); cancelDrawing(); }
       else if (state.settingsMenuOpen) closeSettingsMenu();
       else if (state.draw.mode) cancelDrawing();
       else if (state.mcSelectMode) toggleMcSelectMode();
+      else if (state.tacticalEditor.mode) closeTacticalEditorModal();
+      else if (dom.tacticalPaletteModal && !dom.tacticalPaletteModal.classList.contains("hidden")) closeTacticalPaletteModal();
       else closeShapeStylePanel();
     }
     if (e.key === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
@@ -4994,6 +5830,12 @@ function serializeCurrentMapState() {
   const serializedImported = state.importedItems
     .filter((item) => !isTakLiveImportedItem(item))
     .map(serializeImportedItem);
+  const serializedTactical = state.tacticalObjects.map(serializeTacticalObject);
+  const serializedOrder = state.mapContentOrder.filter((contentId) => !String(contentId || "").startsWith("taklive:"));
+  const serializedAssignments = Array.from(state.mapContentAssignments.entries())
+    .filter(([contentId]) => !String(contentId || "").startsWith("taklive:"));
+  const serializedHiddenIds = [...state.hiddenContentIds]
+    .filter((contentId) => !String(contentId || "").startsWith("taklive:"));
 
   return {
     schemaVersion: STATE_SCHEMA_VERSION,
@@ -5005,10 +5847,11 @@ function serializeCurrentMapState() {
     weather: state.weather,
     settings: state.settings,
     importedItems: serializedImported,
+    tacticalObjects: serializedTactical,
     mapContentFolders: state.mapContentFolders,
-    mapContentOrder: state.mapContentOrder,
-    mapContentAssignments: Array.from(state.mapContentAssignments.entries()),
-    hiddenContentIds: [...state.hiddenContentIds],
+    mapContentOrder: serializedOrder,
+    mapContentAssignments: serializedAssignments,
+    hiddenContentIds: serializedHiddenIds,
     activeTerrainId: state.activeTerrainId,
     activeProjectId: state.session.activeProjectId ?? null,
   };
@@ -5066,6 +5909,7 @@ function persistMapStateNow() {
         savedAt: compactPayload.savedAt,
         mapView: compactPayload.mapView,
         plan: compactPayload.plan,
+        tacticalObjects: compactPayload.tacticalObjects,
         mapContentFolders: compactPayload.mapContentFolders,
         mapContentOrder: compactPayload.mapContentOrder,
         mapContentAssignments: compactPayload.mapContentAssignments,
@@ -5156,6 +6000,10 @@ function applySavedMapState(rawSaved) {
     closeToEditModal();
     cancelToLink();
   }
+
+  state.tacticalObjects = [];
+  state.tacticalLayers.forEach((layer) => layer?.remove?.());
+  state.tacticalLayers.clear();
 
   // Restore assets — ensure every record carries version metadata after migration.
   if (Array.isArray(saved.assets)) {
@@ -5532,7 +6380,7 @@ function applySettings() {
 }
 
 function updateCenterCrosshairVisibility() {
-  const shouldShow = Boolean(state.settings.centerGridEnabled && !state.placingAsset);
+  const shouldShow = Boolean(state.settings.centerGridEnabled && !isPlacementModeActive());
   dom.centerGridCrosshair?.classList.toggle("hidden", !shouldShow);
   dom.centerGridCrosshair?.classList.remove("placement-crosshair-active");
 }
@@ -7983,6 +8831,20 @@ function setContentLayerVisible(contentId, visible) {
       if (visible) item.layer.addTo(state.map);
       else item.layer.remove();
     }
+  } else if (contentId.startsWith("tactical:")) {
+    const objectId = contentId.slice("tactical:".length);
+    const layer = state.tacticalLayers.get(objectId);
+    if (layer) {
+      if (visible) layer.addTo(state.map);
+      else layer.remove();
+    }
+  } else if (contentId.startsWith("taklive:")) {
+    const uid = contentId.slice("taklive:".length);
+    const layer = state.takRuntime.layersByUid.get(uid);
+    if (layer) {
+      if (visible) layer.addTo(state.map);
+      else layer.remove();
+    }
   } else if (contentId.startsWith("viewshed:")) {
     const vs = state.viewsheds.find((v) => `viewshed:${v.id}` === contentId);
     if (vs?.layer) {
@@ -8903,6 +9765,41 @@ function serializePlanningResultsForAi() {
   };
 }
 
+function serializeTacticalObjectForAi(object) {
+  if (!object) return null;
+  const normalized = normalizeTacticalObject(object);
+  const geometry = normalized.geometryType === "Point"
+    ? {
+        type: "Point",
+        coordinates: {
+          lat: roundAiNumber(normalized.coordinates[0]),
+          lon: roundAiNumber(normalized.coordinates[1]),
+        },
+      }
+    : {
+        type: normalized.geometryType,
+        coordinates: normalized.coordinates,
+      };
+  return {
+    kind: normalized.source === "tak-live" ? "tak-live" : "tactical",
+    id: normalized.id,
+    uid: normalized.uid,
+    name: normalized.name,
+    designator: normalized.designator,
+    objectClass: normalized.objectClass,
+    domain: normalized.domain,
+    affiliation: normalized.affiliation,
+    unitType: normalized.unitType,
+    size: normalized.size,
+    cotType: normalized.cotType,
+    geometry,
+    linkedPlanUnitId: normalized.linkedPlanUnitId,
+    linkedAssetIds: normalized.linkedAssetIds,
+    remarks: normalized.remarks,
+    readOnly: normalized.readOnly,
+  };
+}
+
 function serializeMapContentForAi(contentId) {
   if (!contentId || contentId.startsWith("folder:")) {
     return null;
@@ -8918,6 +9815,14 @@ function serializeMapContentForAi(contentId) {
 
   if (contentId.startsWith("imported:")) {
     return serializeImportedItemForAi(state.importedItems.find((item) => `imported:${item.id}` === contentId));
+  }
+
+  if (contentId.startsWith("tactical:")) {
+    return serializeTacticalObjectForAi(getTacticalObjectById(contentId.slice("tactical:".length)));
+  }
+
+  if (contentId.startsWith("taklive:")) {
+    return serializeTacticalObjectForAi(getTakLiveObjectByUid(contentId.slice("taklive:".length)));
   }
 
   if (contentId.startsWith("terrain:")) {
@@ -8950,6 +9855,12 @@ function getMapContentName(contentId) {
   }
   if (contentId.startsWith("imported:")) {
     return state.importedItems.find((i) => `imported:${i.id}` === contentId)?.name ?? null;
+  }
+  if (contentId.startsWith("tactical:")) {
+    return getTacticalObjectById(contentId.slice("tactical:".length))?.name ?? null;
+  }
+  if (contentId.startsWith("taklive:")) {
+    return getTakLiveObjectByUid(contentId.slice("taklive:".length))?.name ?? null;
   }
   if (contentId.startsWith("viewshed:")) {
     return state.viewsheds.find((v) => `viewshed:${v.id}` === contentId)?.name ?? null;
@@ -12122,17 +13033,38 @@ function onMapClick(event) {
     return;
   }
 
+  if (state.placingTactical) {
+    placePendingTacticalAt(event.latlng, "2D map");
+    return;
+  }
+
   if (state.activeInspectionViewshedId) {
     inspectSignalPoint(event.latlng);
   }
 }
 
+function isPlacementModeActive() {
+  return Boolean(state.placingAsset || state.placingTactical);
+}
+
 function setAssetPlacementMode(enabled) {
   state.placingAsset = Boolean(enabled);
+  if (enabled) state.placingTactical = false;
   state.ui.lastPlacementEventKey = "";
-  dom.map?.classList.toggle("asset-placement-active", state.placingAsset);
-  dom.cesiumContainer?.classList.toggle("asset-placement-active", state.placingAsset);
-  dom.mapStage?.classList.toggle("asset-placement-active", state.placingAsset);
+  dom.map?.classList.toggle("asset-placement-active", isPlacementModeActive());
+  dom.cesiumContainer?.classList.toggle("asset-placement-active", isPlacementModeActive());
+  dom.mapStage?.classList.toggle("asset-placement-active", isPlacementModeActive());
+  updatePlacementInteractionState();
+  updateCenterCrosshairVisibility();
+}
+
+function setTacticalPlacementMode(enabled) {
+  state.placingTactical = Boolean(enabled);
+  if (enabled) state.placingAsset = false;
+  state.ui.lastPlacementEventKey = "";
+  dom.map?.classList.toggle("asset-placement-active", isPlacementModeActive());
+  dom.cesiumContainer?.classList.toggle("asset-placement-active", isPlacementModeActive());
+  dom.mapStage?.classList.toggle("asset-placement-active", isPlacementModeActive());
   updatePlacementInteractionState();
   updateCenterCrosshairVisibility();
 }
@@ -12244,7 +13176,7 @@ function finishImportedPointRelocation(latlng) {
 
 function updatePlacementInteractionState() {
   if (state.map) {
-    if (state.placingAsset) {
+    if (isPlacementModeActive()) {
       state.map.dragging?.disable();
       state.map.doubleClickZoom?.disable();
       state.map.boxZoom?.disable();
@@ -12261,10 +13193,10 @@ function updatePlacementInteractionState() {
 
   const controller = state.cesiumViewer?.scene?.screenSpaceCameraController;
   if (controller) {
-    controller.enableRotate = !state.placingAsset;
-    controller.enableTranslate = !state.placingAsset;
-    controller.enableTilt = !state.placingAsset;
-    controller.enableLook = !state.placingAsset;
+    controller.enableRotate = !isPlacementModeActive();
+    controller.enableTranslate = !isPlacementModeActive();
+    controller.enableTilt = !isPlacementModeActive();
+    controller.enableLook = !isPlacementModeActive();
   }
 }
 
@@ -12296,6 +13228,18 @@ function placePendingAssetAt(latlng, sourceLabel = "map") {
   addAsset(latlng);
   setAssetPlacementMode(false);
   setStatus(`Emitter placed from ${sourceLabel}.`);
+  return true;
+}
+
+function placePendingTacticalAt(latlng, sourceLabel = "map") {
+  if (!state.placingTactical || !latlng) {
+    return false;
+  }
+  if (shouldIgnoreDuplicatePlacement(latlng.lat, latlng.lng)) {
+    return true;
+  }
+  finalizePendingTacticalPlacement("Point", [Number(latlng.lat), Number(latlng.lng)]);
+  setStatus(`Tactical item placed from ${sourceLabel}.`);
   return true;
 }
 
@@ -13892,7 +14836,7 @@ async function initCesiumIfNeeded() {
   const handler = new window.Cesium.ScreenSpaceEventHandler(state.cesiumViewer.scene.canvas);
   handler.setInputAction(async (click) => {
     removeCesium3dTerrainPopup();
-    if (!state.placingAsset) return;
+    if (!state.placingAsset && !state.placingTactical) return;
     const cartesian = await pickCesiumScenePosition(click.position);
     if (!cartesian) {
       setStatus("3D placement pick failed. Zoom closer or click directly on the terrain/building surface.", true);
@@ -13901,7 +14845,11 @@ async function initCesiumIfNeeded() {
     const carto = window.Cesium.Cartographic.fromCartesian(cartesian);
     const lat = window.Cesium.Math.toDegrees(carto.latitude);
     const lon = window.Cesium.Math.toDegrees(carto.longitude);
-    placePendingAssetAt({ lat, lng: lon }, "3D scene");
+    if (state.placingAsset) {
+      placePendingAssetAt({ lat, lng: lon }, "3D scene");
+    } else {
+      placePendingTacticalAt({ lat, lng: lon }, "3D scene");
+    }
   }, window.Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
   handler.setInputAction(async (click) => {
@@ -14669,6 +15617,30 @@ function getMapContentEntries() {
     });
   });
 
+  state.tacticalObjects.forEach((object) => {
+    entries.push({
+      id: buildTacticalContentId(object.id),
+      kind: "tactical",
+      name: object.name,
+      subtitle: `${object.objectClass} | ${object.domain.replace(/_/g, " ")}`,
+      geometryType: object.geometryType,
+      readOnly: Boolean(object.readOnly),
+      tacticalObjectClass: object.objectClass,
+    });
+  });
+
+  getTakLiveRenderableObjects().forEach((object) => {
+    entries.push({
+      id: buildTakLiveContentId(object.uid),
+      kind: "tak-live",
+      name: object.name,
+      subtitle: `${object.provider || "TAK"} | ${object.cotType || object.objectClass}`,
+      geometryType: object.geometryType,
+      readOnly: true,
+      tacticalObjectClass: object.objectClass,
+    });
+  });
+
   state.viewsheds.forEach((viewshed) => {
     entries.push({
       id: `viewshed:${viewshed.id}`,
@@ -15151,6 +16123,9 @@ function getMapContentTypeIcon(entry) {
   if (entry.kind === "planning-region" || entry.kind === "planning-results") {
     return s(`<polygon points="3 11 12 2 21 11 21 21 3 21"/>`);
   }
+  if (entry.kind === "tactical" || entry.kind === "tak-live") {
+    return s(`<path d="M12 2l3 7 7 3-7 3-3 7-3-7-7-3 7-3 3-7z"/>`);
+  }
   // imported / drawn shapes
   const geo = entry.geometryType;
   if (geo === "LineString") return s(`<polyline points="3 17 9 11 13 15 21 7"/>`);
@@ -15576,6 +16551,30 @@ function focusMapContent(contentId) {
     } else if (typeof item.layer.getLatLng === "function") {
       state.map.setView(item.layer.getLatLng(), Math.max(state.map.getZoom(), 15));
     }
+    return;
+  }
+
+  if (contentId.startsWith("tactical:")) {
+    const object = getTacticalObjectById(contentId.slice("tactical:".length));
+    const layer = object ? state.tacticalLayers.get(object.id) : null;
+    if (!object || !layer) return;
+    if (typeof layer.getBounds === "function" && !isTacticalPointGeometry(object.geometryType)) {
+      state.map.fitBounds(layer.getBounds().pad(0.08));
+    } else if (typeof layer.getLatLng === "function") {
+      state.map.setView(layer.getLatLng(), Math.max(state.map.getZoom(), 15));
+    }
+    return;
+  }
+
+  if (contentId.startsWith("taklive:")) {
+    const uid = contentId.slice("taklive:".length);
+    const layer = state.takRuntime.layersByUid.get(uid);
+    if (!layer) return;
+    if (typeof layer.getBounds === "function") {
+      state.map.fitBounds(layer.getBounds().pad(0.08));
+    } else if (typeof layer.getLatLng === "function") {
+      state.map.setView(layer.getLatLng(), Math.max(state.map.getZoom(), 15));
+    }
   }
 }
 
@@ -15603,9 +16602,14 @@ function openMapContentsMenu(event, contentId) {
   event.stopPropagation();
   state.activeMapContentMenuId = contentId;
   const isFolder = contentId.startsWith("folder:");
+  const isTakLive = contentId.startsWith("taklive:");
   const editButton = dom.mapContentsMenu.querySelector('[data-map-content-action="edit"]');
   if (editButton) {
-    editButton.classList.toggle("hidden", isFolder);
+    editButton.classList.toggle("hidden", isFolder || isTakLive);
+  }
+  const renameButton = dom.mapContentsMenu.querySelector('[data-map-content-action="rename"]');
+  if (renameButton) {
+    renameButton.classList.toggle("hidden", isTakLive);
   }
   const simulateButton = dom.mapContentsMenu.querySelector('[data-map-content-action="simulate"]');
   if (simulateButton) {
@@ -15614,6 +16618,10 @@ function openMapContentsMenu(event, contentId) {
   const relocateButton = dom.mapContentsMenu.querySelector('[data-map-content-action="relocate"]');
   if (relocateButton) {
     relocateButton.classList.toggle("hidden", !contentId.startsWith("asset:"));
+  }
+  const deleteButton = dom.mapContentsMenu.querySelector('[data-map-content-action="delete"]');
+  if (deleteButton) {
+    deleteButton.classList.toggle("hidden", isTakLive);
   }
 
   // Bulk edit button: show when 2+ selected imported items share a geometry class
@@ -15833,6 +16841,17 @@ function commitRenameMapContent() {
       item.layer.setPopupContent?.(renderImportedItemPopup(item));
       applyItemLabel(item);
     }
+  } else if (contentId.startsWith("tactical:")) {
+    const object = getTacticalObjectById(contentId.slice("tactical:".length));
+    if (object) {
+      object.name = nextName;
+      if (Number.isFinite(Number(object.linkedPlanUnitId))) {
+        const linkedUnit = _toState.units.find((unit) => unit.id === Number(object.linkedPlanUnitId));
+        if (linkedUnit) linkedUnit.label = nextName;
+        renderToView();
+      }
+      renderTacticalObjectLayer(object);
+    }
   }
 
   renderMapContents();
@@ -15892,6 +16911,15 @@ function editMapContent(contentId) {
     closeMapContentsMenu();
     openShapeStylePanel(item);
     setStatus(`Editing ${item.name}.`);
+    return;
+  }
+
+  if (contentId.startsWith("tactical:")) {
+    const object = getTacticalObjectById(contentId.slice("tactical:".length));
+    if (!object) return;
+    closeMapContentsMenu();
+    openTacticalEditorModal(object, { mode: "edit" });
+    setStatus(`Editing ${object.name}.`);
   }
 }
 
@@ -16107,6 +17135,32 @@ function snapshotContentId(contentId) {
           state.mapContentOrder.push(contentId);
         }
         renderMapContents();
+        saveMapState();
+      },
+    };
+  }
+
+  if (contentId.startsWith("tactical:")) {
+    const id = contentId.slice("tactical:".length);
+    const object = getTacticalObjectById(id);
+    if (!object) return null;
+    const assignment = state.mapContentAssignments.get(contentId);
+    const orderIdx = state.mapContentOrder.indexOf(contentId);
+    const snap = { object: serializeTacticalObject(object), assignment, orderIdx };
+    return {
+      contentId,
+      restore() {
+        if (getTacticalObjectById(snap.object.id)) return;
+        state.tacticalObjects.push(normalizeTacticalObject(snap.object));
+        renderTacticalObjectLayer(getTacticalObjectById(snap.object.id));
+        if (snap.assignment) state.mapContentAssignments.set(contentId, snap.assignment);
+        if (snap.orderIdx >= 0) {
+          state.mapContentOrder.splice(Math.min(snap.orderIdx, state.mapContentOrder.length), 0, contentId);
+        } else {
+          state.mapContentOrder.push(contentId);
+        }
+        renderMapContents();
+        syncCesiumEntities();
         saveMapState();
       },
     };
@@ -16349,6 +17403,20 @@ function deleteMapContent(contentId, options = {}) {
 
   if (contentId.startsWith("imported:")) {
     removeImportedItem(contentId.slice("imported:".length), options);
+    return;
+  }
+
+  if (contentId.startsWith("tactical:")) {
+    deleteTacticalObject(contentId.slice("tactical:".length), { silent: Boolean(options.silent) });
+    return;
+  }
+
+  if (contentId.startsWith("taklive:")) {
+    removeTakLiveRuntimeObject(contentId.slice("taklive:".length));
+    if (!options.deferFinalize) {
+      renderMapContents();
+      syncCesiumEntities();
+    }
   }
 }
 
@@ -16357,6 +17425,11 @@ function removeAsset(assetId, options = {}) {
   const marker = state.assetMarkers.get(assetId);
   marker?.remove();
   state.assetMarkers.delete(assetId);
+  state.tacticalObjects.forEach((object) => {
+    if (Array.isArray(object.linkedAssetIds) && object.linkedAssetIds.includes(String(assetId))) {
+      object.linkedAssetIds = object.linkedAssetIds.filter((id) => String(id) !== String(assetId));
+    }
+  });
   state.assets = state.assets.filter((entry) => entry.id !== assetId);
   state.viewsheds
     .filter((entry) => entry.asset.id === assetId)
@@ -16709,7 +17782,7 @@ function startDrawing(mode) {
   setStatus(hints[mode] ?? "Click on the map.");
 }
 
-function cancelDrawing() {
+function cancelDrawing(preserveTacticalTemplate = false) {
   if (state.draw.previewLayer) {
     state.draw.previewLayer.remove();
     state.draw.previewLayer = null;
@@ -16720,6 +17793,9 @@ function cancelDrawing() {
   }
   state.draw.mode = null;
   state.draw.points = [];
+  if (!preserveTacticalTemplate && state.pendingTacticalPlacement?.drawMode) {
+    state.pendingTacticalPlacement = null;
+  }
   dom.map.classList.remove("leaflet-drawing-active");
   state.map?.getContainer()?.classList.remove("leaflet-drawing-active");
 }
@@ -16730,14 +17806,18 @@ function onDrawClick(latlng) {
 
   if (mode === "point") {
     cancelDrawing();
-    const index = state.importedItems.filter((i) => i.drawn).length;
-    addDrawnFeature({
-      name: `Point ${index + 1}`,
-      geometryType: "Point",
-      coordinates: [latlng.lat, latlng.lng],
-      properties: {},
-      markerStyle: { icon: "dot", color: "#ffffff", size: 24, outlineColor: "#0b1220", outlineWidth: 2 },
-    });
+    if (state.pendingTacticalPlacement) {
+      finalizePendingTacticalPlacement("Point", [Number(latlng.lat), Number(latlng.lng)]);
+    } else {
+      const index = state.importedItems.filter((i) => i.drawn).length;
+      addDrawnFeature({
+        name: `Point ${index + 1}`,
+        geometryType: "Point",
+        coordinates: [latlng.lat, latlng.lng],
+        properties: {},
+        markerStyle: { icon: "dot", color: "#ffffff", size: 24, outlineColor: "#0b1220", outlineWidth: 2 },
+      });
+    }
     return;
   }
 
@@ -16748,7 +17828,7 @@ function onDrawClick(latlng) {
     } else {
       const center = points[0];
       const radiusM = state.map.distance(center, latlng);
-      cancelDrawing();
+      cancelDrawing(Boolean(state.pendingTacticalPlacement));
       commitDrawnShape("Circle", "Polygon", circleToPolygonLatLngs(center, radiusM), { isCircle: true, center, radiusM });
     }
     return;
@@ -16762,7 +17842,7 @@ function onDrawClick(latlng) {
       const [a] = points;
       const b = latlng;
       const corners = [[a.lat, a.lng], [a.lat, b.lng], [b.lat, b.lng], [b.lat, a.lng]];
-      cancelDrawing();
+      cancelDrawing(Boolean(state.pendingTacticalPlacement));
       commitDrawnShape("Rectangle", "Polygon", corners);
     }
     return;
@@ -16771,7 +17851,7 @@ function onDrawClick(latlng) {
   if (mode === "polyline") {
     if (shouldAutoClosePolyline(latlng)) {
       const polygonCoords = points.map((p) => [p.lat, p.lng]);
-      cancelDrawing();
+      cancelDrawing(Boolean(state.pendingTacticalPlacement));
       commitDrawnShape("Polygon", "Polygon", polygonCoords);
       return;
     }
@@ -16795,8 +17875,14 @@ function onMapDblClick(event) {
   // Leaflet fires click then dblclick — the last click already added a point, so remove the duplicate
   const points = state.draw.points.slice(0, -1);
   const coords = points.map((p) => [p.lat, p.lng]);
-  cancelDrawing();
-  commitDrawnShape("Polyline", "LineString", coords);
+  cancelDrawing(Boolean(state.pendingTacticalPlacement));
+  if (state.pendingTacticalPlacement) {
+    finalizePendingTacticalPlacement("LineString", coords, {
+      shapeKind: state.pendingTacticalPlacement.shapeKind || "route",
+    });
+  } else {
+    commitDrawnShape("Polyline", "LineString", coords);
+  }
 }
 
 function shouldAutoClosePolyline(latlng) {
@@ -16874,6 +17960,10 @@ function circleToPolygonLatLngs(center, radiusM, steps = 64) {
 }
 
 function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
+  if (state.pendingTacticalPlacement) {
+    finalizePendingTacticalPlacement(geometryType, coordinates, extra);
+    return;
+  }
   const index = state.importedItems.filter((i) => i.drawn).length;
   const feature = {
     name: `${labelPrefix} ${index + 1}`,
@@ -18979,6 +20069,74 @@ function _syncCesiumEntitiesImmediate() {
       console.warn("[Cesium] GeoJsonDataSource load failed:", err);
     });
   }
+
+  const addCesiumTacticalObject = (object, idPrefix, zIndexBase = 18) => {
+    if (object.geometryType === "Point" && Array.isArray(object.coordinates) && object.coordinates.length >= 2) {
+      const color = C.Color.fromCssColorString(getTacticalAffiliationColor(object.affiliation));
+      safeAddEntity({
+        id: `${idPrefix}:${object.uid || object.id}`,
+        position: C.Cartesian3.fromDegrees(Number(object.coordinates[1]), Number(object.coordinates[0]), 0),
+        point: {
+          pixelSize: object.readOnly ? 11 : 13,
+          color,
+          outlineColor: C.Color.WHITE,
+          outlineWidth: 2,
+          heightReference: C.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: 0,
+        },
+        label: {
+          text: object.name || object.designator || object.uid || "Track",
+          font: "bold 13px Bahnschrift",
+          fillColor: C.Color.WHITE,
+          pixelOffset: new C.Cartesian2(10, 0),
+          heightReference: C.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: 0,
+          style: C.LabelStyle.FILL_AND_OUTLINE,
+          outlineWidth: 2,
+          outlineColor: C.Color.BLACK,
+          showBackground: true,
+          backgroundColor: C.Color.fromCssColorString("#0b1220").withAlpha(0.7),
+          backgroundPadding: new C.Cartesian2(5, 3),
+        },
+      });
+      return;
+    }
+    if (object.geometryType === "LineString" && Array.isArray(object.coordinates) && object.coordinates.length >= 2) {
+      const style = getTacticalShapeStyle(object);
+      safeAddEntity({
+        id: `${idPrefix}:${object.uid || object.id}`,
+        polyline: {
+          positions: C.Cartesian3.fromDegreesArray(object.coordinates.flatMap(([lat, lon]) => [lon, lat])),
+          width: style.weight ?? 2,
+          material: getCesiumStrokeMaterial(C, style.color ?? "#80c8ff", style.lineStyle),
+          clampToGround: true,
+          arcType: C.ArcType.GEODESIC,
+          zIndex: zIndexBase,
+        },
+      });
+      return;
+    }
+    if (object.geometryType === "Polygon" && Array.isArray(object.coordinates) && object.coordinates.length >= 3) {
+      const style = getTacticalShapeStyle(object);
+      addClampedPolygon(`${idPrefix}:${object.uid || object.id}`, object.coordinates.map(([lat, lon]) => ({ lat, lng: lon })), {
+        color: style.color ?? "#80c8ff",
+        fillColor: style.fillColor ?? style.color ?? "#80c8ff",
+        fillOpacity: style.fillOpacity ?? 0.12,
+        outlineColor: style.color ?? "#80c8ff",
+        outlineWidth: style.weight ?? 2,
+        lineStyle: style.lineStyle,
+        zIndex: zIndexBase,
+      });
+    }
+  };
+
+  state.tacticalObjects
+    .filter((object) => isVisible(buildTacticalContentId(object.id)))
+    .forEach((object) => addCesiumTacticalObject(object, "managed:tactical", 18));
+
+  getTakLiveRenderableObjects()
+    .filter((object) => isVisible(buildTakLiveContentId(object.uid)))
+    .forEach((object) => addCesiumTacticalObject(object, "managed:taklive", 20));
 
   // --- PLANNING REGION ---
   if (state.planning.regionLayer) {
@@ -22287,6 +23445,7 @@ function saveToEditModal() {
   if (validation) validation.textContent = "";
   closeToEditModal();
   renderToView();
+  syncTacticalObjectFromPlanUnit(unit.id);
   saveMapState();
 }
 
@@ -22326,6 +23485,10 @@ function initPlanViewIfNeeded() {
   document.getElementById("toFitViewBtn")?.addEventListener("click", toFitView);
   document.getElementById("toClearAllBtn")?.addEventListener("click", () => {
     if (!confirm("Clear all units?")) return;
+    const linkedTacticalIds = state.tacticalObjects
+      .filter((object) => Number.isFinite(Number(object.linkedPlanUnitId)))
+      .map((object) => object.id);
+    linkedTacticalIds.forEach((objectId) => deleteTacticalObject(objectId, { silent: true }));
     _toState.units = [];
     _toState.links = [];
     clearToSelection();
@@ -22419,6 +23582,12 @@ function initPlanViewIfNeeded() {
   });
   document.getElementById("toCtxDelete")?.addEventListener("click", () => {
     if (!_toState.selectedUnit) return;
+    const linkedTactical = getTacticalObjectByPlanUnitId(_toState.selectedUnit);
+    if (linkedTactical) {
+      hideToContextMenu();
+      deleteTacticalObject(linkedTactical.id);
+      return;
+    }
     _toState.units = _toState.units.filter(u => u.id !== _toState.selectedUnit);
     _toState.links = _toState.links.filter(l => l.parentId !== _toState.selectedUnit && l.childId !== _toState.selectedUnit);
     clearToSelection();
@@ -22853,6 +24022,17 @@ async function renderTopologyView() {
       unitPos.set(entry.key, { x: CARD_W / 2 + PAD_X / 2 + col * SLOT_W, y: CARD_H / 2 + PAD_Y / 2 + row * SLOT_H });
     });
   }
+
+  if (Array.isArray(saved.tacticalObjects)) {
+    saved.tacticalObjects.forEach((entry) => {
+      const tactical = normalizeTacticalObject(entry);
+      state.tacticalObjects.push(tactical);
+    });
+  }
+
+  state.tacticalObjects.forEach((object) => {
+    renderTacticalObjectLayer(object);
+  });
 
   // ── Candidate links: one per unique emitter-type pair between any two unit cards ──
   // Match on waveform bucket (waveform name, or frequency if no waveform).
