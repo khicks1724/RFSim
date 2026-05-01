@@ -95,7 +95,7 @@ const BUILDING_MATERIAL_MODELS = {
 // Bump this integer whenever the serialized state shape changes in a way that
 // requires a migration. applySavedMapState() runs migrateStatePayload() first
 // so old saves are always upgraded before being applied.
-const STATE_SCHEMA_VERSION = 1;
+const STATE_SCHEMA_VERSION = 2;
 
 function nowIso() {
   return new Date().toISOString();
@@ -132,7 +132,138 @@ function migrateStatePayload(payload) {
     };
   }
 
+  if (from < 2) {
+    payload = {
+      ...payload,
+      schemaVersion: 2,
+      assets: Array.isArray(payload.assets)
+        ? payload.assets.map((asset) => ({
+          ...asset,
+          tak: asset?.tak && typeof asset.tak === "object" ? asset.tak : null,
+        }))
+        : payload.assets,
+      importedItems: Array.isArray(payload.importedItems)
+        ? payload.importedItems.map((item) => ({
+          ...item,
+          tak: item?.tak && typeof item.tak === "object" ? item.tak : null,
+          shapeKind: typeof item?.shapeKind === "string" && item.shapeKind
+            ? item.shapeKind
+            : item?.properties?.isCircle
+              ? "circle"
+              : item?.geometryType === "Point"
+                ? "point"
+                : item?.geometryType === "LineString"
+                  ? "polyline"
+                  : "polygon",
+        }))
+        : payload.importedItems,
+    };
+  }
+
   return payload;
+}
+
+function normalizeTakMetadata(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const uid = typeof value.uid === "string" && value.uid.trim() ? value.uid.trim() : "";
+  const profileId = typeof value.profileId === "string" && value.profileId.trim() ? value.profileId.trim() : "";
+  const cotType = typeof value.cotType === "string" && value.cotType.trim() ? value.cotType.trim() : "";
+  const source = typeof value.source === "string" && value.source.trim() ? value.source.trim() : "";
+  const staleAt = typeof value.staleAt === "string" && value.staleAt.trim() ? value.staleAt.trim() : "";
+  const how = typeof value.how === "string" && value.how.trim() ? value.how.trim() : "";
+  const detail = value.detail && typeof value.detail === "object" ? value.detail : null;
+  if (!uid && !profileId && !cotType && !source && !staleAt && !how && !detail) {
+    return null;
+  }
+  return {
+    uid: uid || generateId(),
+    profileId,
+    cotType,
+    source,
+    staleAt,
+    how,
+    detail,
+  };
+}
+
+function inferImportedShapeKind(geometryType, properties = {}, hint = "") {
+  if (properties?.isCircle) return "circle";
+  const normalizedHint = String(hint ?? "").trim().toLowerCase();
+  if (normalizedHint.includes("route")) return "route";
+  if (normalizedHint.includes("geofence")) return "geofence";
+  if (normalizedHint.includes("rectangle")) return "rectangle";
+  if (normalizedHint.includes("circle")) return "circle";
+  if (geometryType === "Point") return "point";
+  if (geometryType === "LineString") return "polyline";
+  return "polygon";
+}
+
+function getDefaultTakTypeForForce(force = "unknown") {
+  if (force === "friendly") return "a-f-G-U-C";
+  if (force === "enemy") return "a-h-G-U-C";
+  if (force === "host-nation") return "a-n-G-U-C";
+  return "a-u-G-U-C";
+}
+
+function normalizeAssetToTakObject(asset) {
+  if (!asset || !Number.isFinite(Number(asset.lat)) || !Number.isFinite(Number(asset.lon))) {
+    return null;
+  }
+  const tak = normalizeTakMetadata(asset.tak);
+  return {
+    uid: tak?.uid || `asset-${asset.id}`,
+    profileId: tak?.profileId || "",
+    cotType: tak?.cotType || getDefaultTakTypeForForce(asset.force),
+    callsign: asset.name || asset.unit || "RF Sim Asset",
+    geometryType: "Point",
+    coordinates: [Number(asset.lat), Number(asset.lon)],
+    how: tak?.how || "h-g-i-g-o",
+    source: tak?.source || "rf-sim-asset",
+    detail: tak?.detail ?? {
+      contact: { callsign: asset.name || "" },
+      remarks: asset.notes || "",
+      rf: {
+        unit: asset.unit || "",
+        type: asset.type || "",
+        icon: asset.icon || "",
+      },
+    },
+  };
+}
+
+function normalizeImportedItemToTakObject(item) {
+  if (!item) {
+    return null;
+  }
+  const tak = normalizeTakMetadata(item.tak);
+  const coordinates = item.geometryType === "Point"
+    ? (() => {
+      const ll = item.layer?.getLatLng?.();
+      return ll ? [Number(ll.lat), Number(ll.lng)] : null;
+    })()
+    : (() => {
+      const latlngs = item.layer?.getLatLngs?.();
+      if (!latlngs) return null;
+      const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
+      return ring.map((entry) => [Number(entry.lat), Number(entry.lng)]);
+    })();
+  if (!coordinates) {
+    return null;
+  }
+  return {
+    uid: tak?.uid || `imported-${item.id}`,
+    profileId: tak?.profileId || "",
+    cotType: tak?.cotType || "",
+    callsign: item.name || "RF Sim Shape",
+    geometryType: item.geometryType,
+    shapeKind: item.shapeKind || inferImportedShapeKind(item.geometryType, item.properties, item.name),
+    coordinates,
+    how: tak?.how || "h-e",
+    source: tak?.source || "rf-sim-imported",
+    detail: tak?.detail ?? null,
+  };
 }
 
 function generateId() {
@@ -1110,6 +1241,32 @@ const dom = {
   deleteAiProviderBtn: document.querySelector("#deleteAiProviderBtn"),
   testAiConnectionBtn: document.querySelector("#testAiConnectionBtn"),
   clearAiProviderBtn: document.querySelector("#clearAiProviderBtn"),
+  takGuestNotice: document.querySelector("#takGuestNotice"),
+  takMemberSection: document.querySelector("#takMemberSection"),
+  takSavedProfileSelect: document.querySelector("#takSavedProfileSelect"),
+  takNewProfileBtn: document.querySelector("#takNewProfileBtn"),
+  takDeleteProfileBtn: document.querySelector("#takDeleteProfileBtn"),
+  takProfileLabelInput: document.querySelector("#takProfileLabelInput"),
+  takServerHostInput: document.querySelector("#takServerHostInput"),
+  takServerPortInput: document.querySelector("#takServerPortInput"),
+  takTransportSelect: document.querySelector("#takTransportSelect"),
+  takUsernameInput: document.querySelector("#takUsernameInput"),
+  takAuthSecretInput: document.querySelector("#takAuthSecretInput"),
+  takClientCertInput: document.querySelector("#takClientCertInput"),
+  takClientKeyInput: document.querySelector("#takClientKeyInput"),
+  takCaCertInput: document.querySelector("#takCaCertInput"),
+  takClientCertSummary: document.querySelector("#takClientCertSummary"),
+  takClientKeySummary: document.querySelector("#takClientKeySummary"),
+  takCaCertSummary: document.querySelector("#takCaCertSummary"),
+  takDeleteClientCertBtn: document.querySelector("#takDeleteClientCertBtn"),
+  takDeleteClientKeyBtn: document.querySelector("#takDeleteClientKeyBtn"),
+  takDeleteCaCertBtn: document.querySelector("#takDeleteCaCertBtn"),
+  takProjectChecklist: document.querySelector("#takProjectChecklist"),
+  takProjectBindingHint: document.querySelector("#takProjectBindingHint"),
+  saveTakProfileBtn: document.querySelector("#saveTakProfileBtn"),
+  testTakProfileBtn: document.querySelector("#testTakProfileBtn"),
+  clearTakProfileBtn: document.querySelector("#clearTakProfileBtn"),
+  takSettingsSummary: document.querySelector("#takSettingsSummary"),
   openAiPanelBtn: null, // removed from topbar — kept as null so refs don't throw
   aiChatToggleBtn: document.querySelector("#aiChatToggleBtn"),
   aiChatToggleValue: document.querySelector("#aiChatToggleValue"),
@@ -1497,6 +1654,15 @@ const state = {
     messages: [],
     requestInFlight: false,
   },
+  takSettings: {
+    profiles: [],
+    activeProfileId: "",
+    draft: null,
+    projectAssignments: new Map(),
+    loading: false,
+    saving: false,
+    statusMessage: "Save a TAK server profile to assign it to server-backed projects.",
+  },
   authScreenMode: "login",
   canceledSimulationRequestIds: new Set(),
 };
@@ -1843,6 +2009,420 @@ async function apiFetch(path, options = {}) {
   }
 
   return payload;
+}
+
+function createEmptyTakProfileDraft() {
+  return {
+    id: "",
+    label: "",
+    serverHost: "",
+    serverPort: 8089,
+    transport: "tls",
+    username: "",
+    hasAuthSecret: false,
+    hasClientCert: false,
+    hasClientKey: false,
+    hasCaCert: false,
+    clientCertFileName: "",
+    clientKeyFileName: "",
+    caCertFileName: "",
+    clientCertUpdatedAt: "",
+    clientKeyUpdatedAt: "",
+    caCertUpdatedAt: "",
+    lastTestedAt: "",
+    lastTestStatus: "",
+    _authSecretDraft: "",
+    _deleteAuthSecret: false,
+    _clientCertPemDraft: "",
+    _clientCertFileNameDraft: "",
+    _deleteClientCert: false,
+    _clientKeyPemDraft: "",
+    _clientKeyFileNameDraft: "",
+    _deleteClientKey: false,
+    _caCertPemDraft: "",
+    _caCertFileNameDraft: "",
+    _deleteCaCert: false,
+  };
+}
+
+function sanitizeTakProfileSummary(profile) {
+  const base = createEmptyTakProfileDraft();
+  if (!profile || typeof profile !== "object") {
+    return base;
+  }
+  return {
+    ...base,
+    id: typeof profile.id === "string" ? profile.id : "",
+    label: typeof profile.label === "string" ? profile.label : "",
+    serverHost: typeof profile.serverHost === "string" ? profile.serverHost : "",
+    serverPort: Number.isFinite(Number(profile.serverPort)) ? Number(profile.serverPort) : 8089,
+    transport: typeof profile.transport === "string" && profile.transport ? profile.transport : "tls",
+    username: typeof profile.username === "string" ? profile.username : "",
+    hasAuthSecret: Boolean(profile.hasAuthSecret),
+    hasClientCert: Boolean(profile.hasClientCert),
+    hasClientKey: Boolean(profile.hasClientKey),
+    hasCaCert: Boolean(profile.hasCaCert),
+    clientCertFileName: typeof profile.clientCertFileName === "string" ? profile.clientCertFileName : "",
+    clientKeyFileName: typeof profile.clientKeyFileName === "string" ? profile.clientKeyFileName : "",
+    caCertFileName: typeof profile.caCertFileName === "string" ? profile.caCertFileName : "",
+    clientCertUpdatedAt: typeof profile.clientCertUpdatedAt === "string" ? profile.clientCertUpdatedAt : "",
+    clientKeyUpdatedAt: typeof profile.clientKeyUpdatedAt === "string" ? profile.clientKeyUpdatedAt : "",
+    caCertUpdatedAt: typeof profile.caCertUpdatedAt === "string" ? profile.caCertUpdatedAt : "",
+    lastTestedAt: typeof profile.lastTestedAt === "string" ? profile.lastTestedAt : "",
+    lastTestStatus: typeof profile.lastTestStatus === "string" ? profile.lastTestStatus : "",
+  };
+}
+
+function getTakProfile(profileId = state.takSettings.activeProfileId) {
+  return state.takSettings.profiles.find((profile) => profile.id === profileId) ?? null;
+}
+
+function getTakProjectBinding(projectId = state.session.activeProjectId) {
+  if (!projectId) {
+    return null;
+  }
+  return state.takSettings.projectAssignments.get(projectId) ?? null;
+}
+
+function getTakProfileForProject(projectId = state.session.activeProjectId) {
+  const profileId = getTakProjectBinding(projectId);
+  return profileId ? getTakProfile(profileId) : null;
+}
+
+function isTakEnabledForProject(projectId = state.session.activeProjectId) {
+  return Boolean(getTakProfileForProject(projectId));
+}
+
+function setTakDraft(profile) {
+  state.takSettings.draft = sanitizeTakProfileSummary(profile);
+}
+
+function resetTakDraft() {
+  state.takSettings.activeProfileId = "";
+  setTakDraft(createEmptyTakProfileDraft());
+  state.takSettings.statusMessage = "Save a TAK server profile to assign it to server-backed projects.";
+}
+
+function formatTakTimestamp(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString();
+}
+
+function formatTakCertSummary({ hasValue, fileName, updatedAt, pendingName, deleting, emptyText }) {
+  if (pendingName) {
+    return `${pendingName} selected. Save the TAK server to upload it.`;
+  }
+  if (deleting) {
+    return "This file will be deleted when you save the TAK server.";
+  }
+  if (hasValue) {
+    const parts = [fileName || "Stored PEM"];
+    const ts = formatTakTimestamp(updatedAt);
+    if (ts) parts.push(`updated ${ts}`);
+    return parts.join(" • ");
+  }
+  return emptyText;
+}
+
+function renderTakSavedProfileOptions() {
+  if (!dom.takSavedProfileSelect) {
+    return;
+  }
+  const options = state.takSettings.profiles.length
+    ? [
+        '<option value="">New TAK server…</option>',
+        ...state.takSettings.profiles.map((profile) => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.label || profile.serverHost || "Unnamed TAK server")}</option>`),
+      ]
+    : ['<option value="">No saved TAK servers</option>'];
+  dom.takSavedProfileSelect.innerHTML = options.join("");
+  dom.takSavedProfileSelect.value = state.takSettings.activeProfileId || "";
+}
+
+function renderTakProjectChecklist() {
+  if (!dom.takProjectChecklist) {
+    return;
+  }
+  const activeProfileId = state.takSettings.activeProfileId;
+  if (!state.session.token) {
+    dom.takProjectChecklist.innerHTML = '<div class="tak-project-empty">Sign in to assign TAK servers to projects.</div>';
+    return;
+  }
+  if (!activeProfileId) {
+    dom.takProjectChecklist.innerHTML = '<div class="tak-project-empty">Save this TAK server first to assign it to projects.</div>';
+    return;
+  }
+  if (!state.session.projects.length) {
+    dom.takProjectChecklist.innerHTML = '<div class="tak-project-empty">Create a server-backed project to enable TAK streaming.</div>';
+    return;
+  }
+
+  dom.takProjectChecklist.innerHTML = state.session.projects.map((project) => {
+    const checked = state.takSettings.projectAssignments.get(project.id) === activeProfileId;
+    const activeBadge = project.id === state.session.activeProjectId ? " • Active workspace project" : "";
+    return `
+      <label class="tak-project-item">
+        <input type="checkbox" data-tak-project-id="${escapeHtml(project.id)}" ${checked ? "checked" : ""}>
+        <span class="tak-project-copy">
+          <strong>${escapeHtml(project.name)}</strong>
+          <span>${escapeHtml(project.description || "Server-backed project")}${escapeHtml(activeBadge)}</span>
+        </span>
+      </label>
+    `;
+  }).join("");
+
+  dom.takProjectChecklist.querySelectorAll("[data-tak-project-id]").forEach((input) => {
+    input.addEventListener("change", onTakProjectBindingChanged);
+  });
+}
+
+function syncTakUi() {
+  if (!dom.takSettingsSummary) {
+    return;
+  }
+  if (!state.takSettings.draft) {
+    setTakDraft(createEmptyTakProfileDraft());
+  }
+  const draft = state.takSettings.draft;
+  const requiresLogin = !state.session.token || isGuestSession();
+
+  dom.takGuestNotice?.classList.toggle("hidden", !requiresLogin);
+  dom.takMemberSection?.classList.toggle("hidden", requiresLogin);
+  renderTakSavedProfileOptions();
+  renderTakProjectChecklist();
+
+  if (requiresLogin) {
+    dom.takSettingsSummary.textContent = "TAK Integration requires a logged-in account and server-backed projects.";
+    return;
+  }
+
+  dom.takProfileLabelInput.value = draft.label ?? "";
+  dom.takServerHostInput.value = draft.serverHost ?? "";
+  dom.takServerPortInput.value = String(draft.serverPort ?? 8089);
+  dom.takTransportSelect.value = draft.transport || "tls";
+  dom.takUsernameInput.value = draft.username ?? "";
+  dom.takAuthSecretInput.value = draft._authSecretDraft ?? "";
+
+  if (dom.takProjectBindingHint) {
+    const activeProfile = getTakProfile();
+    dom.takProjectBindingHint.textContent = activeProfile
+      ? "Checked projects will load with this TAK stream profile available."
+      : "Save this TAK server first to assign projects.";
+  }
+
+  if (dom.takClientCertSummary) {
+    dom.takClientCertSummary.textContent = formatTakCertSummary({
+      hasValue: draft.hasClientCert,
+      fileName: draft.clientCertFileName,
+      updatedAt: draft.clientCertUpdatedAt,
+      pendingName: draft._clientCertFileNameDraft,
+      deleting: draft._deleteClientCert,
+      emptyText: "No client certificate stored.",
+    });
+  }
+  if (dom.takClientKeySummary) {
+    dom.takClientKeySummary.textContent = formatTakCertSummary({
+      hasValue: draft.hasClientKey,
+      fileName: draft.clientKeyFileName,
+      updatedAt: draft.clientKeyUpdatedAt,
+      pendingName: draft._clientKeyFileNameDraft,
+      deleting: draft._deleteClientKey,
+      emptyText: "No client key stored.",
+    });
+  }
+  if (dom.takCaCertSummary) {
+    dom.takCaCertSummary.textContent = formatTakCertSummary({
+      hasValue: draft.hasCaCert,
+      fileName: draft.caCertFileName,
+      updatedAt: draft.caCertUpdatedAt,
+      pendingName: draft._caCertFileNameDraft,
+      deleting: draft._deleteCaCert,
+      emptyText: "No CA certificate stored.",
+    });
+  }
+  if (dom.takClientCertInput) dom.takClientCertInput.value = "";
+  if (dom.takClientKeyInput) dom.takClientKeyInput.value = "";
+  if (dom.takCaCertInput) dom.takCaCertInput.value = "";
+
+  const hasActiveSavedProfile = Boolean(getTakProfile());
+  dom.takDeleteProfileBtn?.toggleAttribute("disabled", !hasActiveSavedProfile);
+  dom.testTakProfileBtn?.toggleAttribute("disabled", !hasActiveSavedProfile);
+
+  const activeProjectProfile = getTakProfileForProject(state.session.activeProjectId);
+  const activeProjectStatus = state.session.activeProjectId
+    ? activeProjectProfile
+      ? `Active project is linked to TAK via ${activeProjectProfile.label || activeProjectProfile.serverHost}.`
+      : "Active project is not linked to a TAK server."
+    : "Select a server-backed project to expose a TAK stream in that project.";
+  const summary = state.takSettings.statusMessage
+    ? `${state.takSettings.statusMessage} ${activeProjectStatus}`.trim()
+    : activeProjectStatus;
+  dom.takSettingsSummary.textContent = summary;
+}
+
+async function loadServerTakProfiles() {
+  if (!state.session.token) {
+    state.takSettings.profiles = [];
+    resetTakDraft();
+    syncTakUi();
+    return;
+  }
+  const payload = await apiFetch("/user/tak-profiles");
+  state.takSettings.profiles = Array.isArray(payload.profiles)
+    ? payload.profiles.map(sanitizeTakProfileSummary)
+    : [];
+  const preferredId = state.takSettings.activeProfileId;
+  const activeProfile = state.takSettings.profiles.find((profile) => profile.id === preferredId)
+    ?? state.takSettings.profiles[0]
+    ?? null;
+  if (activeProfile) {
+    state.takSettings.activeProfileId = activeProfile.id;
+    setTakDraft(activeProfile);
+  } else {
+    resetTakDraft();
+  }
+}
+
+async function loadServerTakProjectBindings() {
+  if (!state.session.token) {
+    state.takSettings.projectAssignments = new Map();
+    syncTakUi();
+    return;
+  }
+  const payload = await apiFetch("/user/tak-project-bindings");
+  const next = new Map();
+  (Array.isArray(payload.bindings) ? payload.bindings : []).forEach((binding) => {
+    if (binding?.projectId && binding?.takProfileId) {
+      next.set(binding.projectId, binding.takProfileId);
+    }
+  });
+  state.takSettings.projectAssignments = next;
+}
+
+async function loadServerTakSettings() {
+  if (!state.session.token) {
+    state.takSettings.profiles = [];
+    state.takSettings.projectAssignments = new Map();
+    resetTakDraft();
+    syncTakUi();
+    return;
+  }
+  try {
+    await loadServerTakProfiles();
+    await loadServerTakProjectBindings();
+  } catch (error) {
+    state.takSettings.statusMessage = `TAK settings unavailable: ${error.message}`;
+    setStatus(state.takSettings.statusMessage, true);
+  }
+  syncTakUi();
+}
+
+function buildTakProfilesPayload() {
+  return state.takSettings.profiles.map((profile) => {
+    const payload = {
+      id: profile.id,
+      label: profile.label,
+      serverHost: profile.serverHost,
+      serverPort: Number(profile.serverPort) || 8089,
+      transport: profile.transport || "tls",
+      username: profile.username || "",
+      deleteAuthSecret: Boolean(profile._deleteAuthSecret),
+      deleteClientCert: Boolean(profile._deleteClientCert),
+      deleteClientKey: Boolean(profile._deleteClientKey),
+      deleteCaCert: Boolean(profile._deleteCaCert),
+    };
+    if (profile._authSecretDraft) payload.authSecret = profile._authSecretDraft;
+    if (profile._clientCertPemDraft) {
+      payload.clientCertPem = profile._clientCertPemDraft;
+      payload.clientCertFileName = profile._clientCertFileNameDraft || "";
+    }
+    if (profile._clientKeyPemDraft) {
+      payload.clientKeyPem = profile._clientKeyPemDraft;
+      payload.clientKeyFileName = profile._clientKeyFileNameDraft || "";
+    }
+    if (profile._caCertPemDraft) {
+      payload.caCertPem = profile._caCertPemDraft;
+      payload.caCertFileName = profile._caCertFileNameDraft || "";
+    }
+    return payload;
+  });
+}
+
+async function syncTakProfilesToServer() {
+  const payload = await apiFetch("/user/tak-profiles", {
+    method: "PUT",
+    body: JSON.stringify({ profiles: buildTakProfilesPayload() }),
+  });
+  state.takSettings.profiles = Array.isArray(payload.profiles)
+    ? payload.profiles.map(sanitizeTakProfileSummary)
+    : [];
+}
+
+async function syncTakProjectBindingsToServer() {
+  const bindings = state.session.projects.map((project) => ({
+    projectId: project.id,
+    takProfileId: state.takSettings.projectAssignments.get(project.id) ?? null,
+  }));
+  await apiFetch("/user/tak-project-bindings", {
+    method: "PUT",
+    body: JSON.stringify({ bindings }),
+  });
+}
+
+async function readTextFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}.`));
+    reader.readAsText(file);
+  });
+}
+
+async function onTakPemSelected(slot, inputEl) {
+  const file = inputEl?.files?.[0];
+  if (!file) {
+    return;
+  }
+  const text = await readTextFile(file);
+  if (!/-----BEGIN /i.test(text) || !/-----END /i.test(text)) {
+    throw new Error(`${file.name} does not look like a PEM file.`);
+  }
+  const draft = state.takSettings.draft ?? createEmptyTakProfileDraft();
+  if (slot === "clientCert") {
+    draft._clientCertPemDraft = text.trim();
+    draft._clientCertFileNameDraft = file.name;
+    draft._deleteClientCert = false;
+  } else if (slot === "clientKey") {
+    draft._clientKeyPemDraft = text.trim();
+    draft._clientKeyFileNameDraft = file.name;
+    draft._deleteClientKey = false;
+  } else if (slot === "caCert") {
+    draft._caCertPemDraft = text.trim();
+    draft._caCertFileNameDraft = file.name;
+    draft._deleteCaCert = false;
+  }
+  state.takSettings.draft = draft;
+  syncTakUi();
+}
+
+function deleteTakDraftCertificate(slot) {
+  const draft = state.takSettings.draft ?? createEmptyTakProfileDraft();
+  if (slot === "clientCert") {
+    draft._clientCertPemDraft = "";
+    draft._clientCertFileNameDraft = "";
+    draft._deleteClientCert = draft.hasClientCert;
+  } else if (slot === "clientKey") {
+    draft._clientKeyPemDraft = "";
+    draft._clientKeyFileNameDraft = "";
+    draft._deleteClientKey = draft.hasClientKey;
+  } else if (slot === "caCert") {
+    draft._caCertPemDraft = "";
+    draft._caCertFileNameDraft = "";
+    draft._deleteCaCert = draft.hasCaCert;
+  }
+  state.takSettings.draft = draft;
+  syncTakUi();
 }
 
 function defaultAiStatusMessage() {
@@ -2194,6 +2774,9 @@ function clearSessionState({ preserveGuest = false } = {}) {
   state.session.autosaveTimerId = null;
   state.session.autosavePending = false;
   state.session.localSaveTimerId = null;
+  state.takSettings.profiles = [];
+  state.takSettings.projectAssignments = new Map();
+  resetTakDraft();
   persistSessionStorage();
 }
 
@@ -2211,6 +2794,7 @@ async function hydrateSession() {
     const payload = await apiFetch("/auth/me");
     state.session.user = payload.user;
     await loadProjectList();
+    await loadServerTakSettings();
     await loadServerAiProviderSettings();
     fireAnalyticsEvent({ event_type: "visit" });
   } catch (error) {
@@ -2333,6 +2917,7 @@ function syncWorkspaceUi() {
     dom.workspaceStatus.textContent = "Sign in to enter RF Sim and access server-backed projects, or use guest mode for an in-memory session.";
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
     setAutosaveIndicator("hidden");
+    syncTakUi();
     syncAuthScreenUi();
     return;
   }
@@ -2356,6 +2941,7 @@ function syncWorkspaceUi() {
     dom.workspaceProjectSnapshotBtn?.setAttribute("disabled", "true");
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
     setAuthScreenStatus("", false);
+    syncTakUi();
     syncAuthScreenUi();
     return;
   }
@@ -2370,12 +2956,13 @@ function syncWorkspaceUi() {
   const userLabel = state.session.user.fullName || state.session.user.email;
   const activeProject = state.session.projects.find((project) => project.id === state.session.activeProjectId) ?? null;
   const activeProjectLabel = activeProject?.name || "Local Browser State";
+  const activeTakProfile = getTakProfileForProject(state.session.activeProjectId);
   dom.workspaceUserLabel.textContent = userLabel;
   dom.workspaceMenuValue.textContent = activeProjectLabel;
   dom.workspaceMenuHeadline.textContent = state.session.activeProjectId ? "Server Project" : "Workspace";
   dom.workspaceProjectMode.textContent = state.session.activeProjectId ? "Server" : "Local";
   dom.workspaceProjectStatus.textContent = state.session.activeProjectId
-    ? "Changes autosave to the server. Use Snapshot to save a named version you can restore later."
+    ? `Changes autosave to the server. Use Snapshot to save a named version you can restore later.${activeTakProfile ? ` TAK enabled via ${activeTakProfile.label || activeTakProfile.serverHost}.` : " TAK is not enabled for this project."}`
     : "No server project selected. Map contents are saved to browser storage only.";
 
   dom.workspaceProjectSelect.innerHTML = "";
@@ -2396,6 +2983,7 @@ function syncWorkspaceUi() {
     dom.workspaceProjectDeleteBtn?.setAttribute("disabled", "true");
   }
   setAuthScreenStatus("", false);
+  syncTakUi();
   syncAuthScreenUi();
 }
 
@@ -2417,7 +3005,9 @@ async function onWorkspaceLogin(credentials = null) {
   state.session.user = payload.user;
   persistSessionStorage();
   await loadProjectList();
+  await loadServerTakSettings();
   await loadServerAiProviderSettings();
+  syncWorkspaceUi();
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Signed in as ${payload.user.email}.`);
@@ -2442,7 +3032,9 @@ async function onWorkspaceRegister(credentials = null) {
   state.session.user = payload.user;
   persistSessionStorage();
   await loadProjectList();
+  await loadServerTakSettings();
   await loadServerAiProviderSettings();
+  syncWorkspaceUi();
   closeWorkspaceMenu();
   setAuthScreenStatus("", false);
   setStatus(`Account created for ${payload.user.email}.`);
@@ -2709,11 +3301,13 @@ async function onWorkspaceProjectDelete() {
   saveMapState();
   await apiFetch(`/projects/${projectId}`, { method: "DELETE" });
   state.session.projects = state.session.projects.filter((entry) => entry.id !== projectId);
+  state.takSettings.projectAssignments.delete(projectId);
   if (state.session.activeProjectId === projectId) {
     state.session.activeProjectId = null;
   }
   persistSessionStorage();
   syncWorkspaceUi();
+  syncTakUi();
   setStatus(`Deleted project ${projectName}. Switched to local browser state.`);
 }
 
@@ -3328,6 +3922,8 @@ async function init() {
   ensureMapContentsSearchUi();
   initEmitterModal();
   loadAiProviderSettings();
+  resetTakDraft();
+  syncTakUi();
   await hydrateSession();
   loadCesiumIonToken();
   loadSettings();
@@ -3795,6 +4391,24 @@ function wireEvents() {
   dom.deleteAiProviderBtn?.addEventListener("click", deleteAiProvider);
   dom.testAiConnectionBtn.addEventListener("click", testAiProviderConnection);
   dom.clearAiProviderBtn.addEventListener("click", clearAiProvider);
+  dom.takSavedProfileSelect?.addEventListener("change", onTakSavedProfileChanged);
+  dom.takNewProfileBtn?.addEventListener("click", createNewTakProfileDraft);
+  dom.takDeleteProfileBtn?.addEventListener("click", () => deleteTakProfile().catch((error) => setStatus(error.message, true)));
+  dom.takProfileLabelInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takServerHostInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takServerPortInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takTransportSelect?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takUsernameInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takAuthSecretInput?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takClientCertInput?.addEventListener("change", () => onTakPemSelected("clientCert", dom.takClientCertInput).catch((error) => setStatus(error.message, true)));
+  dom.takClientKeyInput?.addEventListener("change", () => onTakPemSelected("clientKey", dom.takClientKeyInput).catch((error) => setStatus(error.message, true)));
+  dom.takCaCertInput?.addEventListener("change", () => onTakPemSelected("caCert", dom.takCaCertInput).catch((error) => setStatus(error.message, true)));
+  dom.takDeleteClientCertBtn?.addEventListener("click", () => deleteTakDraftCertificate("clientCert"));
+  dom.takDeleteClientKeyBtn?.addEventListener("click", () => deleteTakDraftCertificate("clientKey"));
+  dom.takDeleteCaCertBtn?.addEventListener("click", () => deleteTakDraftCertificate("caCert"));
+  dom.saveTakProfileBtn?.addEventListener("click", () => saveTakProfile().catch((error) => setStatus(error.message, true)));
+  dom.testTakProfileBtn?.addEventListener("click", () => testTakProfileConnection().catch((error) => setStatus(error.message, true)));
+  dom.clearTakProfileBtn?.addEventListener("click", clearTakProfile);
   dom.collapseAiPanelBtn.addEventListener("click", toggleAiPanelCollapse);
   dom.aiChatForm.addEventListener("submit", onAiChatSubmit);
   dom.aiChatModelSelect.addEventListener("change", onAiModelChanged);
@@ -3985,6 +4599,10 @@ function serializeImportedItem(item) {
     sourceLabel: item.sourceLabel ?? null,
     properties,
     drawn: item.drawn ?? false,
+    tak: normalizeTakMetadata(item.tak),
+    shapeKind: typeof item.shapeKind === "string" && item.shapeKind
+      ? item.shapeKind
+      : inferImportedShapeKind(item.geometryType, properties, item.name),
     shapeStyle: item.shapeStyle ?? null,
     markerStyle: item.markerStyle ?? null,
     coordinates,
@@ -4020,7 +4638,7 @@ function serializeCurrentMapState() {
 function serializeMapStateForServer() {
   const full = serializeCurrentMapState();
   const { profiles, settings, ...serverState } = full;
-  serverState.importedItems = (serverState.importedItems ?? []).filter((item) => item.drawn);
+  serverState.importedItems = (serverState.importedItems ?? []).filter((item) => item.drawn || item.tak);
   // Keep schemaVersion and savedAt so the server can record what version wrote the state.
   return serverState;
 }
@@ -4046,8 +4664,8 @@ function persistMapStateNow() {
 
   // KMZ (non-drawn) items go to IndexedDB — no size limit, async, non-blocking.
   // Drawn items and structural state go to localStorage (small enough to fit).
-  const kmzItems = (payload.importedItems ?? []).filter((i) => !i.drawn);
-  const drawnItems = (payload.importedItems ?? []).filter((i) => i.drawn);
+  const kmzItems = (payload.importedItems ?? []).filter((i) => !i.drawn && !i.tak);
+  const drawnItems = (payload.importedItems ?? []).filter((i) => i.drawn || i.tak);
   const compactPayload = { ...payload, importedItems: drawnItems };
 
   // Fire-and-forget — KMZ write is async but we don't need to await it here.
@@ -4160,6 +4778,7 @@ function applySavedMapState(rawSaved) {
     saved.assets.forEach((asset) => {
       if (!asset.version) asset.version = 1;
       if (!asset.lastModified) asset.lastModified = nowIso();
+      asset.tak = normalizeTakMetadata(asset.tak);
       state.assets.push(asset);
       const marker = L.marker([asset.lat, asset.lon], {
         icon: createEmitterIcon(asset),
@@ -4194,6 +4813,10 @@ function applySavedMapState(rawSaved) {
           sourceLabel: saved.sourceLabel ?? null,
           properties: saved.properties ?? {},
           drawn: saved.drawn ?? false,
+          tak: normalizeTakMetadata(saved.tak),
+          shapeKind: typeof saved.shapeKind === "string" && saved.shapeKind
+            ? saved.shapeKind
+            : inferImportedShapeKind(saved.geometryType, saved.properties, saved.name),
           showLabel: typeof saved.showLabel === "boolean"
             ? saved.showLabel
             // Non-drawn imported items never had showLabel explicitly set before
@@ -4264,12 +4887,12 @@ async function loadMapState() {
         // Legacy fallback: if IDB is empty but localState has non-drawn items
         // from before the IDB migration, adopt them and migrate them now.
         if (projectKmzItems.length === 0 && localState?.activeProjectId === state.session.activeProjectId) {
-          projectKmzItems = (localState.importedItems ?? []).filter((i) => !i.drawn);
+          projectKmzItems = (localState.importedItems ?? []).filter((i) => !i.drawn && !i.tak);
           if (projectKmzItems.length > 0) {
             await idbSaveKmzItems(state.session.activeProjectId, projectKmzItems);
           }
         }
-        const serverDrawnItems = (serverState.importedItems ?? []).filter((i) => i.drawn);
+        const serverDrawnItems = (serverState.importedItems ?? []).filter((i) => i.drawn || i.tak);
         const mergedState = {
           ...serverState,
           importedItems: [...projectKmzItems, ...serverDrawnItems],
@@ -4288,7 +4911,7 @@ async function loadMapState() {
     // activeProjectId from a previous server-project session, but local browser
     // state KMZ items are always stored under the null key.
     const guestKmzItems = await idbLoadKmzItems(null);
-    const drawnItems = (localState.importedItems ?? []).filter((i) => i.drawn);
+    const drawnItems = (localState.importedItems ?? []).filter((i) => i.drawn || i.tak);
     applySavedMapState({
       ...localState,
       importedItems: [...guestKmzItems, ...drawnItems],
@@ -5585,6 +6208,191 @@ function clearAiProvider() {
   state.ai.statusMessage = defaultAiStatusMessage();
   persistAiProviderSettings();
   syncAiUi();
+}
+
+function onTakSavedProfileChanged() {
+  const selectedId = dom.takSavedProfileSelect?.value || "";
+  state.takSettings.activeProfileId = selectedId;
+  if (selectedId) {
+    const profile = getTakProfile(selectedId);
+    if (profile) {
+      setTakDraft(profile);
+      state.takSettings.statusMessage = `Editing ${profile.label || profile.serverHost}.`;
+    }
+  } else {
+    resetTakDraft();
+  }
+  syncTakUi();
+}
+
+function onTakDraftFieldChanged() {
+  const draft = state.takSettings.draft ?? createEmptyTakProfileDraft();
+  draft.label = dom.takProfileLabelInput?.value.trim() ?? "";
+  draft.serverHost = dom.takServerHostInput?.value.trim() ?? "";
+  draft.serverPort = Math.max(1, Number.parseInt(dom.takServerPortInput?.value ?? "8089", 10) || 8089);
+  draft.transport = dom.takTransportSelect?.value || "tls";
+  draft.username = dom.takUsernameInput?.value.trim() ?? "";
+  draft._authSecretDraft = dom.takAuthSecretInput?.value ?? "";
+  if (draft._authSecretDraft) {
+    draft._deleteAuthSecret = false;
+  }
+  state.takSettings.draft = draft;
+}
+
+function createNewTakProfileDraft() {
+  resetTakDraft();
+  state.takSettings.statusMessage = "Creating a new TAK server profile.";
+  syncTakUi();
+}
+
+async function saveTakProfile() {
+  if (!state.session.token || isGuestSession()) {
+    setStatus("Sign in first to save TAK settings.", true);
+    return;
+  }
+  onTakDraftFieldChanged();
+  const draft = state.takSettings.draft ?? createEmptyTakProfileDraft();
+  if (!draft.serverHost) {
+    setStatus("Enter a TAK server host before saving.", true);
+    return;
+  }
+  const profileId = draft.id || generateId();
+  const nextProfile = sanitizeTakProfileSummary({
+    ...draft,
+    id: profileId,
+  });
+  nextProfile._authSecretDraft = draft._authSecretDraft;
+  nextProfile._deleteAuthSecret = draft._deleteAuthSecret;
+  nextProfile._clientCertPemDraft = draft._clientCertPemDraft;
+  nextProfile._clientCertFileNameDraft = draft._clientCertFileNameDraft;
+  nextProfile._deleteClientCert = draft._deleteClientCert;
+  nextProfile._clientKeyPemDraft = draft._clientKeyPemDraft;
+  nextProfile._clientKeyFileNameDraft = draft._clientKeyFileNameDraft;
+  nextProfile._deleteClientKey = draft._deleteClientKey;
+  nextProfile._caCertPemDraft = draft._caCertPemDraft;
+  nextProfile._caCertFileNameDraft = draft._caCertFileNameDraft;
+  nextProfile._deleteCaCert = draft._deleteCaCert;
+
+  const existingIndex = state.takSettings.profiles.findIndex((profile) => profile.id === profileId);
+  if (existingIndex >= 0) {
+    state.takSettings.profiles.splice(existingIndex, 1, nextProfile);
+  } else {
+    state.takSettings.profiles.push(nextProfile);
+  }
+  state.takSettings.activeProfileId = profileId;
+  state.takSettings.statusMessage = "Saving TAK server profile...";
+  syncTakUi();
+
+  try {
+    await syncTakProfilesToServer();
+    state.takSettings.activeProfileId = profileId;
+    setTakDraft(getTakProfile(profileId) ?? createEmptyTakProfileDraft());
+    state.takSettings.statusMessage = `Saved ${draft.label || draft.serverHost}.`;
+    syncWorkspaceUi();
+    syncTakUi();
+    setStatus(state.takSettings.statusMessage);
+  } catch (error) {
+    state.takSettings.statusMessage = `TAK profile save failed: ${error.message}`;
+    syncTakUi();
+    setStatus(state.takSettings.statusMessage, true);
+  }
+}
+
+async function deleteTakProfile() {
+  const profile = getTakProfile();
+  if (!profile) {
+    return;
+  }
+  if (!window.confirm(`Delete "${profile.label || profile.serverHost}"? This also removes its project bindings.`)) {
+    return;
+  }
+  try {
+    await apiFetch(`/user/tak-profiles/${profile.id}`, { method: "DELETE" });
+    state.takSettings.profiles = state.takSettings.profiles.filter((entry) => entry.id !== profile.id);
+    [...state.takSettings.projectAssignments.entries()].forEach(([projectId, takProfileId]) => {
+      if (takProfileId === profile.id) {
+        state.takSettings.projectAssignments.delete(projectId);
+      }
+    });
+    resetTakDraft();
+    await syncTakProjectBindingsToServer();
+    state.takSettings.statusMessage = `Deleted ${profile.label || profile.serverHost}.`;
+    syncWorkspaceUi();
+    syncTakUi();
+    setStatus(state.takSettings.statusMessage);
+  } catch (error) {
+    setStatus(`TAK profile delete failed: ${error.message}`, true);
+  }
+}
+
+function clearTakProfile() {
+  if (state.takSettings.activeProfileId) {
+    const profile = getTakProfile();
+    setTakDraft(profile ?? createEmptyTakProfileDraft());
+    state.takSettings.statusMessage = profile
+      ? `Cleared unsaved edits for ${profile.label || profile.serverHost}.`
+      : "Cleared TAK draft.";
+  } else {
+    resetTakDraft();
+  }
+  syncTakUi();
+}
+
+async function testTakProfileConnection() {
+  const profile = getTakProfile();
+  if (!profile) {
+    setStatus("Save the TAK server profile before testing it.", true);
+    return;
+  }
+  state.takSettings.statusMessage = "Testing TAK profile...";
+  syncTakUi();
+  try {
+    const payload = await apiFetch(`/user/tak-profiles/${profile.id}/test`, { method: "POST" });
+    const updated = getTakProfile(profile.id);
+    if (updated) {
+      updated.lastTestStatus = payload.status;
+      updated.lastTestedAt = payload.checkedAt;
+    }
+    if (state.takSettings.activeProfileId === profile.id) {
+      setTakDraft(updated ?? profile);
+    }
+    state.takSettings.statusMessage = payload.message;
+    syncTakUi();
+    setStatus(payload.message, !payload.ok);
+  } catch (error) {
+    state.takSettings.statusMessage = `TAK test failed: ${error.message}`;
+    syncTakUi();
+    setStatus(state.takSettings.statusMessage, true);
+  }
+}
+
+async function onTakProjectBindingChanged(event) {
+  const projectId = event.currentTarget?.dataset?.takProjectId;
+  const activeProfileId = state.takSettings.activeProfileId;
+  if (!projectId || !activeProfileId) {
+    return;
+  }
+  if (event.currentTarget.checked) {
+    state.takSettings.projectAssignments.set(projectId, activeProfileId);
+  } else if (state.takSettings.projectAssignments.get(projectId) === activeProfileId) {
+    state.takSettings.projectAssignments.delete(projectId);
+  }
+  syncWorkspaceUi();
+  syncTakUi();
+  try {
+    await syncTakProjectBindingsToServer();
+    const project = state.session.projects.find((entry) => entry.id === projectId);
+    state.takSettings.statusMessage = event.currentTarget.checked
+      ? `Enabled TAK stream for ${project?.name || "project"}.`
+      : `Disabled TAK stream for ${project?.name || "project"}.`;
+    syncWorkspaceUi();
+    syncTakUi();
+  } catch (error) {
+    setStatus(`TAK project binding failed: ${error.message}`, true);
+    await loadServerTakProjectBindings();
+    syncWorkspaceUi();
+    syncTakUi();
+  }
 }
 
 function renderAiEmptyState() {
@@ -15661,6 +16469,7 @@ function commitDrawnShape(labelPrefix, geometryType, coordinates, extra = {}) {
     },
     sourceLabel: "Drawn",
     drawn: true,
+    shapeKind: extra.shapeKind || labelPrefix.toLowerCase(),
     shapeStyle: { color: DRAW_DEFAULTS.color, fillColor: DRAW_DEFAULTS.color, fillOpacity: DRAW_DEFAULTS.fillOpacity, weight: DRAW_DEFAULTS.weight, lineStyle: DRAW_DEFAULTS.lineStyle },
     ...extra,
   };
@@ -15687,6 +16496,10 @@ function addDrawnFeature(feature, folderId = null) {
     geometryType: feature.geometryType,
     properties: feature.properties ?? {},
     drawn: true,
+    tak: normalizeTakMetadata(feature.tak),
+    shapeKind: typeof feature.shapeKind === "string" && feature.shapeKind
+      ? feature.shapeKind
+      : inferImportedShapeKind(feature.geometryType, feature.properties, feature.name),
     showLabel,
     shapeStyle: isPoint ? null : normalizeImportedShapeStyle(feature.geometryType, feature.shapeStyle ?? { ...DRAW_DEFAULTS, fillColor: DRAW_DEFAULTS.color }),
     markerStyle: isPoint ? normalizeDrawnPointMarkerStyle(feature.markerStyle) : null,
@@ -16493,6 +17306,10 @@ function addImportedFeature(feature, folderId, index, options = {}) {
     folderPath: Array.isArray(feature.folderPath) ? feature.folderPath : [],
     sourceLabel: feature.sourceLabel ?? null,
     properties: feature.properties ?? {},
+    tak: normalizeTakMetadata(feature.tak),
+    shapeKind: typeof feature.shapeKind === "string" && feature.shapeKind
+      ? feature.shapeKind
+      : inferImportedShapeKind(feature.geometryType, feature.properties, feature.name),
     shapeStyle,
     markerStyle,
     // Explicitly record showLabel=false at import time so that a page reload

@@ -2090,6 +2090,95 @@
           </div>
           <div class="weather-summary ai-summary" id="aiProviderSummary">Add a provider and API key to enable the AI planning assistant.</div>
         </section>
+        <section class="settings-modal-section">
+          <div class="menu-title-row">
+            <strong>TAK Integration</strong>
+          </div>
+          <div id="takGuestNotice" class="weather-summary ai-summary hidden">
+            TAK Integration requires a logged-in account and server-backed projects.
+          </div>
+          <div id="takMemberSection" class="hidden">
+            <div class="settings-modal-grid">
+              <label class="settings-span-2">
+                Saved TAK Servers
+                <div class="settings-saved-key-row tak-profile-row">
+                  <select id="takSavedProfileSelect">
+                    <option value="">No saved TAK servers</option>
+                  </select>
+                  <div class="tak-inline-actions">
+                    <button id="takNewProfileBtn" class="ghost-button small" type="button">New</button>
+                    <button id="takDeleteProfileBtn" class="ghost-button small" type="button">Delete</button>
+                  </div>
+                </div>
+              </label>
+              <label class="settings-span-2">
+                TAK Server Label
+                <input id="takProfileLabelInput" type="text" placeholder="Optional display name">
+              </label>
+              <label>
+                Server Host
+                <input id="takServerHostInput" type="text" placeholder="tak.example.mil">
+              </label>
+              <label>
+                Port
+                <input id="takServerPortInput" type="number" min="1" max="65535" value="8089">
+              </label>
+              <label>
+                Transport
+                <select id="takTransportSelect">
+                  <option value="tls">TLS</option>
+                  <option value="ssl">SSL</option>
+                  <option value="tcp">TCP</option>
+                </select>
+              </label>
+              <label>
+                Username
+                <input id="takUsernameInput" type="text" placeholder="Optional">
+              </label>
+              <label class="settings-span-2">
+                Password / Token / Secret
+                <input id="takAuthSecretInput" type="password" placeholder="Leave blank to keep stored secret">
+              </label>
+
+              <div class="settings-span-2 tak-cert-grid">
+                <div class="tak-cert-card">
+                  <strong>Client Certificate (PEM)</strong>
+                  <input id="takClientCertInput" type="file" accept=".pem,.crt,.cer,.txt">
+                  <div id="takClientCertSummary" class="tak-cert-summary">No client certificate stored.</div>
+                  <button id="takDeleteClientCertBtn" class="ghost-button small" type="button">Delete Certificate</button>
+                </div>
+                <div class="tak-cert-card">
+                  <strong>Client Private Key (PEM)</strong>
+                  <input id="takClientKeyInput" type="file" accept=".pem,.key,.txt">
+                  <div id="takClientKeySummary" class="tak-cert-summary">No client key stored.</div>
+                  <button id="takDeleteClientKeyBtn" class="ghost-button small" type="button">Delete Key</button>
+                </div>
+                <div class="tak-cert-card">
+                  <strong>CA Certificate (Optional PEM)</strong>
+                  <input id="takCaCertInput" type="file" accept=".pem,.crt,.cer,.txt">
+                  <div id="takCaCertSummary" class="tak-cert-summary">No CA certificate stored.</div>
+                  <button id="takDeleteCaCertBtn" class="ghost-button small" type="button">Delete CA</button>
+                </div>
+              </div>
+
+              <div class="settings-span-2 tak-project-shell">
+                <div class="tak-project-header">
+                  <strong>Projects Enabled For This TAK Server</strong>
+                  <span id="takProjectBindingHint" class="tak-project-hint">Save this TAK server first to assign projects.</span>
+                </div>
+                <div id="takProjectChecklist" class="tak-project-checklist">
+                  <div class="tak-project-empty">No projects available.</div>
+                </div>
+              </div>
+            </div>
+            <div class="button-row compact-button-row settings-modal-actions">
+              <button id="saveTakProfileBtn" class="primary-button small" type="button">Save TAK Server</button>
+              <button id="testTakProfileBtn" class="ghost-button small" type="button">Test Connection</button>
+              <button id="clearTakProfileBtn" class="ghost-button small" type="button">Clear Draft</button>
+            </div>
+            <div class="weather-summary ai-summary" id="takSettingsSummary">Save a TAK server profile to assign it to server-backed projects.</div>
+          </div>
+        </section>
       </div>
     </div>
   </div>

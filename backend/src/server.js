@@ -135,6 +135,46 @@ function usernameToInternalEmail(username) {
   return `${slug}@rfsim.local`;
 }
 
+function isPemLike(value = "", { kind = "generic" } = {}) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+  if (kind === "certificate") {
+    return /-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/i.test(text);
+  }
+  if (kind === "privateKey") {
+    return /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]+-----END [A-Z0-9 ]*PRIVATE KEY-----/i.test(text);
+  }
+  return /-----BEGIN [A-Z0-9 ]+-----[\s\S]+-----END [A-Z0-9 ]+-----/i.test(text);
+}
+
+function summarizeTakProfileRow(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    id: row.id,
+    label: row.label,
+    serverHost: row.server_host,
+    serverPort: Number(row.server_port ?? 8089),
+    transport: row.transport,
+    username: row.username,
+    hasAuthSecret: Boolean(row.auth_secret),
+    hasClientCert: Boolean(row.client_cert_pem),
+    hasClientKey: Boolean(row.client_key_pem),
+    hasCaCert: Boolean(row.ca_cert_pem),
+    clientCertFileName: row.client_cert_file_name || "",
+    clientKeyFileName: row.client_key_file_name || "",
+    caCertFileName: row.ca_cert_file_name || "",
+    clientCertUpdatedAt: row.client_cert_updated_at,
+    clientKeyUpdatedAt: row.client_key_updated_at,
+    caCertUpdatedAt: row.ca_cert_updated_at,
+    lastTestedAt: row.last_tested_at,
+    lastTestStatus: row.last_test_status || "",
+  };
+}
+
 function buildLoginIdentifierCandidates(rawIdentifier = "") {
   const trimmed = normalizeUsername(rawIdentifier);
   if (!trimmed) {
@@ -240,6 +280,37 @@ const aiConfigItemSchema = z.object({
 
 const aiConfigListSchema = z.object({
   configs: z.array(aiConfigItemSchema).default([])
+});
+
+const takProfileItemSchema = z.object({
+  id: z.string().min(1).max(200),
+  label: z.string().max(120).optional().default(""),
+  serverHost: z.string().min(1).max(255),
+  serverPort: z.number().int().min(1).max(65535).optional().default(8089),
+  transport: z.string().min(1).max(80).optional().default("tls"),
+  username: z.string().max(120).optional().default(""),
+  authSecret: z.string().max(4096).optional(),
+  deleteAuthSecret: z.boolean().optional().default(false),
+  clientCertPem: z.string().max(200000).optional(),
+  clientCertFileName: z.string().max(255).optional().default(""),
+  deleteClientCert: z.boolean().optional().default(false),
+  clientKeyPem: z.string().max(200000).optional(),
+  clientKeyFileName: z.string().max(255).optional().default(""),
+  deleteClientKey: z.boolean().optional().default(false),
+  caCertPem: z.string().max(200000).optional(),
+  caCertFileName: z.string().max(255).optional().default(""),
+  deleteCaCert: z.boolean().optional().default(false),
+});
+
+const takProfileListSchema = z.object({
+  profiles: z.array(takProfileItemSchema).default([])
+});
+
+const takProjectBindingListSchema = z.object({
+  bindings: z.array(z.object({
+    projectId: z.string().uuid(),
+    takProfileId: z.string().min(1).max(200).nullable().optional().default(null),
+  })).default([])
 });
 
 const aiGenAiMilModelsSchema = z.object({
@@ -568,6 +639,334 @@ app.put("/api/user/ai-configs", authRequired, async (request, response) => {
     await client.query("rollback");
     if (error.code === "42P01") {
       response.status(503).json({ error: "AI config storage not available — run the latest database migration." });
+      return;
+    }
+    response.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/user/tak-profiles", authRequired, async (request, response) => {
+  try {
+    const result = await query(
+      `select *
+       from user_tak_profile
+       where owner_user_id = $1
+       order by position asc, updated_at desc`,
+      [request.user.sub]
+    );
+    response.json({ profiles: result.rows.map(summarizeTakProfileRow) });
+  } catch (error) {
+    if (error.code === "42P01") {
+      response.json({ profiles: [] });
+      return;
+    }
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
+  const parsed = takProfileListSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const existingResult = await client.query(
+      "select * from user_tak_profile where owner_user_id = $1",
+      [request.user.sub]
+    );
+    const existingById = new Map(existingResult.rows.map((row) => [row.id, row]));
+    const retainedIds = parsed.data.profiles.map((profile) => profile.id);
+
+    for (const [index, profile] of parsed.data.profiles.entries()) {
+      const existing = existingById.get(profile.id);
+
+      const authSecret = profile.deleteAuthSecret
+        ? ""
+        : typeof profile.authSecret === "string"
+          ? (profile.authSecret.trim() ? encryptSecret(profile.authSecret.trim()) : "")
+          : (existing?.auth_secret ?? "");
+
+      let clientCertPem = existing?.client_cert_pem ?? "";
+      let clientCertFileName = existing?.client_cert_file_name ?? "";
+      let clientCertUpdatedAt = existing?.client_cert_updated_at ?? null;
+      if (profile.deleteClientCert) {
+        clientCertPem = "";
+        clientCertFileName = "";
+        clientCertUpdatedAt = null;
+      } else if (typeof profile.clientCertPem === "string") {
+        if (!isPemLike(profile.clientCertPem, { kind: "certificate" })) {
+          throw new Error(`Client certificate for "${profile.label || profile.serverHost}" must be a PEM certificate.`);
+        }
+        clientCertPem = encryptSecret(profile.clientCertPem.trim());
+        clientCertFileName = profile.clientCertFileName ?? "";
+        clientCertUpdatedAt = new Date().toISOString();
+      }
+
+      let clientKeyPem = existing?.client_key_pem ?? "";
+      let clientKeyFileName = existing?.client_key_file_name ?? "";
+      let clientKeyUpdatedAt = existing?.client_key_updated_at ?? null;
+      if (profile.deleteClientKey) {
+        clientKeyPem = "";
+        clientKeyFileName = "";
+        clientKeyUpdatedAt = null;
+      } else if (typeof profile.clientKeyPem === "string") {
+        if (!isPemLike(profile.clientKeyPem, { kind: "privateKey" })) {
+          throw new Error(`Client key for "${profile.label || profile.serverHost}" must be a PEM private key.`);
+        }
+        clientKeyPem = encryptSecret(profile.clientKeyPem.trim());
+        clientKeyFileName = profile.clientKeyFileName ?? "";
+        clientKeyUpdatedAt = new Date().toISOString();
+      }
+
+      let caCertPem = existing?.ca_cert_pem ?? "";
+      let caCertFileName = existing?.ca_cert_file_name ?? "";
+      let caCertUpdatedAt = existing?.ca_cert_updated_at ?? null;
+      if (profile.deleteCaCert) {
+        caCertPem = "";
+        caCertFileName = "";
+        caCertUpdatedAt = null;
+      } else if (typeof profile.caCertPem === "string") {
+        if (!isPemLike(profile.caCertPem, { kind: "certificate" })) {
+          throw new Error(`CA certificate for "${profile.label || profile.serverHost}" must be a PEM certificate.`);
+        }
+        caCertPem = encryptSecret(profile.caCertPem.trim());
+        caCertFileName = profile.caCertFileName ?? "";
+        caCertUpdatedAt = new Date().toISOString();
+      }
+
+      await client.query(
+        `insert into user_tak_profile (
+           id, owner_user_id, label, server_host, server_port, transport, username, auth_secret,
+           client_cert_pem, client_key_pem, ca_cert_pem,
+           client_cert_file_name, client_key_file_name, ca_cert_file_name,
+           client_cert_updated_at, client_key_updated_at, ca_cert_updated_at,
+           position, updated_at
+         )
+         values (
+           $1, $2, $3, $4, $5, $6, $7, $8,
+           $9, $10, $11,
+           $12, $13, $14,
+           $15, $16, $17,
+           $18, now()
+         )
+         on conflict (id) do update set
+           label = excluded.label,
+           server_host = excluded.server_host,
+           server_port = excluded.server_port,
+           transport = excluded.transport,
+           username = excluded.username,
+           auth_secret = excluded.auth_secret,
+           client_cert_pem = excluded.client_cert_pem,
+           client_key_pem = excluded.client_key_pem,
+           ca_cert_pem = excluded.ca_cert_pem,
+           client_cert_file_name = excluded.client_cert_file_name,
+           client_key_file_name = excluded.client_key_file_name,
+           ca_cert_file_name = excluded.ca_cert_file_name,
+           client_cert_updated_at = excluded.client_cert_updated_at,
+           client_key_updated_at = excluded.client_key_updated_at,
+           ca_cert_updated_at = excluded.ca_cert_updated_at,
+           position = excluded.position,
+           updated_at = now()
+         where user_tak_profile.owner_user_id = excluded.owner_user_id`,
+        [
+          profile.id,
+          request.user.sub,
+          profile.label ?? "",
+          profile.serverHost.trim(),
+          profile.serverPort ?? 8089,
+          profile.transport ?? "tls",
+          profile.username ?? "",
+          authSecret,
+          clientCertPem,
+          clientKeyPem,
+          caCertPem,
+          clientCertFileName,
+          clientKeyFileName,
+          caCertFileName,
+          clientCertUpdatedAt,
+          clientKeyUpdatedAt,
+          caCertUpdatedAt,
+          index,
+        ]
+      );
+    }
+
+    if (retainedIds.length) {
+      await client.query(
+        "delete from user_tak_profile where owner_user_id = $1 and not (id = any($2::text[]))",
+        [request.user.sub, retainedIds]
+      );
+    } else {
+      await client.query("delete from user_tak_profile where owner_user_id = $1", [request.user.sub]);
+    }
+
+    const result = await client.query(
+      `select *
+       from user_tak_profile
+       where owner_user_id = $1
+       order by position asc, updated_at desc`,
+      [request.user.sub]
+    );
+    await client.query("commit");
+    response.json({ profiles: result.rows.map(summarizeTakProfileRow) });
+  } catch (error) {
+    await client.query("rollback");
+    if (error.code === "42P01") {
+      response.status(503).json({ error: "TAK profile storage not available — run the latest database migration." });
+      return;
+    }
+    response.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/user/tak-profiles/:profileId", authRequired, async (request, response) => {
+  try {
+    const result = await query(
+      "delete from user_tak_profile where id = $1 and owner_user_id = $2",
+      [request.params.profileId, request.user.sub]
+    );
+    if (result.rowCount === 0) {
+      response.status(404).json({ error: "TAK profile not found." });
+      return;
+    }
+    response.status(204).end();
+  } catch (error) {
+    if (error.code === "42P01") {
+      response.status(503).json({ error: "TAK profile storage not available — run the latest database migration." });
+      return;
+    }
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/user/tak-profiles/:profileId/test", authRequired, async (request, response) => {
+  try {
+    const result = await query(
+      "select * from user_tak_profile where id = $1 and owner_user_id = $2",
+      [request.params.profileId, request.user.sub]
+    );
+    if (result.rowCount === 0) {
+      response.status(404).json({ error: "TAK profile not found." });
+      return;
+    }
+    const profile = result.rows[0];
+    const hasCore = Boolean(profile.server_host && profile.server_port && profile.transport);
+    const hasMutualTls = Boolean(profile.client_cert_pem && profile.client_key_pem);
+    const status = hasCore ? (hasMutualTls ? "ready" : "incomplete") : "error";
+    const checkedAt = new Date().toISOString();
+    const message = hasCore
+      ? (hasMutualTls
+        ? "Profile is bridge-ready. Live TAK transport can use this configuration."
+        : "Server settings are saved, but the mutual TLS certificate and key are not both present yet.")
+      : "Profile is missing required TAK server settings.";
+
+    await query(
+      "update user_tak_profile set last_tested_at = $3, last_test_status = $4, updated_at = now() where id = $1 and owner_user_id = $2",
+      [request.params.profileId, request.user.sub, checkedAt, status]
+    );
+
+    response.json({
+      ok: status === "ready",
+      status,
+      checkedAt,
+      message,
+      requirements: {
+        hasServerHost: Boolean(profile.server_host),
+        hasServerPort: Boolean(profile.server_port),
+        hasTransport: Boolean(profile.transport),
+        hasAuthSecret: Boolean(profile.auth_secret),
+        hasClientCert: Boolean(profile.client_cert_pem),
+        hasClientKey: Boolean(profile.client_key_pem),
+        hasCaCert: Boolean(profile.ca_cert_pem),
+      },
+    });
+  } catch (error) {
+    if (error.code === "42P01") {
+      response.status(503).json({ error: "TAK profile storage not available — run the latest database migration." });
+      return;
+    }
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/user/tak-project-bindings", authRequired, async (request, response) => {
+  try {
+    const result = await query(
+      `select project_id as "projectId", tak_profile_id as "takProfileId"
+       from project_tak_binding
+       where owner_user_id = $1
+       order by updated_at desc`,
+      [request.user.sub]
+    );
+    response.json({ bindings: result.rows });
+  } catch (error) {
+    if (error.code === "42P01") {
+      response.json({ bindings: [] });
+      return;
+    }
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/api/user/tak-project-bindings", authRequired, async (request, response) => {
+  const parsed = takProjectBindingListSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  const normalizedBindings = parsed.data.bindings.filter((binding) => binding.takProfileId);
+  const projectIds = [...new Set(parsed.data.bindings.map((binding) => binding.projectId))];
+  const profileIds = [...new Set(normalizedBindings.map((binding) => binding.takProfileId))];
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    if (projectIds.length) {
+      const ownedProjects = await client.query(
+        "select id from project where owner_user_id = $1 and id = any($2::uuid[])",
+        [request.user.sub, projectIds]
+      );
+      if (ownedProjects.rowCount !== projectIds.length) {
+        throw new Error("One or more selected projects are not owned by this user.");
+      }
+    }
+    if (profileIds.length) {
+      const ownedProfiles = await client.query(
+        "select id from user_tak_profile where owner_user_id = $1 and id = any($2::text[])",
+        [request.user.sub, profileIds]
+      );
+      if (ownedProfiles.rowCount !== profileIds.length) {
+        throw new Error("One or more selected TAK profiles are not owned by this user.");
+      }
+    }
+
+    await client.query("delete from project_tak_binding where owner_user_id = $1", [request.user.sub]);
+    for (const binding of normalizedBindings) {
+      await client.query(
+        `insert into project_tak_binding (project_id, tak_profile_id, owner_user_id)
+         values ($1, $2, $3)
+         on conflict (project_id) do update set
+           tak_profile_id = excluded.tak_profile_id,
+           owner_user_id = excluded.owner_user_id,
+           updated_at = now()`,
+        [binding.projectId, binding.takProfileId, request.user.sub]
+      );
+    }
+    await client.query("commit");
+    response.json({ bindings: normalizedBindings });
+  } catch (error) {
+    await client.query("rollback");
+    if (error.code === "42P01") {
+      response.status(503).json({ error: "TAK project binding storage not available — run the latest database migration." });
       return;
     }
     response.status(500).json({ error: error.message });

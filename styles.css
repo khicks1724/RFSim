@@ -4554,6 +4554,89 @@ button:focus {
   margin-top: 2px;
 }
 
+.tak-profile-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.tak-inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tak-cert-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tak-cert-card,
+.tak-project-shell {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+}
+
+.tak-cert-card strong,
+.tak-project-header strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.tak-cert-summary,
+.tak-project-hint,
+.tak-project-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.tak-project-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tak-project-checklist {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tak-project-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.tak-project-item input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.tak-project-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.tak-project-copy strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.tak-project-copy span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 body.settings-modal-open {
   overflow: hidden;
 }
@@ -4588,6 +4671,10 @@ body.settings-modal-open {
   }
 
   .settings-saved-key-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tak-cert-grid {
     grid-template-columns: 1fr;
   }
 }
