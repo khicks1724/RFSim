@@ -267,13 +267,16 @@ function parseTakCotEvent(xml = "") {
 
   const contactMatch = String(xml || "").match(/<contact\b([^>]*)\/?>/i);
   const groupMatch = String(xml || "").match(/<__group\b([^>]*)\/?>/i);
+  const usericonMatch = String(xml || "").match(/<usericon\b([^>]*)\/?>/i);
   const remarksMatch = String(xml || "").match(/<remarks[^>]*>([\s\S]*?)<\/remarks>/i);
   const contactAttrs = contactMatch ? parseXmlAttributes(contactMatch[1]) : {};
   const groupAttrs = groupMatch ? parseXmlAttributes(groupMatch[1]) : {};
+  const usericonAttrs = usericonMatch ? parseXmlAttributes(usericonMatch[1]) : {};
+  const remarks = decodeXmlEntities((remarksMatch?.[1] || "").trim());
   const callsign = (
     contactAttrs.callsign
     || groupAttrs.name
-    || decodeXmlEntities((remarksMatch?.[1] || "").trim())
+    || remarks
     || eventAttrs.uid
   ).trim();
 
@@ -292,6 +295,8 @@ function parseTakCotEvent(xml = "") {
     stale: String(eventAttrs.stale || "").trim(),
     team: String(groupAttrs.name || "").trim(),
     role: String(groupAttrs.role || "").trim(),
+    usericonPath: String(usericonAttrs.iconsetpath || "").trim(),
+    remarks,
   };
 }
 
@@ -411,6 +416,8 @@ function serializeTakConnectorContact(contact) {
     stale: contact.stale,
     team: contact.team,
     role: contact.role,
+    usericonPath: contact.usericonPath,
+    remarks: contact.remarks,
     lastSeenAt: contact.lastSeenAt,
   };
 }
@@ -858,6 +865,12 @@ const takLocationPublishSchema = z.object({
   cotType: z.string().max(120).optional(),
   displayType: z.string().max(120).optional(),
   how: z.string().max(40).optional(),
+  sourceMode: z.string().max(40).optional(),
+});
+
+const takEventPublishSchema = z.object({
+  xml: z.string().min(1).max(40000),
+  summary: z.string().max(200).optional(),
   sourceMode: z.string().max(40).optional(),
 });
 
@@ -1686,6 +1699,80 @@ app.post("/api/projects/:projectId/tak-location", authRequired, async (request, 
       sent: true,
       uid,
       message: `Published GPS position for ${body.callsign}.`,
+      profile: summarizeTakProfileRow(profileRow),
+      projectId: request.params.projectId,
+      sourceMode: body.sourceMode || "",
+      ...snapshot,
+    });
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/projects/:projectId/tak-event", authRequired, async (request, response) => {
+  const parsed = takEventPublishSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    const projectResult = await query(
+      "select id, name from project where id = $1 and owner_user_id = $2",
+      [request.params.projectId, request.user.sub]
+    );
+    if (projectResult.rowCount === 0) {
+      response.status(404).json({ error: "Project not found." });
+      return;
+    }
+
+    const bindingResult = await query(
+      `select t.*, p.project_id
+       from project_tak_binding p
+       join user_tak_profile t
+         on t.id = p.tak_profile_id
+        and t.owner_user_id = p.owner_user_id
+       where p.project_id = $1
+         and p.owner_user_id = $2`,
+      [request.params.projectId, request.user.sub]
+    );
+
+    if (bindingResult.rowCount === 0) {
+      response.status(409).json({
+        linked: false,
+        status: "unlinked",
+        message: "This project is not linked to a TAK server.",
+      });
+      return;
+    }
+
+    const profileRow = bindingResult.rows[0];
+    const connector = ensureTakConnector(request.user.sub, profileRow);
+    connector.lastAccessAt = Date.now();
+
+    if (connector.status !== "connected") {
+      const snapshot = summarizeTakConnector(connector);
+      response.status(409).json({
+        linked: true,
+        profile: summarizeTakProfileRow(profileRow),
+        ok: false,
+        sent: false,
+        message: connector.statusMessage || "TAK connector is not connected.",
+        ...snapshot,
+      });
+      return;
+    }
+
+    const body = parsed.data;
+    const summary = body.summary || "RF SIM Tactical CoT";
+    sendTakConnectorCot(connector, body.xml, summary);
+    const snapshot = summarizeTakConnector(connector);
+
+    response.json({
+      linked: true,
+      ok: true,
+      sent: true,
+      message: `${summary} published.`,
       profile: summarizeTakProfileRow(profileRow),
       projectId: request.params.projectId,
       sourceMode: body.sourceMode || "",

@@ -6262,23 +6262,37 @@ body.emitter-modal-open {
 /* Step 2 – Domain grid */
 .tpal-domain-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 .tpal-domain-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 14px 6px;
+  justify-content: center;
+  gap: 10px;
+  min-height: 132px;
+  padding: 16px 10px;
   background: transparent;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 8px;
-  color: var(--text-muted);
+  color: var(--text);
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
   text-align: center;
   transition: border-color 120ms, color 120ms, background 120ms;
+}
+.tpal-domain-btn-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+}
+.tpal-domain-btn-symbol .ms2525-icon,
+.tpal-domain-btn-symbol .milstd-stack {
+  width: 58px;
+  height: 58px;
 }
 .tpal-domain-btn:hover,
 .tpal-domain-btn:focus-visible {
@@ -6297,23 +6311,61 @@ body.emitter-modal-open {
 .tpal-category-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   border-right: 1px solid rgba(148, 163, 184, 0.12);
   padding-right: 10px;
 }
-.tpal-cat-btn {
-  text-align: left;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
+.tpal-category-heading {
   color: var(--text-muted);
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: background 100ms, color 100ms;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 4px 8px;
 }
-.tpal-cat-btn:hover { background: rgba(148, 163, 184, 0.08); color: var(--text); }
-.tpal-cat-btn.active { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
+.tpal-cat-btn {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 100ms, color 100ms, border-color 100ms;
+}
+.tpal-cat-btn:hover,
+.tpal-cat-btn:focus-visible {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.32);
+}
+.tpal-cat-btn.active {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+.tpal-cat-symbol,
+.tpal-type-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tpal-cat-symbol .ms2525-icon,
+.tpal-cat-symbol .milstd-stack,
+.tpal-type-symbol .ms2525-icon,
+.tpal-type-symbol .milstd-stack {
+  width: 34px;
+  height: 34px;
+}
+.tpal-nav-arrow {
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  text-align: right;
+}
 
 .tpal-type-grid {
   display: grid;
@@ -6342,18 +6394,28 @@ body.emitter-modal-open {
   color: var(--text);
   background: rgba(56, 189, 248, 0.04);
 }
-.tpal-type-btn img {
-  width: 36px;
-  height: 36px;
-  object-fit: contain;
+.tpal-type-btn .tpal-type-symbol .ms2525-icon,
+.tpal-type-btn .tpal-type-symbol .milstd-stack {
+  width: 42px;
+  height: 42px;
 }
-.tpal-type-btn .tpal-milstd-icon {
-  width: 52px;
-  height: 34px;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+
+@media (max-width: 900px) {
+  .tpal-domain-grid,
+  .tpal-type-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tpal-type-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tpal-category-list {
+    border-right: none;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    padding-right: 0;
+    padding-bottom: 10px;
+  }
 }
 
 /* Legacy hidden class still needed for search filter compat */
