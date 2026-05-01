@@ -1932,6 +1932,18 @@ const state = {
     projectId: null,
     provider: "backend-direct",
     lastEventAt: "",
+    lastPollAt: "",
+    lastConnectedAt: "",
+    lastOutboundAt: "",
+    lastContactCount: 0,
+    debugEvents: [],
+    clientDebugEvents: [],
+    gpsPublishTimerId: null,
+    gpsPublishInFlight: false,
+    gpsLastPublishAt: "",
+    gpsLastPublishStatus: "idle",
+    gpsLastPublishMessage: "",
+    gpsLastSentFixKey: "",
   },
   tacticalEditor: {
     mode: null,
@@ -2615,10 +2627,43 @@ function clearTakLiveContacts() {
   syncCesiumEntities();
 }
 
+function createTakDebugEntry(direction, summary, detail = "", level = "info", at = nowIso()) {
+  return {
+    at,
+    direction,
+    summary: String(summary || "").slice(0, 240),
+    detail: String(detail || "").slice(0, 1600),
+    level,
+  };
+}
+
+function pushClientTakDebug(direction, summary, detail = "", level = "info") {
+  state.takRuntime.clientDebugEvents.push(createTakDebugEntry(direction, summary, detail, level));
+  if (state.takRuntime.clientDebugEvents.length > 80) {
+    state.takRuntime.clientDebugEvents.splice(0, state.takRuntime.clientDebugEvents.length - 80);
+  }
+  renderMapTakDebugPanel();
+}
+
+function getCombinedTakDebugEvents() {
+  const merged = [
+    ...(Array.isArray(state.takRuntime.debugEvents) ? state.takRuntime.debugEvents : []),
+    ...(Array.isArray(state.takRuntime.clientDebugEvents) ? state.takRuntime.clientDebugEvents : []),
+  ];
+  return merged
+    .filter((entry) => entry && (entry.summary || entry.detail))
+    .sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")))
+    .slice(-120);
+}
+
 function stopTakLivePolling({ clearContacts = false } = {}) {
   if (state.takLive.pollTimerId) {
     window.clearTimeout(state.takLive.pollTimerId);
     state.takLive.pollTimerId = null;
+  }
+  if (state.takRuntime.gpsPublishTimerId) {
+    window.clearTimeout(state.takRuntime.gpsPublishTimerId);
+    state.takRuntime.gpsPublishTimerId = null;
   }
   state.takLive.projectId = null;
   state.takLive.status = "idle";
@@ -2628,9 +2673,20 @@ function stopTakLivePolling({ clearContacts = false } = {}) {
   state.takRuntime.status = "idle";
   state.takRuntime.message = "";
   state.takRuntime.profileId = "";
+  state.takRuntime.lastPollAt = "";
+  state.takRuntime.lastConnectedAt = "";
+  state.takRuntime.lastOutboundAt = "";
+  state.takRuntime.lastContactCount = 0;
+  state.takRuntime.gpsPublishInFlight = false;
+  state.takRuntime.gpsLastPublishStatus = "idle";
+  state.takRuntime.gpsLastPublishMessage = "";
+  state.takRuntime.gpsLastSentFixKey = "";
+  state.takRuntime.debugEvents = [];
+  state.takRuntime.clientDebugEvents = [];
   if (clearContacts) {
     clearTakLiveContacts();
   }
+  renderMapTakDebugPanel();
 }
 
 async function pollTakLiveContacts({ immediate = false } = {}) {
@@ -2656,6 +2712,11 @@ async function pollTakLiveContacts({ immediate = false } = {}) {
     state.takLive.lastPollAt = nowIso();
     state.takRuntime.status = state.takLive.status;
     state.takRuntime.message = state.takLive.message;
+    state.takRuntime.lastPollAt = state.takLive.lastPollAt;
+    state.takRuntime.lastConnectedAt = payload.connectedAt || "";
+    state.takRuntime.lastOutboundAt = payload.lastOutboundAt || "";
+    state.takRuntime.lastContactCount = Number(payload.contactCount ?? (Array.isArray(payload.contacts) ? payload.contacts.length : 0)) || 0;
+    state.takRuntime.debugEvents = Array.isArray(payload.debugEvents) ? payload.debugEvents : [];
 
     if (!payload.linked) {
       clearTakLiveContacts();
@@ -2673,11 +2734,13 @@ async function pollTakLiveContacts({ immediate = false } = {}) {
       renderMapContents();
       syncCesiumEntities();
     }
+    renderMapTakDebugPanel();
   } catch (error) {
     state.takLive.status = "error";
     state.takLive.message = error.message;
     state.takRuntime.status = "error";
     state.takRuntime.message = error.message;
+    pushClientTakDebug("status", "TAK poll failed", error.message, "error");
   } finally {
     if (state.session.token && state.session.activeProjectId === currentProjectId && isTakEnabledForProject(currentProjectId)) {
       state.takLive.pollTimerId = window.setTimeout(() => {
@@ -2690,9 +2753,106 @@ async function pollTakLiveContacts({ immediate = false } = {}) {
 function refreshTakLiveFeed({ immediate = false } = {}) {
   stopTakLivePolling({ clearContacts: !isTakEnabledForProject(state.session.activeProjectId) });
   if (!state.session.token || !state.session.activeProjectId || !isTakEnabledForProject(state.session.activeProjectId)) {
+    renderMapTakDebugPanel();
     return;
   }
   void pollTakLiveContacts({ immediate }).catch(() => {});
+  queueTakGpsPublish({ immediate: true });
+}
+
+const TAK_GPS_PUBLISH_INTERVAL_MS = 8000;
+
+function buildTakGpsUid(projectId = state.session.activeProjectId) {
+  const rawIdentity = state.session.user?.email || state.session.user?.fullName || "user";
+  const safeIdentity = String(rawIdentity)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "user";
+  return `rfsim:${projectId || "project"}:${safeIdentity}:gps`;
+}
+
+function getTakGpsCallsign() {
+  const fullName = state.session.user?.fullName?.trim();
+  if (fullName) {
+    return fullName.slice(0, 120);
+  }
+  const email = state.session.user?.email?.trim();
+  if (email) {
+    return email.split("@")[0].slice(0, 120);
+  }
+  return "RF SIM";
+}
+
+function queueTakGpsPublish({ immediate = false } = {}) {
+  if (state.takRuntime.gpsPublishTimerId) {
+    window.clearTimeout(state.takRuntime.gpsPublishTimerId);
+    state.takRuntime.gpsPublishTimerId = null;
+  }
+  if (!state.session.token || !state.session.activeProjectId || !isTakEnabledForProject(state.session.activeProjectId) || !state.gps.location) {
+    return;
+  }
+  if (state.takRuntime.gpsPublishInFlight) {
+    return;
+  }
+  const lastPublishMs = state.takRuntime.gpsLastPublishAt ? Date.parse(state.takRuntime.gpsLastPublishAt) : 0;
+  const elapsedMs = Number.isFinite(lastPublishMs) ? (Date.now() - lastPublishMs) : Number.POSITIVE_INFINITY;
+  const delayMs = immediate ? 0 : Math.max(0, TAK_GPS_PUBLISH_INTERVAL_MS - elapsedMs);
+  state.takRuntime.gpsPublishTimerId = window.setTimeout(() => {
+    state.takRuntime.gpsPublishTimerId = null;
+    void publishTakGpsLocation();
+  }, delayMs);
+}
+
+async function publishTakGpsLocation() {
+  if (state.takRuntime.gpsPublishInFlight || !state.session.token || !state.session.activeProjectId || !isTakEnabledForProject(state.session.activeProjectId) || !state.gps.location) {
+    return;
+  }
+
+  const fix = state.gps.location;
+  const projectId = state.session.activeProjectId;
+  const callsign = getTakGpsCallsign();
+  const sourceMode = state.gps.mode || "gps";
+  const payload = {
+    lat: Number(fix.lat),
+    lon: Number(fix.lon),
+    hae: Number.isFinite(Number(fix.altitudeM)) ? Number(fix.altitudeM) : undefined,
+    accuracyM: Number.isFinite(Number(fix.accuracyM)) ? Number(fix.accuracyM) : undefined,
+    ce: Number.isFinite(Number(fix.accuracyM)) ? Number(fix.accuracyM) : undefined,
+    le: Number.isFinite(Number(fix.accuracyM)) ? Number(fix.accuracyM) : undefined,
+    callsign,
+    uid: buildTakGpsUid(projectId),
+    how: sourceMode === "usb" ? "m-p" : "m-g",
+    sourceMode,
+  };
+
+  state.takRuntime.gpsPublishInFlight = true;
+  pushClientTakDebug("outbound", "Publishing RF SIM GPS PLI", `${callsign} ${payload.lat.toFixed(5)}, ${payload.lon.toFixed(5)} via ${sourceMode}`, "info");
+
+  try {
+    const result = await apiFetch(`/projects/${projectId}/tak-location`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (state.session.activeProjectId !== projectId) {
+      return;
+    }
+    state.takRuntime.gpsLastPublishAt = nowIso();
+    state.takRuntime.gpsLastPublishStatus = result?.sent ? "sent" : "pending";
+    state.takRuntime.gpsLastPublishMessage = result?.message || "GPS PLI published.";
+    state.takRuntime.lastOutboundAt = result?.lastOutboundAt || state.takRuntime.gpsLastPublishAt;
+    state.takRuntime.debugEvents = Array.isArray(result?.debugEvents) ? result.debugEvents : state.takRuntime.debugEvents;
+    state.takRuntime.lastContactCount = Number(result?.contactCount ?? state.takRuntime.lastContactCount) || 0;
+    pushClientTakDebug("outbound", "GPS PLI sent", state.takRuntime.gpsLastPublishMessage, "info");
+  } catch (error) {
+    state.takRuntime.gpsLastPublishAt = nowIso();
+    state.takRuntime.gpsLastPublishStatus = "error";
+    state.takRuntime.gpsLastPublishMessage = error.message;
+    pushClientTakDebug("outbound", "GPS PLI failed", error.message, "error");
+  } finally {
+    state.takRuntime.gpsPublishInFlight = false;
+    renderMapTakDebugPanel();
+  }
 }
 
 function setTakDraft(profile) {
@@ -3176,6 +3336,7 @@ function renderTakProjectChecklist() {
     return `
       <label class="tak-project-item">
         <input type="checkbox" data-tak-project-id="${escapeHtml(project.id)}" ${checked ? "checked" : ""}>
+        <span class="tak-project-checkmark" aria-hidden="true">x</span>
         <span class="tak-project-copy">
           <strong>${escapeHtml(project.name)}</strong>
           <span>${escapeHtml(project.description || "Server-backed project")}${escapeHtml(activeBadge)}</span>
@@ -5078,6 +5239,7 @@ async function init() {
   renderPlanningResults();
   renderMapContents();
   refreshTakLiveFeed({ immediate: true });
+  renderMapTakDebugPanel();
   refreshActionButtons();
   updateTerrainSummary();
   updateWeatherState();
@@ -7064,6 +7226,7 @@ function afterSwitchView(view) {
   if (view === "topology") renderTopologyView();
   if (view === "analyze")  renderAnalyzeView();
   if (view === "plan")     initPlanViewIfNeeded();
+  renderMapTakDebugPanel();
 }
 
 function initViewModeToggle() {
@@ -14621,6 +14784,8 @@ function applyGpsFix(fix, mode) {
 
   updateMapOverlayMetrics();
   syncCesiumEntities();
+  queueTakGpsPublish();
+  renderMapTakDebugPanel();
 }
 
 function drawPlanningRegion() {
@@ -24909,6 +25074,167 @@ function getRectRayExitPoint(cx, cy, width, height, angleRad, extra = 0) {
     x: cx + dx * (scale + extra),
     y: cy + dy * (scale + extra),
   };
+}
+
+let _mapTakDebugCollapsed = false;
+let _mapTakDebugSize = { width: 360, height: 240 };
+let _mapTakDebugResize = null;
+
+function applyMapTakDebugPanelSize(panel = document.getElementById("_mapTakDebugPanel")) {
+  if (!panel || _mapTakDebugCollapsed) return;
+  const width = Math.max(240, Math.round(Number(_mapTakDebugSize?.width) || 360));
+  const height = Math.max(140, Math.round(Number(_mapTakDebugSize?.height) || 240));
+  panel.style.width = `${width}px`;
+  panel.style.height = `${height}px`;
+  panel.style.maxHeight = "none";
+}
+
+function stopMapTakDebugWheelPropagation(event) {
+  event.stopPropagation();
+}
+
+function onMapTakDebugResizePointerMove(event) {
+  if (!_mapTakDebugResize) return;
+  const { panel, startRect, startClientX, startClientY } = _mapTakDebugResize;
+  const dx = startClientX - event.clientX;
+  const dy = event.clientY - startClientY;
+  const stageRect = dom.mapStage?.getBoundingClientRect?.();
+  const maxWidth = stageRect ? Math.max(240, stageRect.width - 24) : 720;
+  const maxHeight = stageRect ? Math.max(140, stageRect.height - 24) : 540;
+  _mapTakDebugSize = {
+    width: Math.max(240, Math.min(maxWidth, startRect.width + dx)),
+    height: Math.max(140, Math.min(maxHeight, startRect.height + dy)),
+  };
+  applyMapTakDebugPanelSize(panel);
+}
+
+function endMapTakDebugResize(event) {
+  if (!_mapTakDebugResize) return;
+  try {
+    _mapTakDebugResize.handle?.releasePointerCapture?.(event.pointerId);
+  } catch {}
+  _mapTakDebugResize = null;
+  document.body.classList.remove("map-tak-debug-resizing");
+}
+
+function formatMapTakDebugTimestamp(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatMapTakDebugLines() {
+  const project = state.session.projects.find((entry) => entry.id === state.session.activeProjectId) ?? null;
+  const profile = getTakProfileForProject(state.session.activeProjectId);
+  const runtime = state.takRuntime;
+  const lines = [
+    `Project: ${project?.name || "None"}`,
+    `Profile: ${profile?.label || profile?.serverHost || "Not linked"}`,
+    `Status: ${runtime.status || "idle"}${runtime.message ? ` • ${runtime.message}` : ""}`,
+    `Contacts: ${runtime.lastContactCount || 0}`,
+    `Last inbound: ${formatMapTakDebugTimestamp(runtime.lastEventAt)}`,
+    `Last outbound: ${formatMapTakDebugTimestamp(runtime.lastOutboundAt || runtime.gpsLastPublishAt)}`,
+    `Last poll: ${formatMapTakDebugTimestamp(runtime.lastPollAt)}`,
+    `GPS publish: ${runtime.gpsLastPublishStatus || "idle"}${runtime.gpsLastPublishMessage ? ` • ${runtime.gpsLastPublishMessage}` : ""}`,
+    "",
+    "Recent TAK activity:",
+  ];
+
+  const events = getCombinedTakDebugEvents();
+  if (!events.length) {
+    lines.push("  No CoT activity yet.");
+  } else {
+    events.slice(-40).forEach((entry) => {
+      const stamp = formatMapTakDebugTimestamp(entry.at);
+      const direction = String(entry.direction || "status").toUpperCase();
+      const level = entry.level && entry.level !== "info" ? ` ${String(entry.level).toUpperCase()}` : "";
+      lines.push(`[${stamp}] ${direction}${level} ${entry.summary || ""}`.trim());
+      if (entry.detail) {
+        lines.push(`  ${entry.detail}`);
+      }
+    });
+  }
+  return lines.join("\n");
+}
+
+function syncMapTakDebugPanelState() {
+  const panel = document.getElementById("_mapTakDebugPanel");
+  if (!panel) return;
+  const isMapView = state.ui?.currentView === "map";
+  panel.classList.toggle("hidden", !isMapView);
+  panel.classList.toggle("is-collapsed", _mapTakDebugCollapsed);
+  const toggle = document.getElementById("_mapTakDebugToggle");
+  if (toggle) {
+    toggle.textContent = _mapTakDebugCollapsed ? "+" : "−";
+    toggle.setAttribute("aria-expanded", String(!_mapTakDebugCollapsed));
+    toggle.setAttribute("aria-label", _mapTakDebugCollapsed ? "Expand TAK debug panel" : "Collapse TAK debug panel");
+  }
+  if (_mapTakDebugCollapsed) {
+    panel.style.removeProperty("height");
+  } else {
+    applyMapTakDebugPanelSize(panel);
+  }
+}
+
+function ensureMapTakDebugPanel() {
+  if (!dom.mapStage) return null;
+  let panel = document.getElementById("_mapTakDebugPanel");
+  if (panel && panel.parentElement !== dom.mapStage) {
+    panel.remove();
+    panel = null;
+  }
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "_mapTakDebugPanel";
+    panel.className = "map-tak-debug-panel";
+    panel.innerHTML = `
+      <div class="map-tak-debug-header">
+        <span class="map-tak-debug-title">TAK DEBUG</span>
+        <button id="_mapTakDebugToggle" class="map-tak-debug-toggle" type="button" aria-expanded="true" aria-label="Collapse TAK debug panel">−</button>
+      </div>
+      <pre id="_mapTakDebug" class="map-tak-debug-body"></pre>
+      <div id="_mapTakDebugResizeHandle" class="map-tak-debug-resize-handle" aria-hidden="true"></div>
+    `;
+    panel.addEventListener("mousedown", (event) => event.stopPropagation());
+    panel.addEventListener("click", (event) => event.stopPropagation());
+    panel.addEventListener("wheel", stopMapTakDebugWheelPropagation, { passive: true });
+    panel.querySelector("#_mapTakDebug")?.addEventListener("wheel", stopMapTakDebugWheelPropagation, { passive: true });
+    dom.mapStage.appendChild(panel);
+    panel.querySelector("#_mapTakDebugToggle")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _mapTakDebugCollapsed = !_mapTakDebugCollapsed;
+      syncMapTakDebugPanelState();
+    });
+    panel.querySelector("#_mapTakDebugResizeHandle")?.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _mapTakDebugResize = {
+        panel,
+        handle: event.currentTarget,
+        startRect: panel.getBoundingClientRect(),
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+      };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      document.body.classList.add("map-tak-debug-resizing");
+    });
+    document.addEventListener("pointermove", onMapTakDebugResizePointerMove);
+    document.addEventListener("pointerup", endMapTakDebugResize);
+    document.addEventListener("pointercancel", endMapTakDebugResize);
+  }
+  applyMapTakDebugPanelSize(panel);
+  syncMapTakDebugPanelState();
+  return panel;
+}
+
+function renderMapTakDebugPanel() {
+  const panel = ensureMapTakDebugPanel();
+  const body = document.getElementById("_mapTakDebug");
+  if (!panel || !body) return;
+  body.textContent = formatMapTakDebugLines();
+  syncMapTakDebugPanelState();
 }
 
 let _topoDebugCollapsed = false;

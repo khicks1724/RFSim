@@ -191,6 +191,7 @@ function summarizeTakProfileRow(row) {
 
 const TAK_CONNECTOR_IDLE_MS = 2 * 60 * 1000;
 const TAK_CONTACT_MAX_AGE_MS = 10 * 60 * 1000;
+const TAK_DEBUG_LOG_LIMIT = 160;
 const takConnectorState = new Map();
 
 function decodeXmlEntities(value = "") {
@@ -394,6 +395,26 @@ function serializeTakConnectorContact(contact) {
   };
 }
 
+function createTakDebugEntry(direction, summary, detail = "", level = "info") {
+  return {
+    at: new Date().toISOString(),
+    direction,
+    summary: String(summary || "").slice(0, 240),
+    detail: String(detail || "").slice(0, 2000),
+    level,
+  };
+}
+
+function pushTakConnectorDebug(connector, direction, summary, detail = "", level = "info") {
+  if (!connector.debugEvents) {
+    connector.debugEvents = [];
+  }
+  connector.debugEvents.push(createTakDebugEntry(direction, summary, detail, level));
+  if (connector.debugEvents.length > TAK_DEBUG_LOG_LIMIT) {
+    connector.debugEvents.splice(0, connector.debugEvents.length - TAK_DEBUG_LOG_LIMIT);
+  }
+}
+
 function pruneTakConnectorContacts(connector) {
   const now = Date.now();
   connector.contacts.forEach((contact, uid) => {
@@ -418,9 +439,49 @@ function summarizeTakConnector(connector) {
     verificationNote: connector.verificationNote || "",
     connectedAt: connector.connectedAt,
     lastMessageAt: connector.lastMessageAt,
+    lastOutboundAt: connector.lastOutboundAt,
     contactCount: connector.contacts.size,
     contacts: [...connector.contacts.values()].map(serializeTakConnectorContact),
+    debugEvents: Array.isArray(connector.debugEvents) ? connector.debugEvents.slice(-80) : [],
   };
+}
+
+function escapeXmlText(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function buildTakGpsCotEvent({
+  uid,
+  callsign,
+  lat,
+  lon,
+  hae = 0,
+  ce = 25,
+  le = 35,
+  team = "Cyan",
+  role = "Team Member",
+  how = "m-g",
+} = {}) {
+  const now = new Date();
+  const stale = new Date(now.getTime() + 120000);
+  return `<event version="2.0" uid="${escapeXmlText(uid)}" type="a-f-G-U-C" how="${escapeXmlText(how)}" time="${now.toISOString()}" start="${now.toISOString()}" stale="${stale.toISOString()}"><point lat="${Number(lat).toFixed(6)}" lon="${Number(lon).toFixed(6)}" hae="${Number.isFinite(Number(hae)) ? Number(hae).toFixed(1) : "0.0"}" ce="${Number.isFinite(Number(ce)) ? Number(ce).toFixed(1) : "25.0"}" le="${Number.isFinite(Number(le)) ? Number(le).toFixed(1) : "35.0"}"/><detail><contact callsign="${escapeXmlText(callsign)}"/><__group name="${escapeXmlText(team)}" role="${escapeXmlText(role)}"/><remarks>RF SIM GPS PLI</remarks></detail></event>`;
+}
+
+function sendTakConnectorCot(connector, xml, summary = "Outbound CoT") {
+  if (!connector?.socket || connector.status !== "connected") {
+    const error = new Error("TAK connector is not connected.");
+    pushTakConnectorDebug(connector, "outbound", summary, error.message, "error");
+    throw error;
+  }
+  connector.socket.write(`${String(xml || "").trim()}\n`);
+  connector.lastAccessAt = Date.now();
+  connector.lastOutboundAt = new Date().toISOString();
+  pushTakConnectorDebug(connector, "outbound", summary, String(xml || "").slice(0, 1200), "info");
 }
 
 function closeTakConnectorSocket(connector) {
@@ -469,6 +530,13 @@ function startTakConnector(connector) {
   connector.status = "connecting";
   connector.statusMessage = `Connecting to ${connector.connection.host}:${connector.connection.port}...`;
   connector.lastError = "";
+  pushTakConnectorDebug(
+    connector,
+    "status",
+    "Connecting",
+    `${connector.connection.transport.toUpperCase()} ${connector.connection.host}:${connector.connection.port}`,
+    "info"
+  );
 
   let socket;
   try {
@@ -477,6 +545,7 @@ function startTakConnector(connector) {
     connector.lastError = error.message;
     connector.status = "error";
     connector.statusMessage = error.message;
+    pushTakConnectorDebug(connector, "status", "Connect failed", error.message, "error");
     scheduleTakConnectorReconnect(connector);
     return connector;
   }
@@ -491,6 +560,13 @@ function startTakConnector(connector) {
     connector.connectedAt = new Date().toISOString();
     connector.lastError = "";
     connector.reconnectAttempts = 0;
+    pushTakConnectorDebug(
+      connector,
+      "status",
+      "Connected",
+      `${connector.connection.transport.toUpperCase()} ${connector.connection.host}:${connector.connection.port}`,
+      "info"
+    );
   };
 
   if (socket instanceof tls.TLSSocket) {
@@ -508,12 +584,20 @@ function startTakConnector(connector) {
     parsed.events.forEach((xml) => {
       const event = parseTakCotEvent(xml);
       if (!event) {
+        pushTakConnectorDebug(connector, "inbound", "Unreadable CoT event", String(xml || "").slice(0, 800), "warn");
         return;
       }
       connector.contacts.set(event.uid, {
         ...event,
         lastSeenAt: new Date().toISOString(),
       });
+      pushTakConnectorDebug(
+        connector,
+        "inbound",
+        `${event.cotType || "CoT"} ${event.callsign || event.uid}`,
+        `${Number(event.lat).toFixed(5)}, ${Number(event.lon).toFixed(5)} • how=${event.how || "?"}`,
+        "info"
+      );
     });
     pruneTakConnectorContacts(connector);
   });
@@ -522,11 +606,19 @@ function startTakConnector(connector) {
     connector.lastError = error.message;
     connector.status = "error";
     connector.statusMessage = error.message;
+    pushTakConnectorDebug(connector, "status", "Socket error", error.message, "error");
   });
 
   socket.on("close", () => {
     closeTakConnectorSocket(connector);
     connector.reconnectAttempts += 1;
+    pushTakConnectorDebug(
+      connector,
+      "status",
+      "Disconnected",
+      connector.lastError || "Socket closed.",
+      connector.manualStop ? "info" : "warn"
+    );
     if (!connector.manualStop) {
       scheduleTakConnectorReconnect(connector);
     }
@@ -568,9 +660,11 @@ function ensureTakConnector(userId, profileRow) {
     connectedAt: "",
     lastMessageAt: "",
     lastAccessAt: Date.now(),
+    lastOutboundAt: "",
     reconnectAttempts: 0,
     reconnectTimer: null,
     manualStop: false,
+    debugEvents: [],
   };
   takConnectorState.set(key, connector);
   startTakConnector(connector);
@@ -726,6 +820,21 @@ const takProjectBindingListSchema = z.object({
     projectId: z.string().uuid(),
     takProfileId: z.string().min(1).max(200).nullable().optional().default(null),
   })).default([])
+});
+
+const takLocationPublishSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  hae: z.number().optional(),
+  ce: z.number().nonnegative().optional(),
+  le: z.number().nonnegative().optional(),
+  accuracyM: z.number().nonnegative().optional(),
+  callsign: z.string().min(1).max(120),
+  uid: z.string().min(1).max(200).optional(),
+  team: z.string().max(120).optional(),
+  role: z.string().max(120).optional(),
+  how: z.string().max(40).optional(),
+  sourceMode: z.string().max(40).optional(),
 });
 
 const aiGenAiMilModelsSchema = z.object({
@@ -1446,6 +1555,95 @@ app.get("/api/projects/:projectId/tak-contacts", authRequired, async (request, r
     response.json({
       linked: true,
       profile: summarizeTakProfileRow(profileRow),
+      ...snapshot,
+    });
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/projects/:projectId/tak-location", authRequired, async (request, response) => {
+  const parsed = takLocationPublishSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    const projectResult = await query(
+      "select id, name from project where id = $1 and owner_user_id = $2",
+      [request.params.projectId, request.user.sub]
+    );
+    if (projectResult.rowCount === 0) {
+      response.status(404).json({ error: "Project not found." });
+      return;
+    }
+
+    const bindingResult = await query(
+      `select t.*, p.project_id
+       from project_tak_binding p
+       join user_tak_profile t
+         on t.id = p.tak_profile_id
+        and t.owner_user_id = p.owner_user_id
+       where p.project_id = $1
+         and p.owner_user_id = $2`,
+      [request.params.projectId, request.user.sub]
+    );
+
+    if (bindingResult.rowCount === 0) {
+      response.status(409).json({
+        linked: false,
+        status: "unlinked",
+        message: "This project is not linked to a TAK server.",
+      });
+      return;
+    }
+
+    const projectRow = projectResult.rows[0];
+    const profileRow = bindingResult.rows[0];
+    const connector = ensureTakConnector(request.user.sub, profileRow);
+    connector.lastAccessAt = Date.now();
+
+    if (connector.status !== "connected") {
+      const snapshot = summarizeTakConnector(connector);
+      response.status(409).json({
+        linked: true,
+        profile: summarizeTakProfileRow(profileRow),
+        ok: false,
+        sent: false,
+        message: connector.statusMessage || "TAK connector is not connected.",
+        ...snapshot,
+      });
+      return;
+    }
+
+    const body = parsed.data;
+    const uid = body.uid || `rfsim:${request.user.sub}:${request.params.projectId}:gps`;
+    const xml = buildTakGpsCotEvent({
+      uid,
+      callsign: body.callsign,
+      lat: body.lat,
+      lon: body.lon,
+      hae: body.hae,
+      ce: body.ce ?? body.accuracyM,
+      le: body.le ?? body.accuracyM,
+      team: body.team || "Cyan",
+      role: body.role || "Team Member",
+      how: body.how || "m-g",
+    });
+    const summary = `GPS PLI ${body.callsign} ${Number(body.lat).toFixed(5)}, ${Number(body.lon).toFixed(5)}`;
+    sendTakConnectorCot(connector, xml, summary);
+    const snapshot = summarizeTakConnector(connector);
+
+    response.json({
+      linked: true,
+      ok: true,
+      sent: true,
+      uid,
+      message: `Published GPS position for ${body.callsign}.`,
+      profile: summarizeTakProfileRow(profileRow),
+      projectId: request.params.projectId,
+      sourceMode: body.sourceMode || "",
       ...snapshot,
     });
   } catch (error) {

@@ -4664,11 +4664,42 @@ button:focus {
   padding: 10px 12px;
   border: 1px solid var(--border);
   background: var(--bg-soft);
+  cursor: pointer;
 }
 
 .tak-project-item input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tak-project-checkmark {
+  width: 18px;
+  height: 18px;
   margin-top: 2px;
-  accent-color: var(--accent);
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: rgba(8, 13, 24, 0.88);
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.tak-project-item:hover .tak-project-checkmark,
+.tak-project-item:focus-within .tak-project-checkmark {
+  border-color: rgba(96, 165, 250, 0.52);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.18);
+}
+
+.tak-project-item input[type="checkbox"]:checked + .tak-project-checkmark {
+  border-color: rgba(125, 211, 252, 0.68);
+  background: rgba(8, 47, 73, 0.92);
+  color: #dbeafe;
 }
 
 .tak-project-copy {
@@ -6606,6 +6637,101 @@ body.emitter-modal-open {
   display: none;
 }
 body.topo-debug-resizing {
+  cursor: nesw-resize;
+  user-select: none;
+}
+.map-tak-debug-panel {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 360px;
+  height: 240px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(34, 211, 238, 0.38);
+  border-radius: 8px;
+  background: rgba(3, 10, 20, 0.9);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  z-index: 650;
+  pointer-events: auto;
+  overflow: hidden;
+}
+.map-tak-debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 4px 10px;
+  border-bottom: 1px solid rgba(34, 211, 238, 0.18);
+}
+.map-tak-debug-title {
+  color: #67e8f9;
+  font: 600 10px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.14em;
+}
+.map-tak-debug-toggle {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #a5f3fc;
+  font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+}
+.map-tak-debug-toggle:hover {
+  background: rgba(8, 145, 178, 0.22);
+  color: #cffafe;
+}
+.map-tak-debug-body {
+  margin: 0;
+  padding: 6px 10px 9px;
+  color: #b6fbff;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.map-tak-debug-resize-handle {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nesw-resize;
+  z-index: 1;
+}
+.map-tak-debug-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  border-left: 1px solid rgba(34, 211, 238, 0.55);
+  border-bottom: 1px solid rgba(34, 211, 238, 0.55);
+  opacity: 0.8;
+}
+.map-tak-debug-panel.is-collapsed {
+  width: 30px;
+  max-height: 30px;
+  height: 30px;
+}
+.map-tak-debug-panel.is-collapsed .map-tak-debug-header {
+  padding: 4px;
+  border-bottom: none;
+  justify-content: flex-end;
+}
+.map-tak-debug-panel.is-collapsed .map-tak-debug-title,
+.map-tak-debug-panel.is-collapsed .map-tak-debug-body,
+.map-tak-debug-panel.is-collapsed .map-tak-debug-resize-handle {
+  display: none;
+}
+body.map-tak-debug-resizing {
   cursor: nesw-resize;
   user-select: none;
 }
