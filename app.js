@@ -6267,6 +6267,14 @@ function positionTopBarDropdown(menu, button) {
     return;
   }
 
+  if (menu.classList.contains("export-dropdown")) {
+    menu.style.left = "auto";
+    menu.style.right = "0px";
+    menu.style.top = "calc(100% + 6px)";
+    menu.style.maxHeight = "280px";
+    return;
+  }
+
   const buttonRect = button.getBoundingClientRect();
   const computedWidth = parseFloat(getComputedStyle(menu).width);
   const menuWidth = Number.isFinite(computedWidth) ? computedWidth : menu.offsetWidth || buttonRect.width;
@@ -25218,16 +25226,7 @@ async function renderTopologyView() {
     });
   }
 
-  if (Array.isArray(saved.tacticalObjects)) {
-    saved.tacticalObjects.forEach((entry) => {
-      const tactical = normalizeTacticalObject(entry);
-      state.tacticalObjects.push(tactical);
-    });
-  }
 
-  state.tacticalObjects.forEach((object) => {
-    renderTacticalObjectLayer(object);
-  });
 
   // ── Candidate links: one per unique emitter-type pair between any two unit cards ──
   // Match on waveform bucket (waveform name, or frequency if no waveform).
