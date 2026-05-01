@@ -619,77 +619,6 @@
         </div>
       </main>
 
-      <div id="aiPanelDivider" class="panel-divider panel-divider-right" role="separator" aria-orientation="vertical" aria-label="Resize AI chat panel"></div>
-
-      <aside id="aiPanel" class="ai-panel" aria-label="AI planning assistant panel">
-        <div class="ai-panel-header">
-          <div class="ai-panel-title-group">
-            <strong>AI Agent</strong>
-            <span class="eyebrow" id="aiPanelStatus">Offline</span>
-            <label class="ai-model-toggle">
-              <span class="eyebrow">Model</span>
-              <select id="aiChatModelSelect" class="ai-chat-model-select" disabled>
-                <option value="">No model available</option>
-              </select>
-            </label>
-          </div>
-          <div class="button-row">
-            <button id="collapseAiPanelBtn" class="icon-button" type="button" aria-label="Collapse AI panel">
-              <span id="collapseAiPanelIcon">&#9654;</span>
-            </button>
-          </div>
-        </div>
-        <div id="aiChatMessages" class="ai-chat-messages">
-          <article class="ai-chat-message ai-chat-message-system">
-            <strong>Assistant</strong>
-            <p>Add a working AI provider in the top bar to enable chat-assisted planning.</p>
-          </article>
-        </div>
-        <form id="aiChatForm" class="ai-chat-form">
-          <div id="aiAttachmentBar" class="ai-attachment-bar hidden">
-            <div id="aiImagePreviews" class="ai-image-previews"></div>
-            <div id="aiFileChips" class="ai-context-chips"></div>
-            <div id="aiContextChips" class="ai-context-chips"></div>
-          </div>
-          <div class="ai-input-wrap">
-            <div id="aiMentionDropdown" class="ai-mention-dropdown hidden"></div>
-            <div id="aiSlashDropdown" class="ai-slash-dropdown hidden"></div>
-            <label>
-              Chat Prompt
-              <div class="ai-textarea-flip">
-                <textarea id="aiChatInput" rows="4" placeholder="Ask anything, or type / for RF analysis commands, @ to mention map items. Paste images directly." disabled></textarea>
-              </div>
-            </label>
-          </div>
-          <div class="button-row ai-chat-actions">
-            <div class="ai-attach-group">
-              <div class="ai-context-picker-wrapper">
-                <button id="aiAddAttachmentBtn" class="ghost-button small icon-button" type="button" title="Add context or files" disabled>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                </button>
-                <input id="aiFileInput" type="file" multiple class="hidden" aria-hidden="true">
-                <div id="aiAttachmentMenu" class="ai-context-picker ai-attachment-menu hidden">
-                  <button id="aiAddMapContextOption" class="ai-attachment-menu-item" type="button">Add Map Context</button>
-                  <button id="aiAddFilesOption" class="ai-attachment-menu-item" type="button">Add Files</button>
-                </div>
-                <div id="aiContextPicker" class="ai-context-picker hidden">
-                  <div class="ai-context-picker-search-shell">
-                    <input id="aiContextPickerSearch" class="ai-context-picker-search" type="text" placeholder="Search map contents">
-                  </div>
-                  <div id="aiContextPickerList" class="ai-context-picker-list"></div>
-                </div>
-              </div>
-              <button id="aiVoiceBtn" class="ghost-button small icon-button" type="button" title="Voice to text" disabled>
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
-              </button>
-            </div>
-            <div class="button-row">
-              <button id="aiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
-              <button id="aiClearChatBtn" class="ghost-button small" type="button">Clear Chat</button>
-            </div>
-          </div>
-        </form>
-      </aside>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════
@@ -824,32 +753,6 @@
           <svg id="toEdgeSvg" class="to-edge-svg" xmlns="http://www.w3.org/2000/svg"></svg>
         </div>
 
-        <!-- AI Panel — right sidebar alongside canvas -->
-        <div id="planAiPanel" class="plan-ai-panel">
-          <div class="plan-ai-header">
-            <div class="plan-ai-header-text">
-              <strong>AI Agent</strong>
-              <span class="eyebrow">TO &amp; Organization Assistant</span>
-            </div>
-            <button class="plan-ai-collapse-btn" id="planAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
-          </div>
-          <div id="planAiMessages" class="ai-chat-messages plan-ai-messages">
-            <article class="ai-chat-message ai-chat-message-system">
-              <strong>Assistant</strong>
-              <p>Describe your scenario and I'll help you build out the table of organization — units, hierarchy, assignments, and more.</p>
-            </article>
-          </div>
-          <form id="planAiForm" class="ai-chat-form plan-ai-form">
-            <div class="ai-input-wrap">
-              <textarea id="planAiInput" rows="3" placeholder="Describe units, hierarchy, or ask for TO suggestions…" disabled></textarea>
-            </div>
-            <div class="button-row ai-chat-actions">
-              <button id="planAiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
-              <button id="planAiClearBtn" class="ghost-button small" type="button">Clear</button>
-            </div>
-          </form>
-        </div>
-        <button class="view-ai-open-btn" id="planAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
         </div><!-- /to-main -->
       </div>
     </div>
@@ -1003,32 +906,6 @@
               <div id="topoLinkPopupBody" class="topo-link-popup-body"></div>
             </div>
           </div>
-          <!-- Topology AI panel -->
-          <div id="topoAiPanel" class="plan-ai-panel topo-ai-panel">
-            <div class="plan-ai-header">
-              <div class="plan-ai-header-text">
-                <strong>AI Agent</strong>
-                <span class="eyebrow">Link Quality Analyst</span>
-              </div>
-              <button class="plan-ai-collapse-btn" id="topoAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
-            </div>
-            <div id="topoAiMessages" class="ai-chat-messages plan-ai-messages">
-              <article class="ai-chat-message ai-chat-message-system">
-                <strong>Assistant</strong>
-                <p>Ask me about link quality, coverage gaps, terrain interference, or how to improve specific radio paths.</p>
-              </article>
-            </div>
-            <form id="topoAiForm" class="ai-chat-form plan-ai-form">
-              <div class="ai-input-wrap">
-                <textarea id="topoAiInput" rows="3" placeholder="Ask about link quality, coverage, or interference…" disabled></textarea>
-              </div>
-              <div class="button-row ai-chat-actions">
-                <button id="topoAiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
-                <button id="topoAiClearBtn" class="ghost-button small" type="button">Clear</button>
-              </div>
-            </form>
-          </div>
-          <button class="view-ai-open-btn" id="topoAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
         </div>
       </div>
     </div>
@@ -1098,36 +975,88 @@
                 </div>
               </div>
             </div>
-            <!-- Analyze AI panel -->
-            <div id="analyzeAiPanel" class="plan-ai-panel analyze-ai-panel">
-              <div class="plan-ai-header">
-                <div class="plan-ai-header-text">
-                  <strong>AI Agent</strong>
-                  <span class="eyebrow">RF Analysis Assistant</span>
-                </div>
-                <button class="plan-ai-collapse-btn" id="analyzeAiCollapseBtn" type="button" title="Collapse AI panel">&#9654;</button>
-              </div>
-              <div id="analyzeAiMessages" class="ai-chat-messages plan-ai-messages">
-                <article class="ai-chat-message ai-chat-message-system">
-                  <strong>Assistant</strong>
-                  <p>Ask me to interpret emitter coverage, identify conflicts, suggest frequency deconfliction, or explain terrain impacts on RF propagation.</p>
-                </article>
-              </div>
-              <form id="analyzeAiForm" class="ai-chat-form plan-ai-form">
-                <div class="ai-input-wrap">
-                  <textarea id="analyzeAiInput" rows="3" placeholder="Ask about RF configuration, conflicts, terrain impact…" disabled></textarea>
-                </div>
-                <div class="button-row ai-chat-actions">
-                  <button id="analyzeAiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
-                  <button id="analyzeAiClearBtn" class="ghost-button small" type="button">Clear</button>
-                </div>
-              </form>
-            </div>
-            <button class="view-ai-open-btn" id="analyzeAiOpenBtn" type="button" title="Open AI panel">&#9664;</button>
           </div>
         </div>
       </div>
     </div>
+
+    <div id="aiPanelDivider" class="panel-divider panel-divider-right" role="separator" aria-orientation="vertical" aria-label="Resize AI chat panel"></div>
+
+    <aside id="aiPanel" class="ai-panel" aria-label="AI planning assistant panel">
+      <div class="ai-panel-header">
+        <div class="ai-panel-title-group">
+          <div class="ai-panel-title-copy">
+            <strong>AI Agent</strong>
+            <span class="eyebrow" id="aiAgentRole">RF Planning Assistant</span>
+            <span class="eyebrow" id="aiPanelStatus">Offline</span>
+          </div>
+          <label class="ai-model-toggle">
+            <span class="eyebrow">Model</span>
+            <select id="aiChatModelSelect" class="ai-chat-model-select" disabled>
+              <option value="">No model available</option>
+            </select>
+          </label>
+        </div>
+        <div class="button-row">
+          <button id="collapseAiPanelBtn" class="icon-button" type="button" aria-label="Collapse AI panel">
+            <span id="collapseAiPanelIcon">&#9654;</span>
+          </button>
+        </div>
+      </div>
+      <div id="aiAgentPurpose" class="ai-agent-purpose">
+        Ask me about emitter placement, coverage, terrain, simulation, or map content decisions.
+      </div>
+      <div id="aiChatMessages" class="ai-chat-messages">
+        <article class="ai-chat-message ai-chat-message-system">
+          <strong>Assistant</strong>
+          <p>Add a working AI provider in the top bar to enable chat-assisted planning.</p>
+        </article>
+      </div>
+      <form id="aiChatForm" class="ai-chat-form">
+        <div id="aiAttachmentBar" class="ai-attachment-bar hidden">
+          <div id="aiImagePreviews" class="ai-image-previews"></div>
+          <div id="aiFileChips" class="ai-context-chips"></div>
+          <div id="aiContextChips" class="ai-context-chips"></div>
+        </div>
+        <div class="ai-input-wrap">
+          <div id="aiMentionDropdown" class="ai-mention-dropdown hidden"></div>
+          <div id="aiSlashDropdown" class="ai-slash-dropdown hidden"></div>
+          <label>
+            Chat Prompt
+            <div class="ai-textarea-flip">
+              <textarea id="aiChatInput" rows="4" placeholder="Ask anything, or type / for RF analysis commands, @ to mention map items. Paste images directly." disabled></textarea>
+            </div>
+          </label>
+        </div>
+        <div class="button-row ai-chat-actions">
+          <div class="ai-attach-group">
+            <div class="ai-context-picker-wrapper">
+              <button id="aiAddAttachmentBtn" class="ghost-button small icon-button" type="button" title="Add context or files" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+              <input id="aiFileInput" type="file" multiple class="hidden" aria-hidden="true">
+              <div id="aiAttachmentMenu" class="ai-context-picker ai-attachment-menu hidden">
+                <button id="aiAddMapContextOption" class="ai-attachment-menu-item" type="button">Add Map Context</button>
+                <button id="aiAddFilesOption" class="ai-attachment-menu-item" type="button">Add Files</button>
+              </div>
+              <div id="aiContextPicker" class="ai-context-picker hidden">
+                <div class="ai-context-picker-search-shell">
+                  <input id="aiContextPickerSearch" class="ai-context-picker-search" type="text" placeholder="Search map contents">
+                </div>
+                <div id="aiContextPickerList" class="ai-context-picker-list"></div>
+              </div>
+            </div>
+            <button id="aiVoiceBtn" class="ghost-button small icon-button" type="button" title="Voice to text" disabled>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+            </button>
+          </div>
+          <div class="button-row">
+            <button id="aiSendBtn" class="primary-button small" type="submit" disabled>Send</button>
+            <button id="aiClearChatBtn" class="ghost-button small" type="button">Clear Chat</button>
+          </div>
+        </div>
+      </form>
+    </aside>
 
     </div><!-- /app-content -->
   </div><!-- /app-shell -->
@@ -2112,54 +2041,64 @@
                 </div>
               </label>
               <label class="settings-span-2">
-                TAK Server Label
-                <input id="takProfileLabelInput" type="text" placeholder="Optional display name">
+                Description
+                <input id="takProfileLabelInput" type="text" placeholder="RF Sim">
               </label>
               <label>
-                Server Host
-                <input id="takServerHostInput" type="text" placeholder="tak.example.mil">
+                Server Host IP
+                <input id="takServerHostInput" type="text" placeholder="18.118.133.90">
               </label>
               <label>
                 Port
                 <input id="takServerPortInput" type="number" min="1" max="65535" value="8089">
               </label>
               <label>
-                Transport
+                Protocol
                 <select id="takTransportSelect">
-                  <option value="tls">TLS</option>
                   <option value="ssl">SSL</option>
+                  <option value="tls">TLS</option>
                   <option value="tcp">TCP</option>
                 </select>
               </label>
-              <label>
-                Username
-                <input id="takUsernameInput" type="text" placeholder="Optional">
-              </label>
-              <label class="settings-span-2">
-                Password / Token / Secret
-                <input id="takAuthSecretInput" type="password" placeholder="Leave blank to keep stored secret">
-              </label>
+              <div></div>
 
+              <label class="settings-check-row">
+                <input id="takEnrollClientCertToggle" type="checkbox">
+                <span>Enroll for Client Certificate</span>
+              </label>
               <div class="settings-span-2 tak-cert-grid">
                 <div class="tak-cert-card">
-                  <strong>Client Certificate (PEM)</strong>
+                  <strong>Install Certificate Authority</strong>
+                  <input id="takCaCertInput" type="file" accept=".pem,.crt,.cer,.txt">
+                  <div id="takCaCertSummary" class="tak-cert-summary">No CA certificate stored.</div>
+                  <button id="takDeleteCaCertBtn" class="ghost-button small" type="button">Delete CA</button>
+                </div>
+                <div class="tak-cert-card">
+                  <strong>Install Client Certificate</strong>
                   <input id="takClientCertInput" type="file" accept=".pem,.crt,.cer,.txt">
                   <div id="takClientCertSummary" class="tak-cert-summary">No client certificate stored.</div>
                   <button id="takDeleteClientCertBtn" class="ghost-button small" type="button">Delete Certificate</button>
                 </div>
                 <div class="tak-cert-card">
-                  <strong>Client Private Key (PEM)</strong>
+                  <strong>Install Client Private Key (PEM)</strong>
                   <input id="takClientKeyInput" type="file" accept=".pem,.key,.txt">
                   <div id="takClientKeySummary" class="tak-cert-summary">No client key stored.</div>
                   <button id="takDeleteClientKeyBtn" class="ghost-button small" type="button">Delete Key</button>
                 </div>
-                <div class="tak-cert-card">
-                  <strong>CA Certificate (Optional PEM)</strong>
-                  <input id="takCaCertInput" type="file" accept=".pem,.crt,.cer,.txt">
-                  <div id="takCaCertSummary" class="tak-cert-summary">No CA certificate stored.</div>
-                  <button id="takDeleteCaCertBtn" class="ghost-button small" type="button">Delete CA</button>
-                </div>
               </div>
+
+              <label class="settings-check-row">
+                <input id="takUseAuthenticationToggle" type="checkbox">
+                <span>Use Authentication</span>
+              </label>
+              <label id="takUsernameRow" class="settings-span-2 hidden">
+                Username
+                <input id="takUsernameInput" type="text" placeholder="Username">
+              </label>
+              <label id="takPasswordRow" class="settings-span-2 hidden">
+                Password
+                <input id="takAuthSecretInput" type="password" placeholder="Leave blank to keep stored password">
+              </label>
 
               <div class="settings-span-2 tak-project-shell">
                 <div class="tak-project-header">

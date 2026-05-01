@@ -159,6 +159,8 @@ function summarizeTakProfileRow(row) {
     serverHost: row.server_host,
     serverPort: Number(row.server_port ?? 8089),
     transport: row.transport,
+    enrollForClientCert: Boolean(row.enroll_for_client_cert),
+    useAuthentication: Boolean(row.use_authentication),
     username: row.username,
     hasAuthSecret: Boolean(row.auth_secret),
     hasClientCert: Boolean(row.client_cert_pem),
@@ -287,7 +289,9 @@ const takProfileItemSchema = z.object({
   label: z.string().max(120).optional().default(""),
   serverHost: z.string().min(1).max(255),
   serverPort: z.number().int().min(1).max(65535).optional().default(8089),
-  transport: z.string().min(1).max(80).optional().default("tls"),
+  transport: z.string().min(1).max(80).optional().default("ssl"),
+  enrollForClientCert: z.boolean().optional().default(false),
+  useAuthentication: z.boolean().optional().default(false),
   username: z.string().max(120).optional().default(""),
   authSecret: z.string().max(4096).optional(),
   deleteAuthSecret: z.boolean().optional().default(false),
@@ -742,24 +746,26 @@ app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
 
       await client.query(
         `insert into user_tak_profile (
-           id, owner_user_id, label, server_host, server_port, transport, username, auth_secret,
+           id, owner_user_id, label, server_host, server_port, transport, enroll_for_client_cert, use_authentication, username, auth_secret,
            client_cert_pem, client_key_pem, ca_cert_pem,
            client_cert_file_name, client_key_file_name, ca_cert_file_name,
            client_cert_updated_at, client_key_updated_at, ca_cert_updated_at,
            position, updated_at
          )
          values (
-           $1, $2, $3, $4, $5, $6, $7, $8,
-           $9, $10, $11,
-           $12, $13, $14,
-           $15, $16, $17,
-           $18, now()
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+           $11, $12, $13,
+           $14, $15, $16,
+           $17, $18, $19,
+           $20, now()
          )
          on conflict (id) do update set
            label = excluded.label,
            server_host = excluded.server_host,
            server_port = excluded.server_port,
            transport = excluded.transport,
+           enroll_for_client_cert = excluded.enroll_for_client_cert,
+           use_authentication = excluded.use_authentication,
            username = excluded.username,
            auth_secret = excluded.auth_secret,
            client_cert_pem = excluded.client_cert_pem,
@@ -780,7 +786,9 @@ app.put("/api/user/tak-profiles", authRequired, async (request, response) => {
           profile.label ?? "",
           profile.serverHost.trim(),
           profile.serverPort ?? 8089,
-          profile.transport ?? "tls",
+          profile.transport ?? "ssl",
+          Boolean(profile.enrollForClientCert),
+          Boolean(profile.useAuthentication),
           profile.username ?? "",
           authSecret,
           clientCertPem,

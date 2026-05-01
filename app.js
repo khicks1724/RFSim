@@ -1250,6 +1250,10 @@ const dom = {
   takServerHostInput: document.querySelector("#takServerHostInput"),
   takServerPortInput: document.querySelector("#takServerPortInput"),
   takTransportSelect: document.querySelector("#takTransportSelect"),
+  takEnrollClientCertToggle: document.querySelector("#takEnrollClientCertToggle"),
+  takUseAuthenticationToggle: document.querySelector("#takUseAuthenticationToggle"),
+  takUsernameRow: document.querySelector("#takUsernameRow"),
+  takPasswordRow: document.querySelector("#takPasswordRow"),
   takUsernameInput: document.querySelector("#takUsernameInput"),
   takAuthSecretInput: document.querySelector("#takAuthSecretInput"),
   takClientCertInput: document.querySelector("#takClientCertInput"),
@@ -1462,6 +1466,8 @@ const dom = {
   aiPanel: document.querySelector("#aiPanel"),
   collapseAiPanelBtn: document.querySelector("#collapseAiPanelBtn"),
   collapseAiPanelIcon: document.querySelector("#collapseAiPanelIcon"),
+  aiAgentRole: document.querySelector("#aiAgentRole"),
+  aiAgentPurpose: document.querySelector("#aiAgentPurpose"),
   aiPanelStatus: document.querySelector("#aiPanelStatus"),
   aiChatMessages: document.querySelector("#aiChatMessages"),
   aiChatForm: document.querySelector("#aiChatForm"),
@@ -2017,7 +2023,9 @@ function createEmptyTakProfileDraft() {
     label: "",
     serverHost: "",
     serverPort: 8089,
-    transport: "tls",
+    transport: "ssl",
+    enrollForClientCert: false,
+    useAuthentication: false,
     username: "",
     hasAuthSecret: false,
     hasClientCert: false,
@@ -2056,7 +2064,9 @@ function sanitizeTakProfileSummary(profile) {
     label: typeof profile.label === "string" ? profile.label : "",
     serverHost: typeof profile.serverHost === "string" ? profile.serverHost : "",
     serverPort: Number.isFinite(Number(profile.serverPort)) ? Number(profile.serverPort) : 8089,
-    transport: typeof profile.transport === "string" && profile.transport ? profile.transport : "tls",
+    transport: typeof profile.transport === "string" && profile.transport ? profile.transport : "ssl",
+    enrollForClientCert: Boolean(profile.enrollForClientCert),
+    useAuthentication: Boolean(profile.useAuthentication),
     username: typeof profile.username === "string" ? profile.username : "",
     hasAuthSecret: Boolean(profile.hasAuthSecret),
     hasClientCert: Boolean(profile.hasClientCert),
@@ -2200,7 +2210,11 @@ function syncTakUi() {
   dom.takProfileLabelInput.value = draft.label ?? "";
   dom.takServerHostInput.value = draft.serverHost ?? "";
   dom.takServerPortInput.value = String(draft.serverPort ?? 8089);
-  dom.takTransportSelect.value = draft.transport || "tls";
+  dom.takTransportSelect.value = draft.transport || "ssl";
+  if (dom.takEnrollClientCertToggle) dom.takEnrollClientCertToggle.checked = Boolean(draft.enrollForClientCert);
+  if (dom.takUseAuthenticationToggle) dom.takUseAuthenticationToggle.checked = Boolean(draft.useAuthentication);
+  dom.takUsernameRow?.classList.toggle("hidden", !draft.useAuthentication);
+  dom.takPasswordRow?.classList.toggle("hidden", !draft.useAuthentication);
   dom.takUsernameInput.value = draft.username ?? "";
   dom.takAuthSecretInput.value = draft._authSecretDraft ?? "";
 
@@ -2325,7 +2339,9 @@ function buildTakProfilesPayload() {
       label: profile.label,
       serverHost: profile.serverHost,
       serverPort: Number(profile.serverPort) || 8089,
-      transport: profile.transport || "tls",
+      transport: profile.transport || "ssl",
+      enrollForClientCert: Boolean(profile.enrollForClientCert),
+      useAuthentication: Boolean(profile.useAuthentication),
       username: profile.username || "",
       deleteAuthSecret: Boolean(profile._deleteAuthSecret),
       deleteClientCert: Boolean(profile._deleteClientCert),
@@ -2427,6 +2443,68 @@ function deleteTakDraftCertificate(slot) {
 
 function defaultAiStatusMessage() {
   return "Add a provider and API key to enable the AI planning assistant.";
+}
+
+const AI_VIEW_PROFILES = {
+  map: {
+    label: "MAP",
+    role: "RF Planning Assistant",
+    purpose: "Ask me about emitter placement, coverage, terrain, simulation, or map content decisions.",
+    placeholder: "Ask about RF planning, terrain, simulation, or map contents…",
+    emptyMessage: "Ask me about emitter placement, coverage, terrain, simulation, or map contents.",
+    systemGuidance: "The user is in MAP view. This is the only view where direct map and simulation actions should be treated as the default path.",
+  },
+  plan: {
+    label: "PLAN",
+    role: "TO & Organization Assistant",
+    purpose: "Ask me about unit hierarchy, force structure, command relationships, or how to organize the formation.",
+    placeholder: "Ask about units, hierarchy, force design, or organization changes…",
+    emptyMessage: "Describe your scenario and I will help you build out the table of organization, hierarchy, and assignments.",
+    systemGuidance: "The user is in PLAN view. Prioritize advisory answers about unit organization, hierarchy, and force design. Do not invent unsupported TO editing actions.",
+  },
+  topology: {
+    label: "TOPOLOGY",
+    role: "Link Quality Analyst",
+    purpose: "Ask me about link quality, coverage gaps, terrain interference, relay nodes, or improving specific radio paths.",
+    placeholder: "Ask about link quality, coverage, interference, or relay recommendations…",
+    emptyMessage: "Ask me about link quality, coverage gaps, terrain interference, or how to improve specific radio paths.",
+    systemGuidance: "The user is in TOPOLOGY view. Prioritize link analysis, topology reasoning, emitter-to-unit relationships, and relay recommendations.",
+  },
+  analyze: {
+    label: "ANALYZE",
+    role: "RF Analysis Assistant",
+    purpose: "Ask me to interpret coverage, identify conflicts, suggest deconfliction, or explain terrain impacts on RF propagation.",
+    placeholder: "Ask about RF configuration, conflicts, terrain impact, or analysis findings…",
+    emptyMessage: "Ask me to interpret emitter coverage, identify conflicts, suggest frequency deconfliction, or explain terrain impacts on RF propagation.",
+    systemGuidance: "The user is in ANALYZE view. Prioritize interpretation of the analytics cards, conflicts, terrain impacts, and mitigation recommendations.",
+  },
+};
+
+function getAiViewProfile(view = state.ui?.currentView) {
+  return AI_VIEW_PROFILES[view] ?? AI_VIEW_PROFILES.map;
+}
+
+function buildCurrentViewAiContext(view = state.ui?.currentView) {
+  if (view === "plan") return buildPlanAiContext();
+  if (view === "topology") return buildTopoAiContext();
+  if (view === "analyze") return buildAnalyzeAiContext();
+  return "";
+}
+
+function syncAiViewMeta() {
+  const profile = getAiViewProfile();
+  if (dom.aiAgentRole) {
+    dom.aiAgentRole.textContent = profile.role;
+  }
+  if (dom.aiAgentPurpose) {
+    dom.aiAgentPurpose.textContent = profile.purpose;
+  }
+  if (dom.aiChatInput) {
+    dom.aiChatInput.placeholder = profile.placeholder;
+  }
+  if (dom.aiPanel) {
+    dom.aiPanel.setAttribute("aria-label", `${profile.role} panel`);
+  }
 }
 
 function getAiProviderMeta(provider) {
@@ -4398,6 +4476,8 @@ function wireEvents() {
   dom.takServerHostInput?.addEventListener("change", onTakDraftFieldChanged);
   dom.takServerPortInput?.addEventListener("change", onTakDraftFieldChanged);
   dom.takTransportSelect?.addEventListener("change", onTakDraftFieldChanged);
+  dom.takEnrollClientCertToggle?.addEventListener("change", () => { onTakDraftFieldChanged(); syncTakUi(); });
+  dom.takUseAuthenticationToggle?.addEventListener("change", () => { onTakDraftFieldChanged(); syncTakUi(); });
   dom.takUsernameInput?.addEventListener("change", onTakDraftFieldChanged);
   dom.takAuthSecretInput?.addEventListener("change", onTakDraftFieldChanged);
   dom.takClientCertInput?.addEventListener("change", () => onTakPemSelected("clientCert", dom.takClientCertInput).catch((error) => setStatus(error.message, true)));
@@ -5629,6 +5709,25 @@ function togglePanelCollapse() {
   }
 }
 
+function refreshCurrentViewLayout() {
+  if (state.ui?.currentView === "topology") {
+    renderTopologyView();
+    return;
+  }
+  if (state.ui?.currentView === "analyze") {
+    renderAnalyzeView();
+    return;
+  }
+  if (state.ui?.currentView === "plan" && _toState?._initialized) {
+    renderToView();
+    return;
+  }
+  state.map.invalidateSize();
+  if (state.cesiumViewer) {
+    state.cesiumViewer.resize();
+  }
+}
+
 function toggleAiPanelCollapse() {
   state.ai.panelOpen = !state.ai.panelOpen;
   document.body.classList.toggle("ai-panel-open", state.ai.panelOpen);
@@ -5647,10 +5746,7 @@ function toggleAiPanelCollapse() {
   dom.collapseAiPanelIcon.innerHTML = state.ai.panelOpen ? "&#9654;" : "&#9664;";
   syncAiChatToggleBtn();
   persistAiProviderSettings();
-  state.map.invalidateSize();
-  if (state.cesiumViewer) {
-    state.cesiumViewer.resize();
-  }
+  refreshCurrentViewLayout();
 }
 
 function syncAiChatToggleBtn() {
@@ -5755,6 +5851,7 @@ function switchView(view, skipAnimation) {
   const goingRight = nextIdx > prevIdx; // user moves forward → new view enters from right
 
   state.ui.currentView = view;
+  syncAiUi();
 
   // Update toggle UI immediately
   if (dom.viewModeToggle) {
@@ -5835,35 +5932,7 @@ function initViewModeToggle() {
     });
     dom.viewModeToggle.setAttribute("data-active", "map");
   }
-  initViewAiPanelCollapse();
-}
-
-function initViewAiPanelCollapse() {
-  // Wire collapse/expand for each secondary view AI panel
-  const panels = [
-    { panelId: "planAiPanel",    collapseId: "planAiCollapseBtn",    openId: "planAiOpenBtn"    },
-    { panelId: "topoAiPanel",    collapseId: "topoAiCollapseBtn",    openId: "topoAiOpenBtn"    },
-    { panelId: "analyzeAiPanel", collapseId: "analyzeAiCollapseBtn", openId: "analyzeAiOpenBtn" },
-  ];
-  for (const { panelId, collapseId, openId } of panels) {
-    const panel      = document.getElementById(panelId);
-    const collapseBtn = document.getElementById(collapseId);
-    const openBtn    = document.getElementById(openId);
-    if (!panel) continue;
-
-    const collapse = () => {
-      panel.classList.add("view-ai-collapsed");
-      if (collapseBtn) collapseBtn.innerHTML = "&#9664;"; // chevron left = closed
-      if (openBtn) openBtn.textContent = "AI";
-    };
-    const expand = () => {
-      panel.classList.remove("view-ai-collapsed");
-      if (collapseBtn) collapseBtn.innerHTML = "&#9654;"; // chevron right = open (collapse direction)
-    };
-
-    collapseBtn?.addEventListener("click", collapse);
-    openBtn?.addEventListener("click", expand);
-  }
+  syncAiUi();
 }
 
 function endPanelResize() {
@@ -5880,6 +5949,7 @@ function endAiPanelResize() {
   state.ui.aiResizeActive = false;
   document.body.classList.remove("is-resizing");
   persistAiProviderSettings();
+  refreshCurrentViewLayout();
 }
 
 function loadAiProviderSettings() {
@@ -6230,9 +6300,15 @@ function onTakDraftFieldChanged() {
   draft.label = dom.takProfileLabelInput?.value.trim() ?? "";
   draft.serverHost = dom.takServerHostInput?.value.trim() ?? "";
   draft.serverPort = Math.max(1, Number.parseInt(dom.takServerPortInput?.value ?? "8089", 10) || 8089);
-  draft.transport = dom.takTransportSelect?.value || "tls";
+  draft.transport = dom.takTransportSelect?.value || "ssl";
+  draft.enrollForClientCert = Boolean(dom.takEnrollClientCertToggle?.checked);
+  draft.useAuthentication = Boolean(dom.takUseAuthenticationToggle?.checked);
   draft.username = dom.takUsernameInput?.value.trim() ?? "";
-  draft._authSecretDraft = dom.takAuthSecretInput?.value ?? "";
+  draft._authSecretDraft = draft.useAuthentication ? (dom.takAuthSecretInput?.value ?? "") : "";
+  if (!draft.useAuthentication) {
+    draft.username = "";
+    draft._deleteAuthSecret = true;
+  }
   if (draft._authSecretDraft) {
     draft._deleteAuthSecret = false;
   }
@@ -6400,19 +6476,21 @@ function renderAiEmptyState() {
     return;
   }
 
-  if (state.ai.status === "ready") {
-    dom.aiChatMessages.innerHTML = "";
-    return;
-  }
-
-  const message = state.ai.provider && state.ai.apiKey
-    ? escapeHtml(state.ai.statusMessage || "AI assistant is unavailable right now.")
-    : "Add a working AI provider in the top bar to enable chat-assisted planning.";
+  const profile = getAiViewProfile();
+  const isLocalModel = Boolean(getAiProviderMeta(state.ai.provider)?.isLocalModel);
+  const hasConfiguredProvider = Boolean(state.ai.provider && (state.ai.apiKey || isLocalModel));
+  const message = escapeHtml(profile.emptyMessage);
+  const note = !hasConfiguredProvider
+    ? "Add a working AI provider in the top bar to enable chat-assisted planning."
+    : state.ai.status === "ready"
+      ? ""
+      : escapeHtml(state.ai.statusMessage || "AI assistant is unavailable right now.");
 
   dom.aiChatMessages.innerHTML = `
     <article class="ai-chat-message ai-chat-message-system">
       <strong>Assistant</strong>
       <p>${message}</p>
+      ${note ? `<p>${note}</p>` : ""}
     </article>
   `;
 }
@@ -6423,6 +6501,7 @@ function syncAiUi() {
   }
 
   const isLocalModel = Boolean(getAiProviderMeta(state.ai.provider)?.isLocalModel);
+  syncAiViewMeta();
 
   renderAiSavedConfigOptions();
   renderAiModelOptions();
@@ -9366,6 +9445,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   await wait(0);
 
   const scenarioSummary = buildCompactAiScenarioSummary(contextIds);
+  const activeViewProfile = getAiViewProfile();
+  const currentViewContext = buildCurrentViewAiContext();
 
   // Yield again after serialization — large KMZ imports make JSON.stringify expensive
   await wait(0);
@@ -9396,6 +9477,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
   let systemText = [
     "You are an expert RF planning assistant and electronic warfare analyst embedded in a live terrain-aware RF propagation simulator.",
     "You have deep knowledge of military and civilian radio systems, link budget analysis, antenna theory, terrain effects on propagation, and spectrum management.",
+    `The user is currently working in the ${activeViewProfile.label} view. Your active role is ${activeViewProfile.role}.`,
+    activeViewProfile.systemGuidance,
     "Each asset in the scenario may have a 'toUnit' field linking it to a unit in the Table of Organization (TO). When answering questions about why specific units can or cannot communicate, cross-reference their linked emitter's frequencyMHz, waveform, power, elevation, and distance. The TO also contains parent-child hierarchy via toLinks. Use this to answer questions like 'why can't Kilo 1st Platoon talk to Kilo 3rd Platoon' by finding their linked emitters and diagnosing the RF path.",
     "For map-item location questions ('where is X', 'what grid is X', 'find X'), always answer in a complete sentence: '<name> is located at <coordinate>.' — never return just a raw coordinate with no context.",
     "Keep responses terse by default. Do not preface answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
@@ -9687,6 +9770,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "- RESPONSE FORMATTING: In your assistantMessage, reference asset and map item names using markdown bold (**name**). The system will automatically convert these to clickable navigation links.",
     "SCENARIO SUMMARY:",
     scenarioSummaryFinal,
+    currentViewContext ? `CURRENT VIEW CONTEXT:\n${currentViewContext}` : "",
     contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
     fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
     "USER REQUEST:",
@@ -9750,8 +9834,13 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "- To answer elevation/terrain questions, use sample-terrain: {\"type\":\"sample-terrain\",\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":8}. Get the bounds from the relevant polygon in the scenario summary.",
       "- Do not include any text outside the JSON object.",
       "",
+      `CURRENT VIEW: ${activeViewProfile.label}`,
+      `ACTIVE ROLE: ${activeViewProfile.role}`,
+      activeViewProfile.systemGuidance,
+      "",
       "SCENARIO SUMMARY (read coordinates from here):",
       trimmedSummary,
+      currentViewContext ? `CURRENT VIEW CONTEXT:\n${currentViewContext}` : "",
       contextDetail ? `SELECTED ITEM:\n${contextDetail}` : "",
       "USER REQUEST:",
       prompt || "(no prompt)",
@@ -9772,8 +9861,12 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "For newly added assets in the same reply, use placedIndex in run-simulation instead of assetId.",
       "Do not invent tools, URLs, or ids.",
       "If terrainLosMatrix is present, use it when discussing LOS or relay placement.",
+      `CURRENT VIEW: ${activeViewProfile.label}`,
+      `ACTIVE ROLE: ${activeViewProfile.role}`,
+      activeViewProfile.systemGuidance,
       "SCENARIO SUMMARY:",
       scenarioSummaryFinal,
+      currentViewContext ? `CURRENT VIEW CONTEXT:\n${currentViewContext}` : "",
       contextDetail ? `SELECTED MAP CONTENT DETAIL:\n${contextDetail}` : "",
       fileDetail ? `UPLOADED FILE CONTEXT:\n${fileDetail}` : "",
       "USER REQUEST:",
@@ -22042,8 +22135,6 @@ function initPlanViewIfNeeded() {
   });
 
   // ── AI form ──
-  wireViewAiForm("planAiForm", "planAiInput", "planAiSendBtn", "planAiClearBtn", "planAiMessages", buildPlanAiContext);
-
   renderToView();
 }
 
@@ -22399,7 +22490,6 @@ async function renderTopologyView() {
   if (!posEntries.length) {
     if (empty) empty.classList.remove("hidden");
     svg.innerHTML = ""; nodes.innerHTML = "";
-    wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
     return;
   }
   if (empty) empty.classList.add("hidden");
@@ -22577,7 +22667,6 @@ async function renderTopologyView() {
   wireTopoCanvasPanZoom();
   wireTopoNodeContextMenu();
   redrawTopoLinks();
-  wireViewAiForm("topoAiForm", "topoAiInput", "topoAiSendBtn", "topoAiClearBtn", "topoAiMessages", buildTopoAiContext);
   } catch (err) {
     console.error("[Topo] renderTopologyView error:", err);
   }
@@ -23756,7 +23845,6 @@ function renderAnalyzeView() {
   renderAnalyzeConflicts(emitters);
   renderAnalyzeWaveform(emitters);
   document.getElementById("analyzeRefreshBtn")?.addEventListener("click", renderAnalyzeView, { once: true });
-  wireViewAiForm("analyzeAiForm", "analyzeAiInput", "analyzeAiSendBtn", "analyzeAiClearBtn", "analyzeAiMessages", buildAnalyzeAiContext);
 }
 
 function renderAnalyzeCoverage(emitters) {
