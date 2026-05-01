@@ -1692,6 +1692,13 @@ const dom = {
   tacticalPaletteSearch: document.querySelector("#tacticalPaletteSearch"),
   tacticalPaletteList: document.querySelector("#tacticalPaletteList"),
   tacticalPaletteStatus: document.querySelector("#tacticalPaletteStatus"),
+  tacticalPaletteSubtitle: document.querySelector("#tacticalPaletteSubtitle"),
+  tpalStep1: document.querySelector("#tpalStep1"),
+  tpalStep2: document.querySelector("#tpalStep2"),
+  tpalStep3: document.querySelector("#tpalStep3"),
+  tpalBackBtn: document.querySelector("#tpalBackBtn"),
+  tpalCategoryList: document.querySelector("#tpalCategoryList"),
+  tpalTypeGrid: document.querySelector("#tpalTypeGrid"),
   tacticalEditorModal: document.querySelector("#tacticalEditorModal"),
   tacticalEditorCloseBtn: document.querySelector("#tacticalEditorCloseBtn"),
   tacticalEditorCancelBtn: document.querySelector("#tacticalEditorCancelBtn"),
@@ -3329,9 +3336,9 @@ function createTacticalDraftFromPlacement(template, geometryType, coordinates, e
     geometryType,
     shapeKind: extra.shapeKind || template.shapeKind || (geometryType === "LineString" ? "route" : geometryType === "Polygon" ? "polygon" : "point"),
     coordinates,
-    cotType: template.cotType || buildDefaultCotTypeForTacticalObject(objectClass, "friendly", domain),
+    cotType: template.cotType || buildDefaultCotTypeForTacticalObject(objectClass, template.affiliation || "friendly", domain),
     domain,
-    affiliation: "friendly",
+    affiliation: template.affiliation || "friendly",
     unitType,
     size,
     name,
@@ -3428,11 +3435,241 @@ function saveTacticalEditor() {
   setStatus(`${updated.name} saved as tactical content.`);
 }
 
+// ── Tactical palette wizard state ──────────────────────────────────────────
+const TPAL_CATEGORIES = {
+  ground: [
+    { id: "troops",       label: "Troops" },
+    { id: "armor",        label: "Armor" },
+    { id: "aviation",     label: "Aviation" },
+    { id: "fires",        label: "Fires" },
+    { id: "engineer",     label: "Engineer" },
+    { id: "intel",        label: "Intelligence" },
+    { id: "logistics",    label: "Logistics" },
+    { id: "medical",      label: "Medical" },
+    { id: "signal",       label: "Signal" },
+    { id: "special",      label: "Special Ops" },
+    { id: "hq",           label: "HQ / Command" },
+    { id: "other",        label: "Other" },
+  ],
+  air: [
+    { id: "fixed_wing",   label: "Fixed Wing" },
+    { id: "rotary_wing",  label: "Rotary Wing" },
+    { id: "uav",          label: "UAV" },
+  ],
+  sea_surface: [
+    { id: "surface",      label: "Surface" },
+    { id: "amphibious",   label: "Amphibious" },
+  ],
+  subsurface: [
+    { id: "submarine",    label: "Submarine" },
+  ],
+  space: [
+    { id: "space",        label: "Space Asset" },
+  ],
+};
+
+const TPAL_TYPES = {
+  troops: [
+    { id: "infantry",          label: "Infantry",          unitType: "infantry",          cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10161100.svg" },
+    { id: "light_infantry",    label: "Lt. Infantry",      unitType: "light_infantry",    cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10161100.svg" },
+    { id: "airborne_infantry", label: "Airborne",          unitType: "airborne_infantry", cotSuffix: "G-U-C",   img: null },
+    { id: "marine_infantry",   label: "Marines",           unitType: "marine_infantry",   cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10161100.svg" },
+    { id: "ranger",            label: "Ranger",            unitType: "ranger",            cotSuffix: "G-U-C",   img: null },
+    { id: "special_forces",    label: "Special Forces",    unitType: "special_forces",    cotSuffix: "G-U-W",   img: "images/milstd/Appendices/Land/10121700.svg" },
+    { id: "sniper",            label: "Sniper",            unitType: "infantry",          cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10161100.svg" },
+    { id: "military_police",   label: "Military Police",   unitType: "military_police",   cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10141200.svg" },
+  ],
+  armor: [
+    { id: "armor",             label: "Armor",             unitType: "armor",             cotSuffix: "G-U-C-A", img: null },
+    { id: "mechanized_infantry",label: "Mech. Infantry",  unitType: "mechanized_infantry",cotSuffix: "G-U-C",  img: null },
+    { id: "armored_cavalry",   label: "Armored Cavalry",  unitType: "armored_cavalry",   cotSuffix: "G-U-C",   img: null },
+    { id: "recon",             label: "Recon",             unitType: "recon",             cotSuffix: "G-U-C",   img: null },
+    { id: "tank",              label: "Tank",              unitType: "armor",             cotSuffix: "G-U-C-A", img: null },
+  ],
+  aviation: [
+    { id: "attack_helo",       label: "Attack Helo",       unitType: "attack_helo",       cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Air/01110400.svg" },
+    { id: "utility_helo",      label: "Utility Helo",      unitType: "utility_helo",      cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Air/01110400.svg" },
+    { id: "medevac",           label: "MEDEVAC",           unitType: "medevac",           cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Air/01110400.svg" },
+  ],
+  fires: [
+    { id: "artillery",         label: "Artillery",         unitType: "artillery",         cotSuffix: "G-U-C-F", img: "images/milstd/Appendices/Land/10130300.svg" },
+    { id: "air_defense",       label: "Air Defense",       unitType: "air_defense",       cotSuffix: "G-U-C-A-D",img: null },
+    { id: "mortar",            label: "Mortar",            unitType: "infantry",          cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10161100.svg" },
+  ],
+  engineer: [
+    { id: "engineer",          label: "Engineer",          unitType: "engineer",          cotSuffix: "G-U-C-E", img: "images/milstd/Appendices/Land/10140700.svg" },
+  ],
+  intel: [
+    { id: "military_intelligence",label:"Military Intel", unitType: "military_intelligence",cotSuffix:"G-U-C-I",img: "images/milstd/Appendices/Land/10151000.svg" },
+    { id: "ew",                label: "Elec. Warfare",     unitType: "ew",                cotSuffix: "G-U-C-E-W",img:"images/milstd/Appendices/Land/10150500.svg" },
+    { id: "cyber",             label: "Cyber",             unitType: "cyber",             cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Cyberspace/60110100.svg" },
+  ],
+  logistics: [
+    { id: "logistics",         label: "Logistics",         unitType: "logistics",         cotSuffix: "G-U-C-L", img: null },
+    { id: "maintenance",       label: "Maintenance",       unitType: "maintenance",       cotSuffix: "G-U-C",   img: null },
+    { id: "transportation",    label: "Transport",         unitType: "logistics",         cotSuffix: "G-U-C-L", img: null },
+  ],
+  medical: [
+    { id: "medical",           label: "Medical",           unitType: "medical",           cotSuffix: "G-U-C-M", img: "images/milstd/Appendices/Land/10140100.svg" },
+  ],
+  signal: [
+    { id: "signal",            label: "Signal",            unitType: "signal",            cotSuffix: "G-U-C-S", img: null },
+    { id: "civil_affairs",     label: "Civil Affairs",     unitType: "civil_affairs",     cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10110200.svg" },
+    { id: "psyop",             label: "PSYOP",             unitType: "psyop",             cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10110600.svg" },
+  ],
+  special: [
+    { id: "special_forces",    label: "Special Forces",    unitType: "special_forces",    cotSuffix: "G-U-W",   img: "images/milstd/Appendices/Land/10121700.svg" },
+    { id: "ranger",            label: "Ranger",            unitType: "ranger",            cotSuffix: "G-U-C",   img: null },
+  ],
+  hq: [
+    { id: "headquarters",      label: "HQ",                unitType: "headquarters",      cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10110000.svg" },
+    { id: "judge_advocate",    label: "JAG",               unitType: "judge_advocate",    cotSuffix: "G-U-C",   img: "images/milstd/Appendices/Land/10160800.svg" },
+    { id: "chaplain",          label: "Chaplain",          unitType: "chaplain",          cotSuffix: "G-U-C",   img: null },
+  ],
+  other: [
+    { id: "chemical",          label: "CBRN",              unitType: "chemical",          cotSuffix: "G-U-C",   img: null },
+    { id: "finance",           label: "Finance",           unitType: "finance",           cotSuffix: "G-U-C",   img: null },
+    { id: "adjutant_general",  label: "AG",                unitType: "adjutant_general",  cotSuffix: "G-U-C",   img: null },
+  ],
+  fixed_wing: [
+    { id: "fighter",           label: "Fighter",           unitType: "fighter",           cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+    { id: "bomber",            label: "Bomber",            unitType: "bomber",            cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+    { id: "attack_fixed",      label: "Attack",            unitType: "attack_fixed",      cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+    { id: "transport_fixed",   label: "Transport",         unitType: "transport_fixed",   cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+    { id: "isr_fixed",         label: "ISR",               unitType: "isr_fixed",         cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+    { id: "tanker",            label: "Tanker",            unitType: "tanker",            cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+    { id: "aviation_fixed",    label: "Fixed Wing",        unitType: "aviation_fixed",    cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+  ],
+  rotary_wing: [
+    { id: "attack_helo",       label: "Attack Helo",       unitType: "attack_helo",       cotSuffix: "A-M-H-Q", img: "images/milstd/Appendices/Air/01110400.svg" },
+    { id: "utility_helo",      label: "Utility Helo",      unitType: "utility_helo",      cotSuffix: "A-M-H-Q", img: "images/milstd/Appendices/Air/01110400.svg" },
+    { id: "recon_helo",        label: "Recon Helo",        unitType: "recon_helo",        cotSuffix: "A-M-H-Q", img: "images/milstd/Appendices/Air/01110400.svg" },
+    { id: "medevac",           label: "MEDEVAC",           unitType: "medevac",           cotSuffix: "A-M-H-Q", img: "images/milstd/Appendices/Air/01110400.svg" },
+    { id: "aviation_rotary",   label: "Rotary Wing",       unitType: "aviation_rotary",   cotSuffix: "A-M-H-Q", img: "images/milstd/Appendices/Air/01110400.svg" },
+  ],
+  uav: [
+    { id: "uav_fixed",         label: "Fixed UAV",         unitType: "uav_fixed",         cotSuffix: "A-M-F-Q", img: "images/milstd/Appendices/Air/01110300.svg" },
+    { id: "uav_rotary",        label: "Rotary UAV",        unitType: "uav_rotary",        cotSuffix: "A-M-H-Q", img: "images/milstd/Appendices/Air/01110400.svg" },
+  ],
+  surface: [
+    { id: "naval_surface",     label: "Surface Vessel",    unitType: "naval_surface",     cotSuffix: "S-S",     img: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+    { id: "coast_guard",       label: "Coast Guard",       unitType: "coast_guard",       cotSuffix: "S-S",     img: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+    { id: "naval_aviation",    label: "Naval Aviation",    unitType: "naval_aviation",    cotSuffix: "S-S",     img: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+    { id: "mine_warfare",      label: "Mine Warfare",      unitType: "mine_warfare",      cotSuffix: "S-S",     img: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+  ],
+  amphibious: [
+    { id: "amphibious",        label: "Amphibious",        unitType: "amphibious",        cotSuffix: "S-S",     img: "images/milstd/Appendices/SeaSurface/30120200.svg" },
+  ],
+  submarine: [
+    { id: "submarine",         label: "Submarine",         unitType: "submarine",         cotSuffix: "U-U-C",   img: "images/milstd/Appendices/SeaSubsurface/35110100.svg" },
+  ],
+  space: [
+    { id: "space",             label: "Space Asset",       unitType: "space",             cotSuffix: "P-S",     img: "images/milstd/Appendices/Space/05111500.svg" },
+  ],
+};
+
+const TPAL_AFFIL_COT = { friendly: "f", hostile: "h", neutral: "n", unknown: "u" };
+const TPAL_DOMAIN_COT = { ground: "G", air: "A", sea_surface: "S", subsurface: "U", space: "P" };
+
+const _tpalState = { step: 1, affiliation: null, domain: null, category: null };
+
+function _tpalSetStep(step) {
+  _tpalState.step = step;
+  [dom.tpalStep1, dom.tpalStep2, dom.tpalStep3].forEach((el, i) => {
+    el?.classList.toggle("hidden", i + 1 !== step);
+  });
+  // Update step indicators
+  dom.tacticalPaletteModal?.querySelectorAll(".tpal-step").forEach((el) => {
+    const s = Number(el.dataset.step);
+    el.classList.toggle("active", s === step);
+    el.classList.toggle("done", s < step);
+  });
+  dom.tpalBackBtn?.classList.toggle("hidden", step === 1);
+  const subtitles = ["Select affiliation to begin.", "Select domain.", "Select unit type."];
+  if (dom.tacticalPaletteSubtitle) dom.tacticalPaletteSubtitle.textContent = subtitles[step - 1] || "";
+  if (dom.tacticalPaletteStatus) dom.tacticalPaletteStatus.textContent = "";
+}
+
+function _tpalBuildMilstdIconSvg(affiliation, domain) {
+  const affFill = { friendly: "#80E0FF", hostile: "#FF8080", neutral: "#AAFFAA", unknown: "#FFFF80" };
+  const fill = affFill[affiliation] || "#FFFF80";
+  if (domain === "ground") {
+    return `<svg width="38" height="26" viewBox="0 0 38 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="36" height="24" fill="${fill}" stroke="#000" stroke-width="1.5"/>
+      <line x1="1" y1="1" x2="37" y2="25" stroke="#000" stroke-width="1.2"/>
+      <line x1="37" y1="1" x2="1" y2="25" stroke="#000" stroke-width="1.2"/>
+    </svg>`;
+  }
+  if (domain === "air") {
+    return `<svg width="38" height="26" viewBox="0 0 38 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="19" cy="13" rx="17" ry="11" fill="${fill}" stroke="#000" stroke-width="1.5"/>
+    </svg>`;
+  }
+  if (domain === "sea_surface") {
+    return `<svg width="38" height="26" viewBox="0 0 38 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="19" cy="13" rx="17" ry="11" fill="${fill}" stroke="#000" stroke-width="1.5"/>
+      <line x1="1" y1="13" x2="37" y2="13" stroke="#000" stroke-width="1.2"/>
+    </svg>`;
+  }
+  if (domain === "subsurface") {
+    return `<svg width="38" height="26" viewBox="0 0 38 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="19" cy="13" rx="17" ry="11" fill="${fill}" stroke="#000" stroke-width="1.5"/>
+      <line x1="1" y1="13" x2="37" y2="13" stroke="#000" stroke-width="1.2"/>
+      <line x1="5" y1="8" x2="33" y2="8" stroke="#000" stroke-width="1"/>
+    </svg>`;
+  }
+  // space
+  return `<svg width="38" height="26" viewBox="0 0 38 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="19" cy="13" r="10" fill="${fill}" stroke="#000" stroke-width="1.5"/>
+  </svg>`;
+}
+
+function _tpalRenderCategories(domain) {
+  if (!dom.tpalCategoryList) return;
+  const cats = TPAL_CATEGORIES[domain] || [];
+  dom.tpalCategoryList.innerHTML = cats.map((c) =>
+    `<button class="tpal-cat-btn" type="button" data-cat="${c.id}">${c.label}</button>`
+  ).join("");
+  // Select first
+  const first = dom.tpalCategoryList.querySelector(".tpal-cat-btn");
+  if (first) {
+    first.classList.add("active");
+    _tpalState.category = first.dataset.cat;
+    _tpalRenderTypes(_tpalState.category);
+  }
+}
+
+function _tpalRenderTypes(catId) {
+  if (!dom.tpalTypeGrid) return;
+  const types = TPAL_TYPES[catId] || [];
+  const aff = _tpalState.affiliation || "friendly";
+  const affCode = TPAL_AFFIL_COT[aff] || "u";
+  dom.tpalTypeGrid.innerHTML = types.map((t) => {
+    const cotType = `a-${affCode}-${t.cotSuffix}`;
+    const iconHtml = t.img
+      ? `<img src="${t.img}" alt="" style="width:36px;height:36px;object-fit:contain;">`
+      : _tpalBuildMilstdIconSvg(aff, _tpalState.domain);
+    return `<button class="tpal-type-btn" type="button"
+      data-unit-type="${t.unitType}"
+      data-cot-type="${cotType}"
+      data-name="${t.label}"
+      data-domain="${_tpalState.domain}"
+      data-object-class="unit"
+      data-geometry-type="Point">
+      ${iconHtml}
+      <span>${t.label}</span>
+    </button>`;
+  }).join("");
+}
+
 function openTacticalPaletteModal() {
-  renderTacticalPalette();
+  _tpalState.step = 1;
+  _tpalState.affiliation = null;
+  _tpalState.domain = null;
+  _tpalState.category = null;
+  _tpalSetStep(1);
   dom.tacticalPaletteModal?.classList.remove("hidden");
   updateModalBodyState();
-  dom.tacticalPaletteSearch?.focus();
 }
 
 function closeTacticalPaletteModal() {
@@ -3441,25 +3678,7 @@ function closeTacticalPaletteModal() {
 }
 
 function renderTacticalPalette() {
-  const query = normalizeMapContentsSearchText(dom.tacticalPaletteSearch?.value || "");
-  const buttons = [...(dom.tacticalPaletteList?.querySelectorAll(".tactical-template-btn") ?? [])];
-  let visibleCount = 0;
-  buttons.forEach((button) => {
-    const fields = [
-      button.dataset.name,
-      button.dataset.objectClass,
-      button.dataset.domain,
-      button.textContent,
-    ];
-    const matches = !query || smartMapContentsMatch(query, fields);
-    button.classList.toggle("hidden", !matches);
-    if (matches) visibleCount += 1;
-  });
-  if (dom.tacticalPaletteStatus) {
-    dom.tacticalPaletteStatus.textContent = visibleCount
-      ? "Choose a template to start placing tactical content."
-      : "No tactical templates matched that search.";
-  }
+  // No-op: search no longer used; kept for compatibility
 }
 
 function cancelPendingTacticalPlacement() {
@@ -5754,24 +5973,73 @@ function wireEvents() {
   dom.tacticalPaletteCloseBtn?.addEventListener("click", closeTacticalPaletteModal);
   dom.tacticalPaletteCancelBtn?.addEventListener("click", closeTacticalPaletteModal);
   dom.tacticalPaletteModal?.addEventListener("click", (event) => {
-    if (event.target === dom.tacticalPaletteModal) {
-      closeTacticalPaletteModal();
+    if (event.target === dom.tacticalPaletteModal) closeTacticalPaletteModal();
+  });
+
+  // Back button
+  dom.tpalBackBtn?.addEventListener("click", () => {
+    if (_tpalState.step > 1) _tpalSetStep(_tpalState.step - 1);
+  });
+
+  // Step 1: affiliation buttons
+  dom.tpalStep1?.addEventListener("click", (event) => {
+    const affilBtn = event.target.closest(".tpal-affil-btn");
+    if (affilBtn) {
+      _tpalState.affiliation = affilBtn.dataset.affiliation;
+      _tpalSetStep(2);
+      return;
+    }
+    // Drawing tools (no affiliation needed)
+    const drawBtn = event.target.closest(".tpal-draw-btn");
+    if (drawBtn) {
+      beginTacticalPlacement({
+        id: drawBtn.dataset.templateId || generateId(),
+        name: drawBtn.dataset.name || "Tactical Item",
+        objectClass: drawBtn.dataset.objectClass || "marker",
+        domain: drawBtn.dataset.domain || "ground",
+        unitType: drawBtn.dataset.unitType || "headquarters",
+        cotType: drawBtn.dataset.cotType || "",
+        geometryType: drawBtn.dataset.geometryType || "Point",
+        drawMode: drawBtn.dataset.drawMode || "",
+        shapeKind: drawBtn.dataset.shapeKind || "",
+      });
     }
   });
-  dom.tacticalPaletteSearch?.addEventListener("input", renderTacticalPalette);
-  dom.tacticalPaletteList?.addEventListener("click", (event) => {
-    const button = event.target.closest(".tactical-template-btn");
-    if (!button) return;
+
+  // Step 2: domain buttons
+  dom.tpalStep2?.addEventListener("click", (event) => {
+    const domainBtn = event.target.closest(".tpal-domain-btn");
+    if (!domainBtn) return;
+    _tpalState.domain = domainBtn.dataset.domain;
+    _tpalRenderCategories(_tpalState.domain);
+    _tpalSetStep(3);
+  });
+
+  // Step 3: category list + type grid
+  dom.tpalCategoryList?.addEventListener("click", (event) => {
+    const catBtn = event.target.closest(".tpal-cat-btn");
+    if (!catBtn) return;
+    dom.tpalCategoryList.querySelectorAll(".tpal-cat-btn").forEach((b) => b.classList.remove("active"));
+    catBtn.classList.add("active");
+    _tpalState.category = catBtn.dataset.cat;
+    _tpalRenderTypes(_tpalState.category);
+  });
+
+  dom.tpalTypeGrid?.addEventListener("click", (event) => {
+    const typeBtn = event.target.closest(".tpal-type-btn");
+    if (!typeBtn) return;
+    const aff = _tpalState.affiliation || "friendly";
     beginTacticalPlacement({
-      id: button.dataset.templateId || generateId(),
-      name: button.dataset.name || "Tactical Item",
-      objectClass: button.dataset.objectClass || "unit",
-      domain: button.dataset.domain || "ground",
-      unitType: button.dataset.unitType || "infantry",
-      cotType: button.dataset.cotType || "",
-      geometryType: button.dataset.geometryType || "Point",
-      drawMode: button.dataset.drawMode || "",
-      shapeKind: button.dataset.shapeKind || "",
+      id: generateId(),
+      name: typeBtn.dataset.name || "Tactical Item",
+      objectClass: typeBtn.dataset.objectClass || "unit",
+      domain: typeBtn.dataset.domain || _tpalState.domain || "ground",
+      unitType: typeBtn.dataset.unitType || "infantry",
+      affiliation: aff,
+      cotType: typeBtn.dataset.cotType || "",
+      geometryType: typeBtn.dataset.geometryType || "Point",
+      drawMode: "",
+      shapeKind: "",
     });
   });
   initTacticalEditorFormOptions();

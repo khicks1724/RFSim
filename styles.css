@@ -1101,46 +1101,10 @@ body.panel-collapsed .control-panel {
 }
 
 .map-folder-icon {
-  position: relative;
-  width: 20px;
-  height: 16px;
-  display: inline-block;
-}
-
-.map-folder-icon-tab {
-  position: absolute;
-  left: 2px;
-  top: 0;
-  width: 8px;
-  height: 4px;
-  border: 1px solid var(--accent-strong);
-  border-bottom: none;
-  border-radius: 3px 3px 0 0;
-  background: rgba(143, 183, 255, 0.15);
-}
-
-.map-folder-icon-body {
-  position: absolute;
-  inset: 3px 0 0;
-  border: 1px solid var(--accent-strong);
-  border-radius: 3px;
-  background: rgba(143, 183, 255, 0.1);
-}
-
-.map-folder-icon-plus {
-  position: absolute;
-  right: -4px;
-  bottom: -5px;
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--accent-strong);
-  color: var(--accent-strong);
-  font-size: 0.7rem;
-  font-weight: 700;
-  line-height: 10px;
-  text-align: center;
+  display: block;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
 }
 
 /* ── Map-contents icon buttons: shared hover label ── */
@@ -6173,55 +6137,227 @@ body.emitter-modal-open {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .tactical-palette-modal {
-  width: min(860px, calc(100vw - 32px));
+  width: min(680px, calc(100vw - 32px));
 }
 .tactical-palette-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   padding: 18px 20px;
 }
-.tactical-palette-search {
+
+/* Step indicator */
+.tpal-steps {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  padding-bottom: 14px;
 }
-.tactical-template-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-.tactical-template-btn {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(10, 15, 27, 0.98));
-  color: var(--text);
-  border-radius: 14px;
-  padding: 16px 14px;
-  text-align: left;
+.tpal-step {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 118px;
-  cursor: pointer;
-  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-}
-.tactical-template-btn:hover,
-.tactical-template-btn:focus-visible {
-  border-color: rgba(56, 189, 248, 0.55);
-  box-shadow: 0 10px 24px rgba(8, 47, 73, 0.28);
-  transform: translateY(-1px);
-}
-.tactical-template-btn strong {
-  font-size: 0.95rem;
-}
-.tactical-template-btn span {
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
   color: var(--text-muted);
-  font-size: 0.76rem;
-  line-height: 1.5;
+  white-space: nowrap;
 }
-.tactical-template-btn.hidden {
-  display: none;
+.tpal-step span {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
 }
+.tpal-step.active {
+  color: var(--text);
+}
+.tpal-step.active span {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.6);
+  color: #38bdf8;
+}
+.tpal-step.done span {
+  background: rgba(52, 211, 153, 0.15);
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #34d399;
+}
+.tpal-step-sep {
+  flex: 1;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.15);
+  margin: 0 10px;
+  min-width: 12px;
+}
+
+/* Step panes */
+.tpal-step-pane { display: flex; flex-direction: column; gap: 14px; }
+.tpal-step-pane.hidden { display: none; }
+
+/* Step 1 – Affiliation grid */
+.tpal-affil-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.tpal-affil-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px;
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: border-color 120ms, background 120ms;
+}
+.tpal-affil-btn:hover,
+.tpal-affil-btn:focus-visible {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.06);
+}
+.tpal-affil-btn svg { display: block; }
+
+/* Divider */
+.tpal-divider {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* Drawing tools row */
+.tpal-draw-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tpal-draw-btn {
+  padding: 6px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms;
+}
+.tpal-draw-btn:hover,
+.tpal-draw-btn:focus-visible {
+  border-color: rgba(56, 189, 248, 0.5);
+  color: var(--text);
+}
+
+/* Step 2 – Domain grid */
+.tpal-domain-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.tpal-domain-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 6px;
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  text-align: center;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+.tpal-domain-btn:hover,
+.tpal-domain-btn:focus-visible {
+  border-color: rgba(148, 163, 184, 0.5);
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.06);
+}
+
+/* Step 3 – Type layout */
+.tpal-type-layout {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  min-height: 200px;
+}
+.tpal-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  padding-right: 10px;
+}
+.tpal-cat-btn {
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.tpal-cat-btn:hover { background: rgba(148, 163, 184, 0.08); color: var(--text); }
+.tpal-cat-btn.active { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
+
+.tpal-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  align-content: start;
+}
+.tpal-type-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.77rem;
+  text-align: center;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+.tpal-type-btn:hover,
+.tpal-type-btn:focus-visible {
+  border-color: rgba(56, 189, 248, 0.5);
+  color: var(--text);
+  background: rgba(56, 189, 248, 0.04);
+}
+.tpal-type-btn img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+.tpal-type-btn .tpal-milstd-icon {
+  width: 52px;
+  height: 34px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Legacy hidden class still needed for search filter compat */
+.tactical-template-btn.hidden { display: none; }
 .tactical-editor-modal {
   width: min(1080px, calc(100vw - 32px));
 }
