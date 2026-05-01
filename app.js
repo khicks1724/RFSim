@@ -23732,6 +23732,46 @@ function getRectRayExitPoint(cx, cy, width, height, angleRad, extra = 0) {
 }
 
 let _topoDebugCollapsed = false;
+let _topoDebugSize = { width: 320, height: 220 };
+let _topoDebugResize = null;
+
+function applyTopoDebugPanelSize(panel = document.getElementById("_topoDebugPanel")) {
+  if (!panel || _topoDebugCollapsed) return;
+  const width = Math.max(220, Math.round(Number(_topoDebugSize?.width) || 320));
+  const height = Math.max(120, Math.round(Number(_topoDebugSize?.height) || 220));
+  panel.style.width = `${width}px`;
+  panel.style.height = `${height}px`;
+  panel.style.maxHeight = "none";
+}
+
+function stopTopoDebugWheelPropagation(event) {
+  event.stopPropagation();
+}
+
+function onTopoDebugResizePointerMove(event) {
+  if (!_topoDebugResize) return;
+  const { panel, startRect, startClientX, startClientY } = _topoDebugResize;
+  const dx = startClientX - event.clientX;
+  const dy = event.clientY - startClientY;
+  const canvas = document.getElementById("topoCanvas");
+  const canvasRect = canvas?.getBoundingClientRect?.();
+  const maxWidth = canvasRect ? Math.max(220, canvasRect.width - 20) : 640;
+  const maxHeight = canvasRect ? Math.max(120, canvasRect.height - 20) : 480;
+  _topoDebugSize = {
+    width: Math.max(220, Math.min(maxWidth, startRect.width + dx)),
+    height: Math.max(120, Math.min(maxHeight, startRect.height + dy)),
+  };
+  applyTopoDebugPanelSize(panel);
+}
+
+function endTopoDebugResize(event) {
+  if (!_topoDebugResize) return;
+  try {
+    _topoDebugResize.handle?.releasePointerCapture?.(event.pointerId);
+  } catch {}
+  _topoDebugResize = null;
+  document.body.classList.remove("topo-debug-resizing");
+}
 
 function ensureTopoDebugPanel() {
   const canvas = document.getElementById("topoCanvas");
@@ -23751,9 +23791,12 @@ function ensureTopoDebugPanel() {
         <button id="_topoDebugToggle" class="topo-debug-toggle" type="button" aria-expanded="true" aria-label="Collapse topology debug panel">−</button>
       </div>
       <pre id="_topoDebug" class="topo-debug-body"></pre>
+      <div id="_topoDebugResizeHandle" class="topo-debug-resize-handle" aria-hidden="true"></div>
     `;
     panel.addEventListener("mousedown", (e) => e.stopPropagation());
     panel.addEventListener("click", (e) => e.stopPropagation());
+    panel.addEventListener("wheel", stopTopoDebugWheelPropagation, { passive: true });
+    panel.querySelector("#_topoDebug")?.addEventListener("wheel", stopTopoDebugWheelPropagation, { passive: true });
     canvas.appendChild(panel);
     panel.querySelector("#_topoDebugToggle")?.addEventListener("click", (e) => {
       e.preventDefault();
@@ -23761,7 +23804,24 @@ function ensureTopoDebugPanel() {
       _topoDebugCollapsed = !_topoDebugCollapsed;
       syncTopoDebugPanelState();
     });
+    panel.querySelector("#_topoDebugResizeHandle")?.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _topoDebugResize = {
+        panel,
+        handle: event.currentTarget,
+        startRect: panel.getBoundingClientRect(),
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+      };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      document.body.classList.add("topo-debug-resizing");
+    });
+    document.addEventListener("pointermove", onTopoDebugResizePointerMove);
+    document.addEventListener("pointerup", endTopoDebugResize);
+    document.addEventListener("pointercancel", endTopoDebugResize);
   }
+  applyTopoDebugPanelSize(panel);
   syncTopoDebugPanelState();
   return panel;
 }
@@ -23775,6 +23835,11 @@ function syncTopoDebugPanelState() {
     toggle.textContent = _topoDebugCollapsed ? "+" : "−";
     toggle.setAttribute("aria-expanded", String(!_topoDebugCollapsed));
     toggle.setAttribute("aria-label", _topoDebugCollapsed ? "Expand topology debug panel" : "Collapse topology debug panel");
+  }
+  if (_topoDebugCollapsed) {
+    panel.style.removeProperty("height");
+  } else {
+    applyTopoDebugPanelSize(panel);
   }
 }
 
