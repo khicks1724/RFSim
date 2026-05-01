@@ -354,9 +354,24 @@ if ($requirePrivateKey) {
   $normalizedPfxBytes = $collection.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12, $password)
   $normalizedPfxBase64 = [Convert]::ToBase64String($normalizedPfxBytes)
 }
+$privateKeyPem = ''
+if ($requirePrivateKey -and $leaf -and $leaf.HasPrivateKey) {
+  $rsa = $leaf.GetRSAPrivateKey()
+  if ($rsa) {
+    $pkcs8 = $rsa.ExportPkcs8PrivateKey()
+    $privateKeyPem = '-----BEGIN PRIVATE KEY-----' + $newline + [Convert]::ToBase64String($pkcs8, [System.Base64FormattingOptions]::InsertLineBreaks) + $newline + '-----END PRIVATE KEY-----'
+  } else {
+    $ecdsa = $leaf.GetECDsaPrivateKey()
+    if ($ecdsa) {
+      $pkcs8 = $ecdsa.ExportPkcs8PrivateKey()
+      $privateKeyPem = '-----BEGIN PRIVATE KEY-----' + $newline + [Convert]::ToBase64String($pkcs8, [System.Base64FormattingOptions]::InsertLineBreaks) + $newline + '-----END PRIVATE KEY-----'
+    }
+  }
+}
 $result = @{
   certificatesPem = ($pemParts -join $newline)
   normalizedPfxBase64 = $normalizedPfxBase64
+  privateKeyPem = $privateKeyPem
   subject = if ($leaf) { $leaf.Subject } else { '' }
   issuer = if ($leaf) { $leaf.Issuer } else { '' }
   thumbprint = if ($leaf) { $leaf.Thumbprint } else { '' }
@@ -392,6 +407,7 @@ $result = @{
   return {
     certificatesPem: String(parsed.certificatesPem || ""),
     pfxBuffer: parsed.normalizedPfxBase64 ? Buffer.from(parsed.normalizedPfxBase64, "base64") : null,
+    privateKeyPem: String(parsed.privateKeyPem || ""),
     subject: String(parsed.subject || ""),
     issuer: String(parsed.issuer || ""),
     thumbprint: String(parsed.thumbprint || ""),
@@ -423,8 +439,13 @@ function buildTakSocketConfig(profileRow) {
 
   if (clientCert.kind === "data-url") {
     const normalizedClientBundle = normalizePkcs12WithWindowsCrypto(clientCert.buffer, clientCertPassword, { requirePrivateKey: true });
-    tlsOptions.pfx = normalizedClientBundle?.pfxBuffer || clientCert.buffer;
-    tlsOptions.passphrase = clientCertPassword;
+    if (normalizedClientBundle?.certificatesPem && normalizedClientBundle?.privateKeyPem) {
+      tlsOptions.cert = normalizedClientBundle.certificatesPem;
+      tlsOptions.key = normalizedClientBundle.privateKeyPem;
+    } else {
+      tlsOptions.pfx = normalizedClientBundle?.pfxBuffer || clientCert.buffer;
+      tlsOptions.passphrase = clientCertPassword;
+    }
   } else if (isPemLike(clientCert.text, { kind: "certificate" })) {
     tlsOptions.cert = clientCert.text;
   } else {
