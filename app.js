@@ -1759,6 +1759,10 @@ const dom = {
   siteStudyActions: document.querySelector("#siteStudyActions"),
   mapContentsPanel: document.querySelector("#mapContentsPanel"),
   mapContentsList: document.querySelector("#mapContentsList"),
+  terrainHeatmapBtn: document.querySelector("#terrainHeatmapBtn"),
+  terrainHeatmapDropdown: document.querySelector("#terrainHeatmapDropdown"),
+  terrainHeatmapOpacity: document.querySelector("#terrainHeatmapOpacity"),
+  terrainHeatmapOpacityValue: document.querySelector("#terrainHeatmapOpacityValue"),
   mapContentsSearchInput: document.querySelector("#mapContentsSearchInput"),
   mapContentsSearchClearBtn: document.querySelector("#mapContentsSearchClearBtn"),
   mapGeoSearchInput: document.querySelector("#mapGeoSearchInput"),
@@ -1893,6 +1897,9 @@ const dom = {
   simBelowThresholdMode: document.querySelector("#simBelowThresholdMode"),
   viewshedOpacity: document.querySelector("#viewshedOpacity"),
   viewshedList: document.querySelector("#viewshedList"),
+  rssiLegendCard: document.querySelector("#rssiLegendCard"),
+  terrainHeatmapLegendCard: document.querySelector("#terrainHeatmapLegendCard"),
+  terrainHeatmapLegendScale: document.querySelector("#terrainHeatmapLegendScale"),
   clearViewshedsBtn: document.querySelector("#clearViewshedsBtn"),
   gridMeters: document.querySelector("#gridMeters"),
   receiverHeight: document.querySelector("#receiverHeight"),
@@ -2035,6 +2042,15 @@ const state = {
   terrains: [],
   activeTerrainId: null,
   terrainCoverageLayers: new Map(),
+  terrainHeatmap: {
+    enabled: false,
+    opacity: 0.58,
+    layer2d: null,
+    sample: null,
+    refreshTimer: null,
+    requestId: 0,
+    lastBoundsKey: "",
+  },
   viewshedRootLayer: L.layerGroup(),
   viewsheds: [],
   activeInspectionViewshedId: null,
@@ -6395,6 +6411,7 @@ async function init() {
     }
   });
   state.map.on("moveend zoomend resize", updateMapOverlayMetrics);
+  state.map.on("moveend zoomend resize", () => scheduleTerrainHeatmapRefresh());
   state.map.on("moveend zoomend", saveMapViewPosition);
   window.addEventListener("beforeunload", flushPendingAutosave);
   document.addEventListener("visibilitychange", () => {
@@ -6443,6 +6460,7 @@ async function init() {
     });
     syncCesiumEntities();
     updateCesiumCompass();
+    scheduleTerrainHeatmapRefresh({ force: true, delay: 120 });
   });
   state.map.on(L.Draw.Event.CREATED, onPlanningRegionCreated);
   attachSimulationWorkerListener();
@@ -6670,9 +6688,17 @@ function wireEvents() {
   dom.workspaceProjectSnapshotBtn?.addEventListener("click", () => onWorkspaceProjectSnapshot().catch((error) => setStatus(error.message, true)));
   dom.workspaceProjectDeleteBtn?.addEventListener("click", () => onWorkspaceProjectDelete().catch((error) => setStatus(error.message, true)));
   document.addEventListener("click", closeTopBarMenus);
+  document.addEventListener("click", closeTerrainHeatmapDropdown);
   document.addEventListener("click", closeMapContentsMenu);
   document.addEventListener("click", closeRenamePopover);
   addModalBackdropClose(dom.shapeStyleModal, () => closeShapeStylePanel({ stopEditing: false }));
+  dom.terrainHeatmapBtn?.addEventListener("click", onTerrainHeatmapToggleClick);
+  dom.terrainHeatmapBtn?.addEventListener("contextmenu", onTerrainHeatmapButtonContextMenu);
+  dom.terrainHeatmapDropdown?.addEventListener("click", (event) => event.stopPropagation());
+  dom.terrainHeatmapDropdown?.addEventListener("contextmenu", (event) => event.stopPropagation());
+  dom.terrainHeatmapOpacity?.addEventListener("input", onTerrainHeatmapOpacityInput);
+  updateTerrainHeatmapOpacityUi();
+  updateTerrainHeatmapButtonUi();
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
   dom.addTacticalItemBtn?.addEventListener("click", openTacticalPaletteModal);
   dom.tacticalPaletteCloseBtn?.addEventListener("click", closeTacticalPaletteModal);
@@ -8410,6 +8436,7 @@ function onCesiumIonTokenChanged() {
   updateMapOverlayMetrics();
   updateTerrainSummary();
   updateTerrainMenuValue();
+  scheduleTerrainHeatmapRefresh({ force: true, delay: 120 });
   if (state.ui?.currentView === "topology") {
     renderTopologyView();
   }
@@ -8424,6 +8451,7 @@ function onTerrainSourceSettingsChanged() {
   updateMapOverlayMetrics();
   updateTerrainSummary();
   updateTerrainMenuValue();
+  scheduleTerrainHeatmapRefresh({ force: true, delay: 120 });
   if (state.ui?.currentView === "topology") {
     renderTopologyView();
   }
@@ -8686,6 +8714,8 @@ function afterSwitchView(view) {
   if (view === "analyze")  renderAnalyzeView();
   if (view === "plan")     initPlanViewIfNeeded();
   renderMapTakDebugPanel();
+  updateRssiLegendVisibility();
+  updateTerrainHeatmapLegendVisibility();
 }
 
 function initViewModeToggle() {
@@ -8710,6 +8740,8 @@ function initViewModeToggle() {
     dom.viewModeToggle.setAttribute("data-active", "map");
   }
   syncAiUi();
+  updateRssiLegendVisibility();
+  updateTerrainHeatmapLegendVisibility();
 }
 
 function endPanelResize() {
@@ -10531,6 +10563,340 @@ function isContentEffectivelyHidden(contentId) {
   return state.hiddenContentIds.has(contentId) || isContentHiddenByAncestorFolder(contentId);
 }
 
+function updateRssiLegendVisibility() {
+  const legend = dom.rssiLegendCard;
+  if (!legend) return;
+  const hasVisibleCoverage = state.ui?.currentView === "map"
+    && state.viewsheds.some((viewshed) => !isContentEffectivelyHidden(`viewshed:${viewshed.id}`));
+  legend.classList.toggle("hidden", !hasVisibleCoverage);
+}
+
+function closeTerrainHeatmapDropdown() {
+  dom.terrainHeatmapDropdown?.classList.add("hidden");
+}
+
+function updateTerrainHeatmapButtonUi() {
+  const button = dom.terrainHeatmapBtn;
+  if (!button) return;
+  const isEnabled = Boolean(state.terrainHeatmap.enabled);
+  button.setAttribute("aria-pressed", isEnabled ? "true" : "false");
+}
+
+function updateTerrainHeatmapOpacityUi() {
+  const input = dom.terrainHeatmapOpacity;
+  const value = clamp(Number(state.terrainHeatmap.opacity) || 0.58, 0.15, 1);
+  state.terrainHeatmap.opacity = value;
+  if (input) {
+    input.value = String(value);
+    updateRangeTrack(input);
+  }
+  if (dom.terrainHeatmapOpacityValue) {
+    dom.terrainHeatmapOpacityValue.textContent = `${Math.round(value * 100)}%`;
+  }
+}
+
+function buildTerrainHeatmapLegendTicks(minElevationM, maxElevationM) {
+  if (!Number.isFinite(minElevationM) || !Number.isFinite(maxElevationM)) {
+    return ["Low", "Mid", "High", "Peak"];
+  }
+  if (Math.abs(maxElevationM - minElevationM) < 0.5) {
+    const same = formatElevation(minElevationM);
+    return [same, same, same, same];
+  }
+  return [0, 1 / 3, 2 / 3, 1].map((fraction) =>
+    formatElevation(minElevationM + ((maxElevationM - minElevationM) * fraction))
+  );
+}
+
+function updateTerrainHeatmapLegend() {
+  const scale = dom.terrainHeatmapLegendScale;
+  const sample = state.terrainHeatmap.sample;
+  if (!scale || !sample) return;
+  const labels = buildTerrainHeatmapLegendTicks(sample.minElevationM, sample.maxElevationM);
+  scale.querySelectorAll("span").forEach((node, index) => {
+    node.textContent = labels[index] ?? "";
+  });
+}
+
+function updateTerrainHeatmapLegendVisibility() {
+  const legend = dom.terrainHeatmapLegendCard;
+  if (!legend) return;
+  const visible = state.ui?.currentView === "map"
+    && Boolean(state.terrainHeatmap.enabled)
+    && Boolean(state.terrainHeatmap.sample);
+  legend.classList.toggle("hidden", !visible);
+}
+
+function terrainHeatmapGradientColor(value, opacity = 1) {
+  const stops = [
+    { at: 0, color: [255, 59, 59] },
+    { at: 0.2, color: [255, 140, 61] },
+    { at: 0.4, color: [250, 204, 21] },
+    { at: 0.6, color: [52, 211, 153] },
+    { at: 0.8, color: [56, 189, 248] },
+    { at: 1, color: [139, 92, 246] },
+  ];
+  const t = clamp(Number(value) || 0, 0, 1);
+  let left = stops[0];
+  let right = stops[stops.length - 1];
+  for (let index = 1; index < stops.length; index += 1) {
+    if (t <= stops[index].at) {
+      left = stops[index - 1];
+      right = stops[index];
+      break;
+    }
+  }
+  const span = Math.max(0.0001, right.at - left.at);
+  const fraction = clamp((t - left.at) / span, 0, 1);
+  const color = left.color.map((channel, index) => Math.round(channel + ((right.color[index] - channel) * fraction)));
+  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${clamp(opacity, 0, 1).toFixed(3)})`;
+}
+
+function buildTerrainHeatmapBoundsKey(bounds) {
+  return [
+    buildCesiumTerrainProviderKey(),
+    bounds.sw.lat.toFixed(4),
+    bounds.sw.lon.toFixed(4),
+    bounds.ne.lat.toFixed(4),
+    bounds.ne.lon.toFixed(4),
+    state.view3dEnabled ? "3d" : "2d",
+  ].join(":");
+}
+
+function getCurrentTerrainHeatmapBounds() {
+  if (!state.map) return null;
+  if (state.view3dEnabled && state.cesiumViewer) {
+    const rect = state.cesiumViewer.camera.computeViewRectangle?.();
+    if (rect) {
+      const CM = window.Cesium.Math;
+      const south = CM.toDegrees(rect.south);
+      const north = CM.toDegrees(rect.north);
+      const west = CM.toDegrees(rect.west);
+      const east = CM.toDegrees(rect.east);
+      if ([south, north, west, east].every(Number.isFinite) && east > west && north > south) {
+        return {
+          sw: { lat: south, lon: west },
+          ne: { lat: north, lon: east },
+        };
+      }
+    }
+  }
+  const bounds = state.map.getBounds();
+  return {
+    sw: { lat: bounds.getSouth(), lon: bounds.getWest() },
+    ne: { lat: bounds.getNorth(), lon: bounds.getEast() },
+  };
+}
+
+function getTerrainHeatmapGridMeters(bounds) {
+  const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
+  const widthMeters = haversineKm(centerLat, bounds.sw.lon, centerLat, bounds.ne.lon) * 1000;
+  const heightMeters = haversineKm(bounds.sw.lat, bounds.sw.lon, bounds.ne.lat, bounds.sw.lon) * 1000;
+  const dominantSpan = Math.max(widthMeters, heightMeters, 240);
+  return clamp(dominantSpan / 42, 40, 1200);
+}
+
+async function sampleCesiumTerrainGridForHeatmap(bounds, gridMeters) {
+  const provider = await getConfiguredCesiumTerrainProvider();
+  if (!provider) {
+    throw new Error("Cesium terrain is not configured.");
+  }
+  const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
+  const latStepDeg = metersToLatitudeDegrees(gridMeters);
+  const lonStepDeg = metersToLongitudeDegrees(gridMeters, centerLat);
+  const rows = Math.max(2, Math.round((bounds.ne.lat - bounds.sw.lat) / latStepDeg) + 1);
+  const cols = Math.max(2, Math.round((bounds.ne.lon - bounds.sw.lon) / lonStepDeg) + 1);
+  const positions = [];
+  for (let row = 0; row < rows; row += 1) {
+    const lat = bounds.sw.lat + (row * latStepDeg);
+    for (let col = 0; col < cols; col += 1) {
+      const lon = bounds.sw.lon + (col * lonStepDeg);
+      positions.push(window.Cesium.Cartographic.fromDegrees(lon, lat));
+    }
+  }
+
+  const elevations = new Float32Array(rows * cols);
+  const nodataMask = new Uint8Array(rows * cols);
+  elevations.fill(Number.NaN);
+  nodataMask.fill(1);
+  let minElevationM = Number.POSITIVE_INFINITY;
+  let maxElevationM = Number.NEGATIVE_INFINITY;
+  const batchSize = Math.max(192, Math.min(1024, cols * 6));
+
+  for (let start = 0; start < positions.length; start += batchSize) {
+    const batch = positions.slice(start, start + batchSize);
+    const samples = await window.Cesium.sampleTerrainMostDetailed(provider, batch);
+    samples.forEach((sample, batchIndex) => {
+      if (!Number.isFinite(sample?.height)) {
+        return;
+      }
+      const index = start + batchIndex;
+      elevations[index] = sample.height;
+      nodataMask[index] = 0;
+      minElevationM = Math.min(minElevationM, sample.height);
+      maxElevationM = Math.max(maxElevationM, sample.height);
+    });
+    await yieldToMainThread();
+  }
+
+  if (!Number.isFinite(minElevationM) || !Number.isFinite(maxElevationM)) {
+    throw new Error("No Cesium terrain samples were returned for the current map view.");
+  }
+
+  return {
+    bounds,
+    rows,
+    cols,
+    latStepDeg,
+    lonStepDeg,
+    elevations,
+    nodataMask,
+    minElevationM,
+    maxElevationM,
+  };
+}
+
+function syncTerrainHeatmap2dLayer() {
+  if (!state.map) return;
+  const existing = state.terrainHeatmap.layer2d;
+  const shouldShow = Boolean(state.terrainHeatmap.enabled && state.terrainHeatmap.sample);
+  if (!shouldShow) {
+    if (existing) {
+      state.map.removeLayer(existing);
+      state.terrainHeatmap.layer2d = null;
+    }
+    return;
+  }
+
+  if (!existing) {
+    state.terrainHeatmap.layer2d = new CanvasTerrainHeatmapLayer({
+      pane: "pane-terrain",
+      opacity: state.terrainHeatmap.opacity,
+      sample: state.terrainHeatmap.sample,
+    });
+    state.terrainHeatmap.layer2d.addTo(state.map);
+    return;
+  }
+
+  existing.setOpacity(state.terrainHeatmap.opacity);
+  existing.setSample(state.terrainHeatmap.sample);
+}
+
+async function refreshTerrainHeatmap(options = {}) {
+  if (!state.terrainHeatmap.enabled) {
+    return;
+  }
+  if (!usesConfiguredCesiumTerrain()) {
+    state.terrainHeatmap.enabled = false;
+    state.terrainHeatmap.sample = null;
+    syncTerrainHeatmap2dLayer();
+    syncCesiumEntities();
+    updateTerrainHeatmapButtonUi();
+    updateTerrainHeatmapLegendVisibility();
+    throw new Error("Enable Cesium terrain first to use the terrain heatmap.");
+  }
+
+  const bounds = getCurrentTerrainHeatmapBounds();
+  if (!bounds) {
+    return;
+  }
+  const boundsKey = buildTerrainHeatmapBoundsKey(bounds);
+  if (!options.force && boundsKey === state.terrainHeatmap.lastBoundsKey && state.terrainHeatmap.sample) {
+    syncTerrainHeatmap2dLayer();
+    updateTerrainHeatmapLegend();
+    updateTerrainHeatmapLegendVisibility();
+    syncCesiumEntities();
+    return;
+  }
+
+  const requestId = ++state.terrainHeatmap.requestId;
+  const gridMeters = getTerrainHeatmapGridMeters(bounds);
+  const sample = await sampleCesiumTerrainGridForHeatmap(bounds, gridMeters);
+  if (requestId !== state.terrainHeatmap.requestId || !state.terrainHeatmap.enabled) {
+    return;
+  }
+  state.terrainHeatmap.sample = sample;
+  state.terrainHeatmap.lastBoundsKey = boundsKey;
+  syncTerrainHeatmap2dLayer();
+  updateTerrainHeatmapButtonUi();
+  updateTerrainHeatmapLegend();
+  updateTerrainHeatmapLegendVisibility();
+  syncCesiumEntities();
+}
+
+function scheduleTerrainHeatmapRefresh(options = {}) {
+  if (!state.terrainHeatmap.enabled) {
+    return;
+  }
+  if (state.terrainHeatmap.refreshTimer) {
+    clearTimeout(state.terrainHeatmap.refreshTimer);
+  }
+  const delay = Number.isFinite(options.delay) ? options.delay : 220;
+  state.terrainHeatmap.refreshTimer = setTimeout(() => {
+    state.terrainHeatmap.refreshTimer = null;
+    refreshTerrainHeatmap({ force: options.force }).catch((error) => {
+      setStatus(error.message || "Terrain heatmap refresh failed.", true);
+    });
+  }, delay);
+}
+
+async function setTerrainHeatmapEnabled(enabled) {
+  if (!enabled) {
+    state.terrainHeatmap.enabled = false;
+    state.terrainHeatmap.sample = null;
+    state.terrainHeatmap.lastBoundsKey = "";
+    closeTerrainHeatmapDropdown();
+    syncTerrainHeatmap2dLayer();
+    syncCesiumEntities();
+    updateTerrainHeatmapButtonUi();
+    updateTerrainHeatmapLegendVisibility();
+    return;
+  }
+
+  if (!usesConfiguredCesiumTerrain()) {
+    setStatus("Enable Cesium terrain first to use the terrain heatmap overlay.", true);
+    return;
+  }
+
+  state.terrainHeatmap.enabled = true;
+  updateTerrainHeatmapButtonUi();
+  updateTerrainHeatmapOpacityUi();
+  try {
+    await refreshTerrainHeatmap({ force: true });
+  } catch (error) {
+    state.terrainHeatmap.enabled = false;
+    state.terrainHeatmap.sample = null;
+    state.terrainHeatmap.lastBoundsKey = "";
+    updateTerrainHeatmapButtonUi();
+    updateTerrainHeatmapLegendVisibility();
+    syncTerrainHeatmap2dLayer();
+    syncCesiumEntities();
+    throw error;
+  }
+}
+
+function onTerrainHeatmapToggleClick(event) {
+  event.preventDefault();
+  closeTerrainHeatmapDropdown();
+  setTerrainHeatmapEnabled(!state.terrainHeatmap.enabled).catch((error) => {
+    setStatus(error.message || "Terrain heatmap toggle failed.", true);
+  });
+}
+
+function onTerrainHeatmapButtonContextMenu(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  updateTerrainHeatmapOpacityUi();
+  dom.terrainHeatmapDropdown?.classList.toggle("hidden");
+}
+
+function onTerrainHeatmapOpacityInput(event) {
+  state.terrainHeatmap.opacity = clamp(Number(event.currentTarget.value) || 0.58, 0.15, 1);
+  updateTerrainHeatmapOpacityUi();
+  state.terrainHeatmap.layer2d?.setOpacity(state.terrainHeatmap.opacity);
+  syncCesiumEntities();
+}
+
 function syncContentVisibility(contentId) {
   if (contentId.startsWith("folder:")) {
     getFolderDescendantContentIds(contentId).forEach((descendantId) => syncContentVisibility(descendantId));
@@ -10553,6 +10919,7 @@ function toggleContentVisibility(contentId) {
   }
   syncContentVisibility(contentId);
   renderMapContents();
+  updateRssiLegendVisibility();
   syncCesiumEntities();
   saveMapState();
 }
@@ -16300,6 +16667,7 @@ function renderViewsheds() {
 
   if (!state.viewsheds.length) {
     dom.viewshedList.innerHTML = `<div class="asset-item">No coverage layers rendered yet.</div>`;
+    updateRssiLegendVisibility();
     renderMapContents();
     return;
   }
@@ -16346,6 +16714,7 @@ function renderViewsheds() {
     control.addEventListener("click", onViewshedAction);
   });
 
+  updateRssiLegendVisibility();
   renderMapContents();
 }
 
@@ -17962,6 +18331,7 @@ async function toggle3dView() {
     await syncCesiumScene();
     syncCesiumEntities();
     updateCesiumCompass();
+    scheduleTerrainHeatmapRefresh({ force: true, delay: 120 });
   } else if (state.cesiumViewer) {
     // Sync camera back to Leaflet when returning to 2D
     const carto = window.Cesium.Cartographic.fromCartesian(
@@ -17974,6 +18344,7 @@ async function toggle3dView() {
       state.map.setView([lat, lng], Math.min(Math.max(zoom, 2), 18), { animate: false });
     }
   }
+  scheduleTerrainHeatmapRefresh({ force: true, delay: 120 });
   updatePlacementInteractionState();
 }
 
@@ -18005,6 +18376,7 @@ async function initCesiumIfNeeded() {
     updateCesiumCompass();
     updateCesiumPhotorealisticTilesVisibility();
     updateCesiumOsmBuildingsVisibility();
+    scheduleTerrainHeatmapRefresh({ delay: 320 });
   });
 
   // Redraw terrain-clamped gridlines when the 3D camera moves.
@@ -22985,6 +23357,7 @@ function _syncCesiumEntitiesImmediate() {
 
   const viewer = state.cesiumViewer;
   const C = window.Cesium;
+  const scene = viewer.scene;
   const entities = viewer.entities;
 
   // Clear all managed entities
@@ -23007,6 +23380,90 @@ function _syncCesiumEntitiesImmediate() {
   const safeAddEntity = (def) => {
     if (def.id && entities.getById(def.id)) entities.removeById(def.id);
     entities.add(def);
+  };
+
+  const projectedLabelPlacements = [];
+  const buildCesiumLabelOptions = ({
+    lat,
+    lon,
+    text,
+    font = "14px Bahnschrift",
+    fillColor = C.Color.WHITE,
+    outlineColor = C.Color.BLACK,
+    outlineWidth = 2,
+    style = C.LabelStyle.FILL_AND_OUTLINE,
+    backgroundColor = C.Color.fromCssColorString("#0b1220").withAlpha(0.78),
+    backgroundPadding = new C.Cartesian2(6, 4),
+    heightReference = C.HeightReference.CLAMP_TO_GROUND,
+    anchorMode = "above",
+    markerPixelSize = 10,
+    baseOffsetX = 0,
+    baseOffsetY = -18,
+  }) => {
+    let lane = 0;
+    try {
+      const windowPos = C.SceneTransforms.wgs84ToWindowCoordinates(
+        scene,
+        C.Cartesian3.fromDegrees(lon, lat, 0),
+      );
+      if (windowPos) {
+        lane = projectedLabelPlacements.filter((entry) =>
+          Math.abs(entry.x - windowPos.x) < 150 && Math.abs(entry.y - windowPos.y) < 34
+        ).length;
+        projectedLabelPlacements.push({ x: windowPos.x, y: windowPos.y });
+      }
+    } catch (_) {}
+
+    let offsetX = baseOffsetX;
+    let offsetY = baseOffsetY;
+    let horizontalOrigin = C.HorizontalOrigin.CENTER;
+    let verticalOrigin = C.VerticalOrigin.BOTTOM;
+
+    if (anchorMode === "right") {
+      const step = Math.floor((lane + 1) / 2);
+      const sign = lane === 0 ? 0 : (lane % 2 === 1 ? -1 : 1);
+      offsetX = (markerPixelSize / 2) + 10 + Math.min(step, 2) * 4;
+      offsetY = sign * step * 14;
+      horizontalOrigin = C.HorizontalOrigin.LEFT;
+      verticalOrigin = C.VerticalOrigin.CENTER;
+    } else {
+      const presets = [
+        [0, baseOffsetY],
+        [26, -8],
+        [-26, -8],
+        [0, baseOffsetY - 16],
+        [38, -18],
+        [-38, -18],
+      ];
+      const preset = presets[lane] || [
+        (lane % 2 === 0 ? -1 : 1) * (26 + (Math.floor(lane / 2) * 8)),
+        baseOffsetY - (Math.floor(lane / 3) * 10),
+      ];
+      offsetX = preset[0];
+      offsetY = preset[1];
+    }
+
+    return {
+      text,
+      font,
+      fillColor,
+      pixelOffset: new C.Cartesian2(offsetX, offsetY),
+      eyeOffset: new C.Cartesian3(0, Math.min(40, 8 + lane * 5), 0),
+      heightReference,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      style,
+      outlineWidth,
+      outlineColor,
+      showBackground: true,
+      backgroundColor,
+      backgroundPadding,
+      scaleByDistance: new C.NearFarScalar(800, 1, 30000, 0.68),
+      translucencyByDistance: new C.NearFarScalar(1200, 1, 85000, 0.16),
+      pixelOffsetScaleByDistance: new C.NearFarScalar(1000, 1, 40000, 0.72),
+      distanceDisplayCondition: new C.DistanceDisplayCondition(0, 120000),
+      horizontalOrigin,
+      verticalOrigin,
+    };
   };
 
   const addClampedPolygon = (id, latLngs, options = {}) => {
@@ -23073,17 +23530,15 @@ function _syncCesiumEntitiesImmediate() {
         heightReference: heightRef,
         disableDepthTestDistance: 0,
       },
-      label: {
+      label: buildCesiumLabelOptions({
+        lat: asset.lat,
+        lon: asset.lon,
         text: asset.name,
-        fillColor: C.Color.WHITE,
         font: "14px Bahnschrift",
-        pixelOffset: new C.Cartesian2(0, -18),
         heightReference: heightRef,
-        disableDepthTestDistance: 0,
-        style: C.LabelStyle.FILL_AND_OUTLINE,
-        outlineWidth: 2,
-        outlineColor: C.Color.BLACK,
-      },
+        anchorMode: "above",
+        markerPixelSize: 10,
+      }),
     });
   });
 
@@ -23100,17 +23555,15 @@ function _syncCesiumEntitiesImmediate() {
         heightReference: C.HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: 0,
       },
-      label: {
+      label: buildCesiumLabelOptions({
+        lat: state.gps.location.lat,
+        lon: state.gps.location.lon,
         text: "User",
         font: "14px Bahnschrift",
-        fillColor: C.Color.WHITE,
-        pixelOffset: new C.Cartesian2(0, -18),
         heightReference: C.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: 0,
-        style: C.LabelStyle.FILL_AND_OUTLINE,
-        outlineWidth: 2,
-        outlineColor: C.Color.BLACK,
-      },
+        anchorMode: "above",
+        markerPixelSize: 12,
+      }),
     });
     // GPS accuracy circle
     if (state.gps.location.accuracyM) {
@@ -23148,6 +23601,54 @@ function _syncCesiumEntitiesImmediate() {
       },
     });
   });
+
+  // --- TERRAIN HEATMAP ---
+  if (state.terrainHeatmap.enabled && state.terrainHeatmap.sample) {
+    const sample = state.terrainHeatmap.sample;
+    const latHalf = sample.latStepDeg / 2;
+    const lonHalf = sample.lonStepDeg / 2;
+    const span = Math.max(0.0001, sample.maxElevationM - sample.minElevationM);
+    const instances = [];
+    for (let row = 0; row < sample.rows; row += 1) {
+      for (let col = 0; col < sample.cols; col += 1) {
+        const index = (row * sample.cols) + col;
+        if (sample.nodataMask[index] === 1 || !Number.isFinite(sample.elevations[index])) {
+          continue;
+        }
+        const lat = sample.bounds.sw.lat + (row * sample.latStepDeg);
+        const lon = sample.bounds.sw.lon + (col * sample.lonStepDeg);
+        const color = C.Color.fromCssColorString(
+          terrainHeatmapGradientColor((sample.elevations[index] - sample.minElevationM) / span, state.terrainHeatmap.opacity)
+        );
+        instances.push(new C.GeometryInstance({
+          id: `terrain-heatmap:${index}`,
+          geometry: new C.RectangleGeometry({
+            rectangle: C.Rectangle.fromDegrees(
+              lon - lonHalf, lat - latHalf,
+              lon + lonHalf, lat + latHalf,
+            ),
+            vertexFormat: C.PerInstanceColorAppearance.VERTEX_FORMAT,
+          }),
+          attributes: {
+            color: C.ColorGeometryInstanceAttribute.fromColor(color),
+          },
+        }));
+      }
+    }
+    if (instances.length) {
+      const primitive = new C.GroundPrimitive({
+        geometryInstances: instances,
+        appearance: new C.PerInstanceColorAppearance({
+          flat: true,
+          translucent: true,
+        }),
+        classificationType: overlayClassificationType,
+        asynchronous: false,
+      });
+      viewer.scene.primitives.add(primitive);
+      viewer._managedPrimitives.push(primitive);
+    }
+  }
 
   // --- VIEWSHEDS ---
   state.viewsheds.filter((v) => isVisible(`viewshed:${v.id}`)).forEach((viewshed) => {
@@ -23282,22 +23783,19 @@ function _syncCesiumEntitiesImmediate() {
             disableDepthTestDistance: 0,
           });
           if (showLabel && name) {
-            entity.label = new C.LabelGraphics({
+            const pointPosition = entity.position?.getValue?.(viewer.clock.currentTime);
+            const pointCartographic = pointPosition ? C.Cartographic.fromCartesian(pointPosition) : null;
+            entity.label = new C.LabelGraphics(buildCesiumLabelOptions({
+              lat: pointCartographic ? C.Math.toDegrees(pointCartographic.latitude) : 0,
+              lon: pointCartographic ? C.Math.toDegrees(pointCartographic.longitude) : 0,
               text: name,
-              font: "bold 12px sans-serif",
+              font: "bold 12px Bahnschrift",
               fillColor: C.Color.fromCssColorString("#e8edf3"),
               outlineColor: C.Color.fromCssColorString("#0d1117"),
-              outlineWidth: 2,
-              style: C.LabelStyle.FILL_AND_OUTLINE,
-              pixelOffset: new C.Cartesian2(size / 2 + 6, 0),
-              horizontalOrigin: C.HorizontalOrigin.LEFT,
-              verticalOrigin: C.VerticalOrigin.CENTER,
               heightReference: C.HeightReference.CLAMP_TO_GROUND,
-              disableDepthTestDistance: 0,
-              showBackground: true,
-              backgroundColor: C.Color.fromCssColorString("#0d1117").withAlpha(0.75),
-              backgroundPadding: new C.Cartesian2(5, 3),
-            });
+              anchorMode: "right",
+              markerPixelSize: size,
+            }));
           } else {
             if (entity.label) entity.label.show = false;
           }
@@ -23367,18 +23865,15 @@ function _syncCesiumEntitiesImmediate() {
           disableDepthTestDistance: 0,
         },
         label: {
-          text: object.name || object.designator || object.uid || "Track",
-          font: "bold 13px Bahnschrift",
-          fillColor: C.Color.WHITE,
-          pixelOffset: new C.Cartesian2(10, 0),
-          heightReference: C.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: 0,
-          style: C.LabelStyle.FILL_AND_OUTLINE,
-          outlineWidth: 2,
-          outlineColor: C.Color.BLACK,
-          showBackground: true,
-          backgroundColor: C.Color.fromCssColorString("#0b1220").withAlpha(0.7),
-          backgroundPadding: new C.Cartesian2(5, 3),
+          ...buildCesiumLabelOptions({
+            lat: Number(object.coordinates[0]),
+            lon: Number(object.coordinates[1]),
+            text: object.name || object.designator || object.uid || "Track",
+            font: "bold 13px Bahnschrift",
+            heightReference: C.HeightReference.CLAMP_TO_GROUND,
+            anchorMode: "right",
+            markerPixelSize: object.readOnly ? 11 : 13,
+          }),
         },
       });
       return;
@@ -23452,17 +23947,15 @@ function _syncCesiumEntitiesImmediate() {
         heightReference: txRef,
         disableDepthTestDistance: 0,
       },
-      label: {
+      label: buildCesiumLabelOptions({
+        lat: recommendation.tx.lat,
+        lon: recommendation.tx.lon,
         text: `Tx ${index + 1}`,
         font: "14px Bahnschrift",
-        fillColor: C.Color.WHITE,
-        pixelOffset: new C.Cartesian2(0, -18),
         heightReference: txRef,
-        disableDepthTestDistance: 0,
-        style: C.LabelStyle.FILL_AND_OUTLINE,
-        outlineWidth: 2,
-        outlineColor: C.Color.BLACK,
-      },
+        anchorMode: "above",
+        markerPixelSize: 10,
+      }),
     });
     safeAddEntity({
       id: `managed:planning:rx:${index}`,
@@ -23475,17 +23968,15 @@ function _syncCesiumEntitiesImmediate() {
         heightReference: rxRef,
         disableDepthTestDistance: 0,
       },
-      label: {
+      label: buildCesiumLabelOptions({
+        lat: recommendation.rx.lat,
+        lon: recommendation.rx.lon,
         text: `Rx ${index + 1}`,
         font: "14px Bahnschrift",
-        fillColor: C.Color.WHITE,
-        pixelOffset: new C.Cartesian2(0, -18),
         heightReference: rxRef,
-        disableDepthTestDistance: 0,
-        style: C.LabelStyle.FILL_AND_OUTLINE,
-        outlineWidth: 2,
-        outlineColor: C.Color.BLACK,
-      },
+        anchorMode: "above",
+        markerPixelSize: 10,
+      }),
     });
     safeAddEntity({
       id: `managed:planning:link:${index}`,
@@ -24795,6 +25286,122 @@ const CanvasViewshedLayer = L.Layer.extend({
 });
 
 // ─── Offline Data Download ────────────────────────────────────────────────────
+
+const CanvasTerrainHeatmapLayer = L.Layer.extend({
+  initialize(options) {
+    this.options = options;
+    this._canvas = null;
+    this._frame = null;
+    this._colorCache = null;
+  },
+
+  onAdd(map) {
+    this._map = map;
+    this._canvas = L.DomUtil.create("canvas", "leaflet-terrain-heatmap-canvas");
+    const pane = map.getPane(this.options.pane || "overlayPane");
+    pane.appendChild(this._canvas);
+    this._canvas.style.opacity = String(this.options.opacity ?? 0.58);
+    this._canvas.style.mixBlendMode = "screen";
+    map.on("moveend zoomend resize", this._scheduleRedraw, this);
+    this._scheduleRedraw();
+  },
+
+  onRemove(map) {
+    map.off("moveend zoomend resize", this._scheduleRedraw, this);
+    if (this._frame !== null) {
+      window.cancelAnimationFrame(this._frame);
+      this._frame = null;
+    }
+    if (this._canvas?.parentNode) {
+      this._canvas.parentNode.removeChild(this._canvas);
+    }
+    this._canvas = null;
+  },
+
+  setOpacity(opacity) {
+    this.options.opacity = opacity;
+    if (this._canvas) {
+      this._canvas.style.opacity = String(opacity);
+    }
+  },
+
+  setSample(sample) {
+    this.options.sample = sample;
+    this._colorCache = null;
+    this._scheduleRedraw();
+  },
+
+  _scheduleRedraw() {
+    if (this._frame !== null) {
+      return;
+    }
+    this._frame = window.requestAnimationFrame(() => {
+      this._frame = null;
+      this._redraw();
+    });
+  },
+
+  _ensureColorCache() {
+    const sample = this.options.sample;
+    if (!sample) {
+      this._colorCache = null;
+      return;
+    }
+    const { elevations, nodataMask, minElevationM, maxElevationM } = sample;
+    if (this._colorCache?.length === elevations.length && this._cacheMin === minElevationM && this._cacheMax === maxElevationM) {
+      return;
+    }
+    const span = Math.max(0.0001, maxElevationM - minElevationM);
+    this._colorCache = new Array(elevations.length);
+    this._cacheMin = minElevationM;
+    this._cacheMax = maxElevationM;
+    for (let index = 0; index < elevations.length; index += 1) {
+      if (nodataMask[index] === 1 || !Number.isFinite(elevations[index])) {
+        this._colorCache[index] = null;
+        continue;
+      }
+      this._colorCache[index] = terrainHeatmapGradientColor((elevations[index] - minElevationM) / span, 1);
+    }
+  },
+
+  _redraw() {
+    if (!this._map || !this._canvas || !this.options.sample) {
+      return;
+    }
+    this._ensureColorCache();
+    const sample = this.options.sample;
+    const size = this._map.getSize();
+    const topLeft = this._map.containerPointToLayerPoint([0, 0]);
+    this._canvas.width = size.x;
+    this._canvas.height = size.y;
+    this._canvas.style.width = `${size.x}px`;
+    this._canvas.style.height = `${size.y}px`;
+    this._canvas.style.position = "absolute";
+    this._canvas.style.pointerEvents = "none";
+    L.DomUtil.setPosition(this._canvas, topLeft);
+
+    const context = this._canvas.getContext("2d");
+    context.clearRect(0, 0, size.x, size.y);
+
+    const latHalf = sample.latStepDeg / 2;
+    const lonHalf = sample.lonStepDeg / 2;
+    for (let row = 0; row < sample.rows; row += 1) {
+      for (let col = 0; col < sample.cols; col += 1) {
+        const index = (row * sample.cols) + col;
+        const fill = this._colorCache?.[index];
+        if (!fill) continue;
+        const lat = sample.bounds.sw.lat + (row * sample.latStepDeg);
+        const lon = sample.bounds.sw.lon + (col * sample.lonStepDeg);
+        const northWest = this._map.latLngToLayerPoint([lat + latHalf, lon - lonHalf]).subtract(topLeft);
+        const southEast = this._map.latLngToLayerPoint([lat - latHalf, lon + lonHalf]).subtract(topLeft);
+        const width = Math.max(1, southEast.x - northWest.x);
+        const height = Math.max(1, southEast.y - northWest.y);
+        context.fillStyle = fill;
+        context.fillRect(northWest.x, northWest.y, width, height);
+      }
+    }
+  },
+});
 
 const LOCAL_DATA_SERVER = "http://127.0.0.1:8789";
 
