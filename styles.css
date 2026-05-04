@@ -940,7 +940,21 @@ body.panel-collapsed .control-panel {
 }
 
 .map-panel-mode-toggle {
-  width: 126px;
+  width: var(--panel-mode-total-width, 160px);
+}
+
+.map-panel-mode-toggle .panel-mode-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0 12px;
+}
+
+.map-panel-mode-toggle .panel-mode-thumb {
+  width: var(--panel-mode-left-width, calc(50% - 2px));
+}
+
+.map-panel-mode-toggle[aria-checked="true"] .panel-mode-thumb {
+  left: var(--panel-mode-right-left, calc(50%));
 }
 
 .map-panel-actions,
