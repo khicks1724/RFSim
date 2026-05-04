@@ -3666,6 +3666,20 @@ button:focus {
   line-height: 1.1;
 }
 
+.overlay-metric-value-transition {
+  animation: overlayMetricValueFade 160ms ease-out;
+}
+
+@keyframes overlayMetricValueFade {
+  0% {
+    opacity: 0.35;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
 .legend-card {
   min-width: 252px;
   gap: 5px;

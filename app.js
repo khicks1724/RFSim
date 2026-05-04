@@ -7560,6 +7560,23 @@ function updateCoordinateDisplays() {
   if (dom.gpsStatusValue) dom.gpsStatusValue.parentElement?.classList.add("hidden");
 }
 
+function setCenterElevationValue(value) {
+  if (!dom.centerElevationValue) {
+    return;
+  }
+
+  const nextValue = value ?? "No terrain";
+  if (dom.centerElevationValue.textContent === nextValue) {
+    return;
+  }
+
+  const transitionClass = "overlay-metric-value-transition";
+  dom.centerElevationValue.classList.remove(transitionClass);
+  void dom.centerElevationValue.offsetWidth;
+  dom.centerElevationValue.textContent = nextValue;
+  dom.centerElevationValue.classList.add(transitionClass);
+}
+
 function updateMapOverlayMetrics() {
   if (!state.map) {
     return;
@@ -7572,32 +7589,31 @@ function updateMapOverlayMetrics() {
 
   const centerElevationM = sampleTerrainElevation(center.lat, center.lng);
   if (centerElevationM !== null) {
-    dom.centerElevationValue.textContent = formatElevation(centerElevationM);
+    setCenterElevationValue(formatElevation(centerElevationM));
     return;
   }
 
   if (!usesConfiguredCesiumTerrain()) {
-    dom.centerElevationValue.textContent = "No terrain";
+    setCenterElevationValue("No terrain");
     return;
   }
 
   const requestId = generateId();
   state.centerElevationRequestId = requestId;
-  dom.centerElevationValue.textContent = "Loading terrain...";
   sampleTerrainElevationAsync(center.lat, center.lng)
     .then((elevationM) => {
       if (state.centerElevationRequestId !== requestId) {
         return;
       }
-      dom.centerElevationValue.textContent = elevationM === null
+      setCenterElevationValue(elevationM === null
         ? "No terrain"
-        : formatElevation(elevationM);
+        : formatElevation(elevationM));
     })
     .catch(() => {
       if (state.centerElevationRequestId !== requestId) {
         return;
       }
-      dom.centerElevationValue.textContent = "No terrain";
+      setCenterElevationValue("No terrain");
     });
 }
 
@@ -11851,7 +11867,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "For map-item location questions ('where is X', 'what grid is X', 'find X'), always answer in a complete sentence: '<name> is located at <coordinate>.' — never return just a raw coordinate with no context.",
     "Keep responses terse by default. Do not preface answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
     "For a single location answer, one sentence is enough. For ambiguous lookups, list at most 3 short candidates each on its own line with name and coordinate.",
-    "When returning coordinates in your response, write them as plain decimal lat/lon (e.g. 34.3670, -116.0830) or plain MGRS (e.g. 11SNV5417642270) — do NOT write both forms side by side or repeat the same location twice. The app will automatically format them into the user's chosen coordinate system.",
+    `The user's active coordinate system is: ${state.settings.coordinateSystem.toUpperCase()}. When returning coordinates in your response, use ONLY that format — write plain MGRS (e.g. 11SNV5417642270) when the system is MGRS, or plain decimal lat/lon (e.g. 34.3670, -116.0830) when it is LATLON. Do NOT write both forms side by side or repeat the same location twice. Do NOT label coordinates with "Lat:" or "Lon:" prefixes. The app will render them as interactive pills in the correct display format.`,
     "",
     "You are given the full current scenario state. You can answer questions AND execute actions that manipulate the live map and simulation.",
     "Return ONLY valid JSON with this schema:",
