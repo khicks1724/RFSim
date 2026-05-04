@@ -9095,9 +9095,11 @@ function renderMarkdown(text) {
     });
     // Render coord tokens as clickable coordinate pills in the user's chosen format
     result = result.replace(/\x00COORD\x00(\d+)\x00/g, (_, idx) => {
-      const { lat, lon, mgrsHint } = coordTokens[Number(idx)];
+      const { lat, lon } = coordTokens[Number(idx)];
       const sys = state.settings.coordinateSystem;
-      const raw = mgrsHint && sys === "mgrs" ? mgrsHint : formatCoordinate(lat, lon, sys);
+      const raw = sys === "mgrs"
+        ? toMgrs(lat, lon)
+        : formatCoordinate(lat, lon, sys);
       const display = sys === "mgrs" ? formatMgrsDisplay(raw) : raw;
       const safeDisplay = escapeHtml(display);
       return `<button class="ai-coord-link" data-lat="${lat}" data-lon="${lon}" title="Pan map to ${safeDisplay}">${safeDisplay}</button>`;
@@ -10584,35 +10586,59 @@ function tokenizeLookupPrompt(prompt) {
 
   return subject
     .split(/\s*(?:,|\band\b|&)\s*/i)
-    .map((part) => part.trim())
+    .map((part) => {
+      const cleaned = part
+        .replace(/^(?:the|a|an)\s+/i, "")
+        .replace(/\b(?:item|point|marker|asset|shape|overlay)\b/gi, " ")
+        .replace(/\b(?:at|for|of|is|are)\b\s*$/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return cleaned || part.trim();
+    })
     .filter((part) => part.length >= 2);
 }
 
+function buildLookupSearchVariants(term) {
+  const primary = normalizeMapContentsSearchText(term);
+  const stripped = primary
+    .replace(/\b(?:the|a|an|item|point|marker|asset|shape|overlay|location|coordinate|coordinates|grid|mgrs|at|for|of|is|are)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return [...new Set([primary, stripped].filter(Boolean))];
+}
+
 function computeMapLookupMatchScore(term, contentId, record) {
-  const normalizedTerm = normalizeMapContentsSearchText(term);
   const aliasText = Array.isArray(record.aliases) ? record.aliases.join(" ") : "";
   const fields = [record.name, record.subtitle, record.path, aliasText];
   const combined = normalizeMapContentsSearchText(fields.join(" "));
   const acronym = buildSearchAcronym(fields.join(" "));
-  if (!normalizedTerm) {
+  const variants = buildLookupSearchVariants(term);
+  if (!variants.length) {
     return -1;
   }
-  if (normalizeMapContentsSearchText(record.name) === normalizedTerm) {
-    return 120;
+  let bestScore = -1;
+  for (const normalizedTerm of variants) {
+    if (normalizeMapContentsSearchText(record.name) === normalizedTerm) {
+      bestScore = Math.max(bestScore, 120);
+      continue;
+    }
+    if (combined.startsWith(normalizedTerm)) {
+      bestScore = Math.max(bestScore, 100);
+      continue;
+    }
+    if (combined.includes(normalizedTerm)) {
+      bestScore = Math.max(bestScore, 80);
+      continue;
+    }
+    if (acronym.includes(normalizedTerm)) {
+      bestScore = Math.max(bestScore, 65);
+      continue;
+    }
+    if (smartMapContentsMatch(normalizedTerm, fields)) {
+      bestScore = Math.max(bestScore, 50);
+    }
   }
-  if (combined.startsWith(normalizedTerm)) {
-    return 100;
-  }
-  if (combined.includes(normalizedTerm)) {
-    return 80;
-  }
-  if (acronym.includes(normalizedTerm)) {
-    return 65;
-  }
-  if (smartMapContentsMatch(term, fields)) {
-    return 50;
-  }
-  return -1;
+  return bestScore;
 }
 
 function findMapContentLookupMatches(term, limit = 6) {
@@ -10686,6 +10712,12 @@ function formatLookupLocation(record, preferMgrs = false) {
 
 function formatLookupSentence(record, preferMgrs = false) {
   return `${record.name} is located at ${formatLookupCoordinateText(record, { preferMgrs })}.`;
+}
+
+function getLookupRecordsForContentIds(contentIds = []) {
+  return contentIds
+    .map((contentId) => buildCompactMapContentRecord(contentId))
+    .filter(Boolean);
 }
 
 async function fetchRemoteLookupMatches(term, limit = 6) {
@@ -10841,11 +10873,6 @@ async function tryResolveAiMapLookup(prompt) {
     return null;
   }
 
-  // If context items are linked, let the AI handle it — it has full geometry in the scenario summary
-  if (state.ai.contextItemIds.length > 0) {
-    return null;
-  }
-
   const terms = tokenizeLookupPrompt(raw);
   if (!terms.length) {
     return null;
@@ -10856,6 +10883,15 @@ async function tryResolveAiMapLookup(prompt) {
     sections.push({
       term,
       matches: await searchLookupTargets(term, { allowRemote: true, limit: 6 }),
+    });
+  }
+
+  const linkedRecords = getLookupRecordsForContentIds(state.ai.contextItemIds);
+  if (linkedRecords.length) {
+    sections.forEach((section) => {
+      if (!section.matches.length) {
+        section.matches = linkedRecords;
+      }
     });
   }
 
@@ -12125,7 +12161,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "For map-item location questions ('where is X', 'what grid is X', 'find X'), always answer in a complete sentence: '<name> is located at <coordinate>.' — never return just a raw coordinate with no context.",
     "Keep responses terse by default. Do not preface answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
     "For a single location answer, one sentence is enough. For ambiguous lookups, list at most 3 short candidates each on its own line with name and coordinate.",
-    `The user's active coordinate system is: ${state.settings.coordinateSystem.toUpperCase()}. When returning coordinates in your response, use ONLY that format — write plain MGRS (e.g. 11SNV5417642270) when the system is MGRS, or plain decimal lat/lon (e.g. 34.3670, -116.0830) when it is LATLON. Do NOT write both forms side by side or repeat the same location twice. Do NOT label coordinates with "Lat:" or "Lon:" prefixes. The app will render them as interactive pills in the correct display format.`,
+    `The user's active coordinate system is: ${state.settings.coordinateSystem.toUpperCase()}. When returning coordinates in your response, use ONLY that format — write plain MGRS (e.g. 11SNV5417642270) when the system is MGRS, or plain decimal lat/lon (e.g. 34.3670, -116.0830) when it is LATLON. If the system is MGRS, ALWAYS use full 10-digit MGRS precision. Do NOT write both forms side by side or repeat the same location twice. Do NOT label coordinates with "Lat:" or "Lon:" prefixes. The app will render them as interactive pills in the correct display format.`,
     "",
     "You are given the full current scenario state. You can answer questions AND execute actions that manipulate the live map and simulation.",
     "Return ONLY valid JSON with this schema:",
@@ -12767,7 +12803,7 @@ function normalizeAssistantMessageForPrompt(prompt, message) {
   if (wantsMgrsLookup(rawPrompt)) {
     const mgrsTokens = extractMgrsTokens(rawMessage);
     if (mgrsTokens.length) {
-      return mgrsTokens[0];
+      return normalizeMgrsToTenDigit(mgrsTokens[0]);
     }
   }
 
@@ -22169,10 +22205,19 @@ function formatCoordinate(lat, lon, system) {
   return toMgrs(lat, lon);
 }
 
+function normalizeMgrsToTenDigit(mgrsRaw) {
+  const parsed = tryParseCoordinateSearch(String(mgrsRaw ?? ""))?.[0];
+  if (parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lon)) {
+    return toMgrs(parsed.lat, parsed.lon);
+  }
+  return String(mgrsRaw ?? "").trim().toUpperCase();
+}
+
 function formatMgrsDisplay(mgrsRaw) {
   // Format a compact MGRS string (e.g. "11SNU5423") into spaced display form
-  const m = String(mgrsRaw).toUpperCase().match(/^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d+)$/i);
-  if (!m) return mgrsRaw;
+  const normalizedRaw = normalizeMgrsToTenDigit(mgrsRaw);
+  const m = normalizedRaw.match(/^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d+)$/i);
+  if (!m) return normalizedRaw;
   const digits = m[3];
   const half = Math.floor(digits.length / 2);
   return `${m[1]} ${m[2]} ${digits.slice(0, half)} ${digits.slice(half)}`;
