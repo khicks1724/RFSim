@@ -6979,7 +6979,7 @@ function wireEvents() {
       closeTakCertPasswordPrompt({ resolvedPassword: null });
     }
   });
-  dom.collapseAiPanelBtn.addEventListener("click", toggleAiPanelCollapse);
+  dom.collapseAiPanelBtn?.addEventListener("click", toggleAiPanelCollapse);
   dom.aiAgentModeIndicator?.addEventListener("click", () => {
     const profile = getAiAgentProfile();
     setStatus(`${profile.label}: ${state.ai.agentProfileReason || profile.summary}`);

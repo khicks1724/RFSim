@@ -1262,24 +1262,21 @@
             <strong>AI Agent</strong>
             <span class="eyebrow" id="aiPanelStatus">Offline</span>
           </div>
-          <div class="ai-agent-mode-shell" id="aiAgentModeShell" title="Active agent mode">
-            <span class="eyebrow">Mode</span>
-            <button id="aiAgentModeIndicator" class="ai-agent-mode-indicator" type="button" aria-label="Active agent mode">
-              <span class="ai-agent-mode-dot" aria-hidden="true"></span>
-              <span id="aiAgentModeLabel">General</span>
-            </button>
+          <div class="ai-panel-meta-stack">
+            <div class="ai-agent-mode-shell" id="aiAgentModeShell" title="Active agent mode">
+              <span class="eyebrow">Mode</span>
+              <button id="aiAgentModeIndicator" class="ai-agent-mode-indicator" type="button" aria-label="Active agent mode">
+                <span class="ai-agent-mode-dot" aria-hidden="true"></span>
+                <span id="aiAgentModeLabel">General</span>
+              </button>
+            </div>
+            <label class="ai-model-toggle">
+              <span class="eyebrow">Model</span>
+              <select id="aiChatModelSelect" class="ai-chat-model-select" disabled>
+                <option value="">No model available</option>
+              </select>
+            </label>
           </div>
-          <label class="ai-model-toggle">
-            <span class="eyebrow">Model</span>
-            <select id="aiChatModelSelect" class="ai-chat-model-select" disabled>
-              <option value="">No model available</option>
-            </select>
-          </label>
-        </div>
-        <div class="button-row">
-          <button id="collapseAiPanelBtn" class="icon-button" type="button" aria-label="Collapse AI panel">
-            <span id="collapseAiPanelIcon">&#9654;</span>
-          </button>
         </div>
       </div>
       <div id="aiChatMessages" class="ai-chat-messages">

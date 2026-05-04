@@ -1240,24 +1240,25 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-panel-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
 }
 
 .ai-panel-title-group {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
+  gap: 14px;
   min-width: 0;
   flex: 1;
 }
 
 .ai-panel-title-copy {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
+  padding-top: 2px;
 }
 
 .ai-panel-title-copy strong {
@@ -1267,6 +1268,14 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-panel-title-copy .eyebrow {
   white-space: nowrap;
+}
+
+.ai-panel-meta-stack {
+  display: grid;
+  gap: 6px;
+  width: min(170px, 100%);
+  min-width: 0;
+  flex: 0 0 auto;
 }
 
 .ai-agent-purpose {
@@ -1282,45 +1291,43 @@ body:not(.ai-panel-open) .ai-panel {
 
 .ai-model-toggle {
   display: grid;
-  gap: 3px;
-  width: min(176px, 100%);
-  max-width: 176px;
+  gap: 2px;
+  width: 100%;
+  max-width: none;
   align-self: start;
-  margin-top: 1px;
+  margin-top: 0;
   flex: 0 0 auto;
 }
 
-.ai-model-toggle > .eyebrow {
-  padding-left: 10px;
+.ai-model-toggle > .eyebrow,
+.ai-agent-mode-shell > .eyebrow {
+  padding-left: 8px;
 }
 
 .ai-agent-mode-shell {
   display: grid;
-  gap: 3px;
-  width: min(132px, 100%);
-  max-width: 132px;
+  gap: 2px;
+  width: 100%;
+  max-width: none;
   align-self: start;
-  margin-top: 1px;
+  margin-top: 0;
   flex: 0 0 auto;
-}
-
-.ai-agent-mode-shell > .eyebrow {
-  padding-left: 10px;
 }
 
 .ai-agent-mode-indicator {
   width: 100%;
-  min-height: 36px;
-  border-radius: 12px;
+  min-height: 30px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text);
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 7px;
+  padding: 0 10px;
   cursor: default;
+  font-size: 0.86rem;
 }
 
 .ai-agent-mode-indicator[data-mode="general"] .ai-agent-mode-dot { background: #94a3b8; }
@@ -1347,16 +1354,12 @@ body:not(.ai-panel-open) .ai-panel {
 .ai-chat-model-select {
   width: 100%;
   min-width: 0;
-  max-width: 176px;
-  font-size: 0.9rem;
-  padding-right: 28px;
-}
-
-.ai-panel-header .button-row {
-  align-self: flex-start;
-  justify-content: flex-end;
-  margin-top: -2px;
-  margin-right: -2px;
+  max-width: none;
+  min-height: 30px;
+  font-size: 0.86rem;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-right: 24px;
 }
 
 .ai-chat-messages {
