@@ -1763,6 +1763,8 @@ const dom = {
   terrainHeatmapDropdown: document.querySelector("#terrainHeatmapDropdown"),
   terrainHeatmapOpacity: document.querySelector("#terrainHeatmapOpacity"),
   terrainHeatmapOpacityValue: document.querySelector("#terrainHeatmapOpacityValue"),
+  terrainHeatmapSampleSize: document.querySelector("#terrainHeatmapSampleSize"),
+  terrainHeatmapSampleSizeValue: document.querySelector("#terrainHeatmapSampleSizeValue"),
   mapContentsSearchInput: document.querySelector("#mapContentsSearchInput"),
   mapContentsSearchClearBtn: document.querySelector("#mapContentsSearchClearBtn"),
   mapGeoSearchInput: document.querySelector("#mapGeoSearchInput"),
@@ -2045,6 +2047,7 @@ const state = {
   terrainHeatmap: {
     enabled: false,
     opacity: 0.58,
+    sampleBudget: 576,
     layer2d: null,
     sample: null,
     refreshTimer: null,
@@ -6718,7 +6721,9 @@ function wireEvents() {
   dom.terrainHeatmapDropdown?.addEventListener("click", (event) => event.stopPropagation());
   dom.terrainHeatmapDropdown?.addEventListener("contextmenu", (event) => event.stopPropagation());
   dom.terrainHeatmapOpacity?.addEventListener("input", onTerrainHeatmapOpacityInput);
+  dom.terrainHeatmapSampleSize?.addEventListener("input", onTerrainHeatmapSampleSizeInput);
   updateTerrainHeatmapOpacityUi();
+  updateTerrainHeatmapSampleSizeUi();
   updateTerrainHeatmapButtonUi();
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
   dom.addTacticalItemBtn?.addEventListener("click", openTacticalPaletteModal);
@@ -10602,6 +10607,24 @@ function updateRssiLegendVisibility() {
   legend.classList.toggle("hidden", !hasVisibleCoverage);
 }
 
+const TERRAIN_HEATMAP_SAMPLE_BUDGET_MIN = 256;
+const TERRAIN_HEATMAP_SAMPLE_BUDGET_MAX = 1024;
+const TERRAIN_HEATMAP_SAMPLE_BUDGET_STEP = 64;
+const TERRAIN_HEATMAP_SAMPLE_BUDGET_DEFAULT = 576;
+
+function normalizeTerrainHeatmapSampleBudget(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return TERRAIN_HEATMAP_SAMPLE_BUDGET_DEFAULT;
+  }
+  const clamped = clamp(
+    numeric,
+    TERRAIN_HEATMAP_SAMPLE_BUDGET_MIN,
+    TERRAIN_HEATMAP_SAMPLE_BUDGET_MAX,
+  );
+  return Math.round(clamped / TERRAIN_HEATMAP_SAMPLE_BUDGET_STEP) * TERRAIN_HEATMAP_SAMPLE_BUDGET_STEP;
+}
+
 function closeTerrainHeatmapDropdown() {
   dom.terrainHeatmapDropdown?.classList.add("hidden");
 }
@@ -10623,6 +10646,25 @@ function updateTerrainHeatmapOpacityUi() {
   }
   if (dom.terrainHeatmapOpacityValue) {
     dom.terrainHeatmapOpacityValue.textContent = `${Math.round(value * 100)}%`;
+  }
+}
+
+function updateTerrainHeatmapSampleSizeUi() {
+  const input = dom.terrainHeatmapSampleSize;
+  const value = normalizeTerrainHeatmapSampleBudget(state.terrainHeatmap.sampleBudget);
+  state.terrainHeatmap.sampleBudget = value;
+  if (input) {
+    input.value = String(value);
+    updateRangeTrack(input);
+  }
+  if (dom.terrainHeatmapSampleSizeValue) {
+    dom.terrainHeatmapSampleSizeValue.textContent = `${value} cells`;
+  }
+}
+
+function syncTerrainHeatmap3dIfVisible() {
+  if (state.view3dEnabled && state.cesiumViewer) {
+    syncCesiumEntities();
   }
 }
 
@@ -10744,9 +10786,11 @@ function getTerrainHeatmapViewportSize() {
 function getTerrainHeatmapGridProfile(bounds) {
   const size = getTerrainHeatmapViewportSize();
   const aspect = clamp((size.x || 1280) / Math.max(size.y || 720, 1), 0.7, 2.4);
-  const totalCells = 300;
-  const cols = clamp(Math.round(Math.sqrt(totalCells * aspect)), 18, 28);
-  const rows = clamp(Math.round(totalCells / cols), 10, 18);
+  const totalCells = normalizeTerrainHeatmapSampleBudget(state.terrainHeatmap.sampleBudget);
+  const maxCols = Math.round(Math.sqrt(TERRAIN_HEATMAP_SAMPLE_BUDGET_MAX * 2.4));
+  const maxRows = Math.round(Math.sqrt(TERRAIN_HEATMAP_SAMPLE_BUDGET_MAX / 0.7));
+  const cols = clamp(Math.round(Math.sqrt(totalCells * aspect)), 16, maxCols);
+  const rows = clamp(Math.round(totalCells / cols), 12, maxRows);
   const latSpan = Math.max(0.0001, bounds.ne.lat - bounds.sw.lat);
   const lonSpan = Math.max(0.0001, bounds.ne.lon - bounds.sw.lon);
   const latStepDeg = latSpan / rows;
@@ -10757,8 +10801,22 @@ function getTerrainHeatmapGridProfile(bounds) {
     ((latStepDeg * 111320) + (lonStepDeg * 111320 * Math.cos(centerLat * Math.PI / 180))) / 2
   );
   const zoomEstimate = getCurrentTerrainHeatmapZoomEstimate();
-  const terrainLevel = clamp(Math.round(zoomEstimate) + 1, 6, 12);
-  return { rows, cols, latStepDeg, lonStepDeg, sampleDistanceMeters, terrainLevel, zoomEstimate };
+  const sampleFactor = totalCells / TERRAIN_HEATMAP_SAMPLE_BUDGET_DEFAULT;
+  const terrainLevel = clamp(
+    Math.round(zoomEstimate) + (sampleFactor >= 1.5 ? 0 : 1),
+    5,
+    12,
+  );
+  return {
+    rows,
+    cols,
+    totalCells: rows * cols,
+    latStepDeg,
+    lonStepDeg,
+    sampleDistanceMeters,
+    terrainLevel,
+    zoomEstimate,
+  };
 }
 
 async function sampleCesiumTerrainGridForHeatmap(bounds, profile) {
@@ -10795,7 +10853,7 @@ async function sampleCesiumTerrainGridForHeatmap(bounds, profile) {
   nodataMask.fill(1);
   let minElevationM = Number.POSITIVE_INFINITY;
   let maxElevationM = Number.NEGATIVE_INFINITY;
-  const batchSize = Math.max(72, Math.min(192, cols * 4));
+  const batchSize = Math.max(96, Math.min(256, cols * 6));
 
   for (let start = 0; start < positions.length; start += batchSize) {
     const batch = positions.slice(start, start + batchSize);
@@ -10877,7 +10935,7 @@ async function refreshTerrainHeatmap(options = {}) {
     state.terrainHeatmap.enabled = false;
     state.terrainHeatmap.sample = null;
     syncTerrainHeatmap2dLayer();
-    syncCesiumEntities();
+    syncTerrainHeatmap3dIfVisible();
     updateTerrainHeatmapButtonUi();
     updateTerrainHeatmapLegendVisibility();
     throw new Error("Enable Cesium terrain first to use the terrain heatmap.");
@@ -10888,12 +10946,12 @@ async function refreshTerrainHeatmap(options = {}) {
     return;
   }
   const profile = getTerrainHeatmapGridProfile(bounds);
-  const boundsKey = `${buildTerrainHeatmapBoundsKey(bounds)}:${profile.rows}x${profile.cols}:L${profile.terrainLevel}`;
+  const boundsKey = `${buildTerrainHeatmapBoundsKey(bounds)}:${profile.rows}x${profile.cols}:${profile.totalCells}:L${profile.terrainLevel}`;
   if (!options.force && boundsKey === state.terrainHeatmap.lastBoundsKey && state.terrainHeatmap.sample) {
     syncTerrainHeatmap2dLayer();
     updateTerrainHeatmapLegend();
     updateTerrainHeatmapLegendVisibility();
-    syncCesiumEntities();
+    syncTerrainHeatmap3dIfVisible();
     return;
   }
 
@@ -10910,7 +10968,7 @@ async function refreshTerrainHeatmap(options = {}) {
     updateTerrainHeatmapButtonUi();
     updateTerrainHeatmapLegend();
     updateTerrainHeatmapLegendVisibility();
-    syncCesiumEntities();
+    syncTerrainHeatmap3dIfVisible();
   } finally {
     state.terrainHeatmap.inFlight = false;
     const pending = state.terrainHeatmap.pendingRefresh;
@@ -10949,9 +11007,13 @@ async function setTerrainHeatmapEnabled(enabled) {
     state.terrainHeatmap.sample = null;
     state.terrainHeatmap.lastBoundsKey = "";
     state.terrainHeatmap.pendingRefresh = null;
+    if (state.terrainHeatmap.refreshTimer) {
+      clearTimeout(state.terrainHeatmap.refreshTimer);
+      state.terrainHeatmap.refreshTimer = null;
+    }
     closeTerrainHeatmapDropdown();
     syncTerrainHeatmap2dLayer();
-    syncCesiumEntities();
+    syncTerrainHeatmap3dIfVisible();
     updateTerrainHeatmapButtonUi();
     updateTerrainHeatmapLegendVisibility();
     return;
@@ -10965,6 +11027,7 @@ async function setTerrainHeatmapEnabled(enabled) {
   state.terrainHeatmap.enabled = true;
   updateTerrainHeatmapButtonUi();
   updateTerrainHeatmapOpacityUi();
+  updateTerrainHeatmapSampleSizeUi();
   try {
     await refreshTerrainHeatmap({ force: true });
   } catch (error) {
@@ -10974,7 +11037,7 @@ async function setTerrainHeatmapEnabled(enabled) {
     updateTerrainHeatmapButtonUi();
     updateTerrainHeatmapLegendVisibility();
     syncTerrainHeatmap2dLayer();
-    syncCesiumEntities();
+    syncTerrainHeatmap3dIfVisible();
     throw error;
   }
 }
@@ -10991,6 +11054,7 @@ function onTerrainHeatmapButtonContextMenu(event) {
   event.preventDefault();
   event.stopPropagation();
   updateTerrainHeatmapOpacityUi();
+  updateTerrainHeatmapSampleSizeUi();
   dom.terrainHeatmapDropdown?.classList.toggle("hidden");
 }
 
@@ -10998,7 +11062,21 @@ function onTerrainHeatmapOpacityInput(event) {
   state.terrainHeatmap.opacity = clamp(Number(event.currentTarget.value) || 0.58, 0.15, 1);
   updateTerrainHeatmapOpacityUi();
   state.terrainHeatmap.layer2d?.setOpacity(state.terrainHeatmap.opacity);
-  syncCesiumEntities();
+  syncTerrainHeatmap3dIfVisible();
+}
+
+function onTerrainHeatmapSampleSizeInput(event) {
+  const nextValue = normalizeTerrainHeatmapSampleBudget(event.currentTarget.value);
+  if (nextValue === state.terrainHeatmap.sampleBudget) {
+    updateTerrainHeatmapSampleSizeUi();
+    return;
+  }
+  state.terrainHeatmap.sampleBudget = nextValue;
+  state.terrainHeatmap.lastBoundsKey = "";
+  updateTerrainHeatmapSampleSizeUi();
+  if (state.terrainHeatmap.enabled) {
+    scheduleTerrainHeatmapRefresh({ force: true, delay: 60 });
+  }
 }
 
 function syncContentVisibility(contentId) {
@@ -23744,7 +23822,8 @@ function _syncCesiumEntitiesImmediate() {
           translucent: true,
         }),
         classificationType: overlayClassificationType,
-        asynchronous: false,
+        asynchronous: true,
+        releaseGeometryInstances: true,
       });
       viewer.scene.primitives.add(primitive);
       viewer._managedPrimitives.push(primitive);

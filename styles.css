@@ -1191,7 +1191,7 @@ body.panel-collapsed .control-panel {
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
-  width: 196px;
+  width: 208px;
   padding: 10px 11px 11px;
   display: grid;
   gap: 8px;
@@ -1220,6 +1220,7 @@ body.panel-collapsed .control-panel {
 .terrain-heatmap-dropdown-header strong {
   color: var(--text);
   font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 .terrain-heatmap-opacity-slider {
