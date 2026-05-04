@@ -8534,7 +8534,7 @@ function setMapPanelMode(mode) {
   dom.mapContentsActions?.classList.toggle("hidden", isFeatures);
   dom.siteStudyActions?.classList.toggle("hidden", !isFeatures);
   dom.mapPanelModeToggle?.setAttribute("aria-checked", String(isFeatures));
-  dom.mapPanelModeToggle?.setAttribute("aria-label", isFeatures ? "Show contents" : "Show features");
+  dom.mapPanelModeToggle?.setAttribute("aria-label", isFeatures ? "Show contents" : "Show scenario");
 }
 
 function applyPanelMode() {
