@@ -602,6 +602,21 @@ function formatTacticalGeometrySummary(object) {
   return `${Array.isArray(coords) ? coords.length : 0} vertex/vertices`;
 }
 
+// Wire a modal backdrop element to close only when the click both starts and
+// ends on the backdrop — prevents text-selection drags inside the modal from
+// accidentally dismissing it.
+function addModalBackdropClose(el, closeFn) {
+  if (!el || !closeFn) return;
+  let mousedownOnBackdrop = false;
+  el.addEventListener("mousedown", (e) => {
+    mousedownOnBackdrop = e.target === el;
+  });
+  el.addEventListener("click", (e) => {
+    if (mousedownOnBackdrop && e.target === el) closeFn();
+    mousedownOnBackdrop = false;
+  });
+}
+
 function generateId() {
   if (typeof crypto !== "undefined") {
     if (typeof crypto.randomUUID === "function") {
@@ -2121,6 +2136,7 @@ const state = {
     panelOpen: false,
     messages: [],
     requestInFlight: false,
+    recentPlaceLookups: [],
   },
   takSettings: {
     profiles: [],
@@ -6419,18 +6435,12 @@ function wireEvents() {
   document.addEventListener("click", closeTopBarMenus);
   document.addEventListener("click", closeMapContentsMenu);
   document.addEventListener("click", closeRenamePopover);
-  dom.shapeStyleModal?.addEventListener("click", (event) => {
-    if (event.target === dom.shapeStyleModal) {
-      closeShapeStylePanel({ stopEditing: false });
-    }
-  });
+  addModalBackdropClose(dom.shapeStyleModal, () => closeShapeStylePanel({ stopEditing: false }));
   dom.addMapFolderBtn.addEventListener("click", addMapContentFolder);
   dom.addTacticalItemBtn?.addEventListener("click", openTacticalPaletteModal);
   dom.tacticalPaletteCloseBtn?.addEventListener("click", closeTacticalPaletteModal);
   dom.tacticalPaletteCancelBtn?.addEventListener("click", closeTacticalPaletteModal);
-  dom.tacticalPaletteModal?.addEventListener("click", (event) => {
-    if (event.target === dom.tacticalPaletteModal) closeTacticalPaletteModal();
-  });
+  addModalBackdropClose(dom.tacticalPaletteModal, closeTacticalPaletteModal);
 
   // Back button
   dom.tpalBackBtn?.addEventListener("click", () => {
@@ -6536,11 +6546,7 @@ function wireEvents() {
   dom.tacticalEditorCloseBtn?.addEventListener("click", closeTacticalEditorModal);
   dom.tacticalEditorCancelBtn?.addEventListener("click", closeTacticalEditorModal);
   dom.tacticalEditorSaveBtn?.addEventListener("click", saveTacticalEditor);
-  dom.tacticalEditorModal?.addEventListener("click", (event) => {
-    if (event.target === dom.tacticalEditorModal) {
-      closeTacticalEditorModal();
-    }
-  });
+  addModalBackdropClose(dom.tacticalEditorModal, closeTacticalEditorModal);
 
   const importFileInput = document.querySelector("#importFileInput");
   if (importFileInput) {
@@ -6571,11 +6577,7 @@ function wireEvents() {
   dom.takIdentityCloseBtn?.addEventListener("click", closeTakIdentityModal);
   dom.takIdentityCancelBtn?.addEventListener("click", closeTakIdentityModal);
   dom.takIdentitySaveBtn?.addEventListener("click", saveTakIdentityModal);
-  dom.takIdentityModal?.addEventListener("click", (event) => {
-    if (event.target === dom.takIdentityModal) {
-      closeTakIdentityModal();
-    }
-  });
+  addModalBackdropClose(dom.takIdentityModal, closeTakIdentityModal);
 
   dom.drawShapeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDrawDropdown(); });
   document.querySelector("#drawPointBtn")?.addEventListener("click", (e) => { e.stopPropagation(); startDrawing("point"); });
@@ -6616,9 +6618,7 @@ function wireEvents() {
     }
   });
   dom.shapeStyleCloseBtn?.addEventListener("click", () => closeShapeStylePanel());
-  dom.shapeStyleModal?.querySelector(".shape-style-modal-backdrop")?.addEventListener("click", (e) => {
-    if (e.target === e.currentTarget) closeShapeStylePanel();
-  });
+  addModalBackdropClose(dom.shapeStyleModal?.querySelector(".shape-style-modal-backdrop"), closeShapeStylePanel);
   dom.pointSizeInput?.addEventListener("input", onPointStyleChanged);
   dom.circleCenterInput?.addEventListener("change", onCircleGeometryChanged);
   dom.circleRadiusInput?.addEventListener("input", onCircleGeometryChanged);
@@ -6736,11 +6736,7 @@ function wireEvents() {
   }));
   dom.takCertPasswordCancelBtn?.addEventListener("click", () => closeTakCertPasswordPrompt({ resolvedPassword: null }));
   dom.takCertPasswordCloseBtn?.addEventListener("click", () => closeTakCertPasswordPrompt({ resolvedPassword: null }));
-  dom.takCertPasswordModal?.addEventListener("click", (event) => {
-    if (event.target === dom.takCertPasswordModal) {
-      closeTakCertPasswordPrompt({ resolvedPassword: null });
-    }
-  });
+  addModalBackdropClose(dom.takCertPasswordModal, () => closeTakCertPasswordPrompt({ resolvedPassword: null }));
   dom.takCertPasswordInputModal?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -6839,11 +6835,7 @@ function wireEvents() {
   dom.simBelowThresholdMode?.addEventListener("change", invalidateAllViewshedColorCaches);
   dom.simulationModalCloseBtn?.addEventListener("click", closeSimulationModal);
   dom.simulationProgressCancelBtn?.addEventListener("click", cancelSimulationProgress);
-  dom.simulationModal?.addEventListener("click", (event) => {
-    if (event.target === dom.simulationModal) {
-      closeSimulationModal();
-    }
-  });
+  addModalBackdropClose(dom.simulationModal, closeSimulationModal);
   dom.radiusUnit?.addEventListener("change", () => {
     const previousUnit = dom.radiusUnit.dataset.previousUnit || getDefaultCoverageRadiusUnit();
     const previousMeters = convertRadiusUnitToMeters(Number(dom.radiusValue?.value || 0), previousUnit);
@@ -8951,10 +8943,6 @@ async function onAiChatSubmit(event) {
   const prompt = dom.aiChatInput.value.trim();
   if (!prompt && state.ai.pendingImages.length === 0 && state.ai.pendingFiles.length === 0) return;
   if (state.ai.requestInFlight) return;
-  if (!state.ai.provider || !state.ai.apiKey) {
-    return;
-  }
-
   // A stale UI error state should not block chat if the provider/key are configured.
   // Let the actual request path surface the real provider error.
 
@@ -8962,6 +8950,14 @@ async function onAiChatSubmit(event) {
   const files = [...state.ai.pendingFiles];
   const contextIds = getAiContextIds(state.ai.contextItemIds);
   const contextItems = state.ai.contextItemIds.map((id) => ({ id, name: getMapContentName(id) })).filter((c) => c.name);
+  const canUseLocalLookupOnly = images.length === 0 && files.length === 0;
+  let preResolvedLookup = null;
+  if (!state.ai.provider || !state.ai.apiKey) {
+    preResolvedLookup = canUseLocalLookupOnly ? await tryResolveAiMapLookup(prompt) : null;
+    if (!preResolvedLookup) {
+      return;
+    }
+  }
 
   // Render user message in chat
   appendAiMessage("user", prompt, images, contextItems);
@@ -8982,7 +8978,7 @@ async function onAiChatSubmit(event) {
   const safeStopThinking = () => { if (!thinkingStopped) { thinkingStopped = true; stopThinkingIndicator(); } };
 
   try {
-    const response = await callAiPlanningAssistant(prompt, images, files, contextIds, {
+    const response = preResolvedLookup ?? await callAiPlanningAssistant(prompt, images, files, contextIds, {
       onStatus: (statusText) => assistantMessageController.setStatus(statusText),
       onToken: (accumulatedText) => {
         streamedTokenCount++;
@@ -10295,18 +10291,168 @@ function buildCompactMapContentRecord(contentId) {
     return null;
   }
   const aliases = collectMapLookupAliases(entry, detail);
+  const anchor = extractLookupAnchor(detail);
   return {
     id: contentId,
+    contentId,
     name: getPreferredMapLookupName(entry, detail),
     subtitle: entry.subtitle,
     kind: entry.kind,
     path: getMapContentPathLabel(contentId),
     aliases,
     hidden: state.hiddenContentIds.has(contentId),
-    lat: detail.lat ?? detail.geometry?.coordinates?.lat ?? detail.bounds?.southWest?.lat ?? null,
-    lon: detail.lon ?? detail.geometry?.coordinates?.lon ?? detail.bounds?.southWest?.lon ?? null,
-    bounds: detail.bounds ?? null,
+    lat: anchor.lat,
+    lon: anchor.lon,
+    bounds: anchor.bounds,
+    source: "map-content",
   };
+}
+
+function extractLookupPoints(value, points = []) {
+  if (!value) {
+    return points;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => extractLookupPoints(entry, points));
+    return points;
+  }
+  if (typeof value === "object") {
+    const lat = Number(value.lat);
+    const lon = Number(value.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      points.push({ lat, lon });
+      return points;
+    }
+    Object.values(value).forEach((entry) => extractLookupPoints(entry, points));
+  }
+  return points;
+}
+
+function extractLookupAnchor(detail) {
+  if (!detail || typeof detail !== "object") {
+    return { lat: null, lon: null, bounds: null };
+  }
+  const directLat = Number(detail.lat);
+  const directLon = Number(detail.lon);
+  if (Number.isFinite(directLat) && Number.isFinite(directLon)) {
+    return { lat: directLat, lon: directLon, bounds: detail.bounds ?? null };
+  }
+
+  const geoLat = Number(detail.geometry?.coordinates?.lat);
+  const geoLon = Number(detail.geometry?.coordinates?.lon);
+  if (Number.isFinite(geoLat) && Number.isFinite(geoLon)) {
+    return { lat: geoLat, lon: geoLon, bounds: detail.bounds ?? null };
+  }
+
+  const bounds = detail.bounds;
+  if (bounds?.southWest && bounds?.northEast) {
+    const lat = (Number(bounds.southWest.lat) + Number(bounds.northEast.lat)) / 2;
+    const lon = (Number(bounds.southWest.lon) + Number(bounds.northEast.lon)) / 2;
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return { lat, lon, bounds };
+    }
+  }
+
+  const points = extractLookupPoints(detail.geometry?.coordinates);
+  if (points.length) {
+    const lats = points.map((point) => point.lat);
+    const lons = points.map((point) => point.lon);
+    const south = Math.min(...lats);
+    const north = Math.max(...lats);
+    const west = Math.min(...lons);
+    const east = Math.max(...lons);
+    const computedBounds = {
+      southWest: { lat: south, lon: west },
+      northEast: { lat: north, lon: east },
+    };
+    return {
+      lat: (south + north) / 2,
+      lon: (west + east) / 2,
+      bounds: computedBounds,
+    };
+  }
+
+  return { lat: null, lon: null, bounds: bounds ?? null };
+}
+
+function normalizeLookupText(value) {
+  return normalizeMapContentsSearchText(value).replace(/[^a-z0-9\s-]+/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildLookupPlaceId(result) {
+  const lat = Number(result?.lat);
+  const lon = Number(result?.lon);
+  const name = normalizeLookupText(result?.name || result?.query || "place");
+  const latKey = Number.isFinite(lat) ? lat.toFixed(5) : "na";
+  const lonKey = Number.isFinite(lon) ? lon.toFixed(5) : "na";
+  return `lookup:${name}:${latKey}:${lonKey}`;
+}
+
+function cacheRecentPlaceLookup(query, result) {
+  if (!result) {
+    return;
+  }
+  const lat = Number(result.lat);
+  const lon = Number(result.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return;
+  }
+  const id = buildLookupPlaceId(result);
+  const existing = state.ai.recentPlaceLookups.find((entry) => entry.id === id);
+  const aliases = new Set([
+    ...(existing?.aliases ?? []),
+    result.name,
+    result.displayName,
+    result.query,
+    query,
+  ].map((value) => String(value ?? "").trim()).filter(Boolean));
+  const next = {
+    id,
+    contentId: id,
+    name: String(result.name || query || "Location").trim(),
+    subtitle: String(result.sub || result.displayName || "").trim(),
+    kind: "place",
+    path: "Recent Place Search",
+    aliases: [...aliases].slice(0, 12),
+    lat,
+    lon,
+    bounds: result.bounds ?? null,
+    source: result.source ?? "geocoder",
+    hidden: false,
+  };
+  if (existing) {
+    Object.assign(existing, next);
+  } else {
+    state.ai.recentPlaceLookups.unshift(next);
+    state.ai.recentPlaceLookups = state.ai.recentPlaceLookups.slice(0, 40);
+  }
+}
+
+function getRecentPlaceLookupRecords() {
+  return (state.ai.recentPlaceLookups ?? [])
+    .filter((entry) => Number.isFinite(Number(entry.lat)) && Number.isFinite(Number(entry.lon)))
+    .map((entry) => ({
+      ...entry,
+      lat: Number(entry.lat),
+      lon: Number(entry.lon),
+    }));
+}
+
+function buildUnifiedLookupRecords() {
+  const mapRecords = getMapContentEntries()
+    .filter((entry) => entry.id && !entry.id.startsWith("folder:"))
+    .map((entry) => buildCompactMapContentRecord(entry.id))
+    .filter(Boolean);
+  const seen = new Set(mapRecords.map((record) => record.id));
+  const merged = [...mapRecords];
+  getRecentPlaceLookupRecords().forEach((record) => {
+    if (seen.has(record.id)) {
+      return;
+    }
+    seen.add(record.id);
+    merged.push(record);
+  });
+  return merged;
 }
 
 function buildCompactAiScenarioSummary(contextIds = []) {
@@ -10381,6 +10527,19 @@ function buildCompactAiScenarioSummary(contextIds = []) {
       }
       return [...full, ...index];
     })(),
+    mapLookupIndex: buildUnifiedLookupRecords()
+      .slice(0, 300)
+      .map((record) => ({
+        contentId: record.contentId ?? record.id ?? null,
+        name: record.name,
+        kind: record.kind,
+        path: record.path ?? "",
+        aliases: Array.isArray(record.aliases) ? record.aliases.slice(0, 8) : [],
+        lat: roundAiNumber(record.lat),
+        lon: roundAiNumber(record.lon),
+        bounds: record.bounds ?? null,
+        source: record.source ?? "map-content",
+      })),
     viewsheds: state.viewsheds.slice(0, 20).map((viewshed) => ({
       id: viewshed.id,
       name: viewshed.name ?? `${viewshed.asset.name} Coverage`,
@@ -10417,7 +10576,7 @@ function tokenizeLookupPrompt(prompt) {
     return quoted;
   }
 
-  const leadMatch = raw.match(/(?:where\s+(?:is|are)|what(?:'s| is| are)?\s+(?:the\s+)?(?:grid\s+location|mgrs|coords?|coordinates|location|locations)\s+(?:is|are|of|for)?|locations?\s+of|locate|find)\s+(.+)/i);
+  const leadMatch = raw.match(/(?:where\s+(?:is|are)|what(?:'s| is| are)?\s+(?:the\s+)?(?:grid\s+location|mgrs|coords?|coordinates|location|locations)\s+(?:is|are|of|for)?|(?:give|show|tell|return|provide)(?:\s+me)?\s+(?:the\s+)?(?:grid\s+location|mgrs|coords?|coordinates|location|locations)\s+(?:is|are|of|for)?|locations?\s+of|locate|find)\s+(.+)/i);
   const subject = (leadMatch?.[1] ?? raw)
     .replace(/[?]+$/g, "")
     .replace(/\bplease\b/gi, "")
@@ -10457,29 +10616,41 @@ function computeMapLookupMatchScore(term, contentId, record) {
 }
 
 function findMapContentLookupMatches(term, limit = 6) {
-  const candidates = getMapContentEntries()
-    .filter((entry) => entry.id && !entry.id.startsWith("folder:"))
-    .map((entry) => buildCompactMapContentRecord(entry.id))
+  const candidates = buildUnifiedLookupRecords()
     .filter(Boolean)
     .map((record) => ({
       record,
       score: computeMapLookupMatchScore(term, record.id, record),
     }))
     .filter((entry) => entry.score >= 0)
-    .sort((left, right) => right.score - left.score || left.record.name.localeCompare(right.record.name))
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (left.record.hidden !== right.record.hidden) {
+        return left.record.hidden ? 1 : -1;
+      }
+      return left.record.name.localeCompare(right.record.name);
+    })
     .slice(0, limit)
     .map((entry) => entry.record);
   return candidates;
 }
 
-function formatLookupLocation(record) {
+function formatLookupCoordinateText(record, { preferMgrs = false } = {}) {
   if (Number.isFinite(record.lat) && Number.isFinite(record.lon)) {
-    return `${record.lat.toFixed(6)}, ${record.lon.toFixed(6)} | ${toMgrs(record.lat, record.lon)}`;
+    if (preferMgrs || state.settings.coordinateSystem === "mgrs") {
+      return toMgrs(record.lat, record.lon);
+    }
+    return `${record.lat.toFixed(6)}, ${record.lon.toFixed(6)}`;
   }
   if (record.bounds?.southWest && record.bounds?.northEast) {
     const centerLat = (record.bounds.southWest.lat + record.bounds.northEast.lat) / 2;
     const centerLon = (record.bounds.southWest.lon + record.bounds.northEast.lon) / 2;
-    return `center ${centerLat.toFixed(6)}, ${centerLon.toFixed(6)} | ${toMgrs(centerLat, centerLon)}`;
+    if (preferMgrs || state.settings.coordinateSystem === "mgrs") {
+      return toMgrs(centerLat, centerLon);
+    }
+    return `${centerLat.toFixed(6)}, ${centerLon.toFixed(6)}`;
   }
   return "No point location available";
 }
@@ -10495,7 +10666,7 @@ function isLookupPrompt(rawPrompt) {
     return false;
   }
   // Must have explicit simple lookup intent
-  const hasLookupIntent = /\b(where is|where are|what(?:'s| is| are)?\s+the\s+(?:grid\s+location|mgrs|coords?|coordinates|location)|locate|find\s+(?:the\s+)?(?:location|coords?|coordinates|mgrs|grid))\b/i.test(raw)
+  const hasLookupIntent = /\b(where is|where are|what(?:'s| is| are)?\s+the\s+(?:grid\s+location|mgrs|coords?|coordinates|location)|(?:give|show|tell|return|provide)(?:\s+me)?\s+(?:the\s+)?(?:grid\s+location|mgrs|coords?|coordinates|location)|locate|find\s+(?:the\s+)?(?:location|coords?|coordinates|mgrs|grid))\b/i.test(raw)
     || /\bgrid\s+location\s+of\b/i.test(raw);
   if (!hasLookupIntent) {
     return false;
@@ -10506,17 +10677,92 @@ function isLookupPrompt(rawPrompt) {
 }
 
 function formatLookupCoordinateOnly(record, preferMgrs = false) {
-  if (Number.isFinite(record.lat) && Number.isFinite(record.lon)) {
-    const mgrs = toMgrs(record.lat, record.lon);
-    return preferMgrs ? mgrs : `${mgrs} (${record.lat.toFixed(6)}, ${record.lon.toFixed(6)})`;
+  return formatLookupCoordinateText(record, { preferMgrs });
+}
+
+function formatLookupLocation(record, preferMgrs = false) {
+  return formatLookupCoordinateText(record, { preferMgrs });
+}
+
+function formatLookupSentence(record, preferMgrs = false) {
+  return `${record.name} is located at ${formatLookupCoordinateText(record, { preferMgrs })}.`;
+}
+
+async function fetchRemoteLookupMatches(term, limit = 6) {
+  const query = String(term ?? "").trim();
+  if (!query) {
+    return [];
   }
-  if (record.bounds?.southWest && record.bounds?.northEast) {
-    const centerLat = (record.bounds.southWest.lat + record.bounds.northEast.lat) / 2;
-    const centerLon = (record.bounds.southWest.lon + record.bounds.northEast.lon) / 2;
-    const mgrs = toMgrs(centerLat, centerLon);
-    return preferMgrs ? mgrs : `${mgrs} (${centerLat.toFixed(6)}, ${centerLon.toFixed(6)})`;
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=${Math.max(1, Math.min(limit, 6))}&addressdetails=1`;
+  const resp = await fetch(url, {
+    headers: {
+      "Accept-Language": "en",
+      "User-Agent": "RFSim/1.0",
+    },
+  });
+  if (!resp.ok) {
+    throw new Error("Nominatim lookup failed.");
   }
-  return "No point location available";
+  const data = await resp.json();
+  const results = data.map((item) => {
+    const south = Number(item.boundingbox?.[0]);
+    const north = Number(item.boundingbox?.[1]);
+    const west = Number(item.boundingbox?.[2]);
+    const east = Number(item.boundingbox?.[3]);
+    const bounds = [south, north, west, east].every(Number.isFinite)
+      ? { north, south, east, west }
+      : null;
+    const displayName = String(item.display_name || query).trim();
+    const shortName = displayName.split(",")[0]?.trim() || query;
+    return {
+      kind: "place",
+      source: "geocoder",
+      name: shortName,
+      displayName,
+      sub: displayName,
+      query,
+      lat: Number(item.lat),
+      lon: Number(item.lon),
+      bounds,
+      zoom: bounds ? 14 : 14,
+    };
+  }).filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon));
+  results.forEach((result) => cacheRecentPlaceLookup(query, result));
+  return results;
+}
+
+async function searchLookupTargets(term, { allowRemote = false, limit = 6 } = {}) {
+  const parsed = tryParseCoordinateSearch(String(term ?? ""));
+  if (parsed?.length) {
+    return parsed;
+  }
+
+  const localMatches = findMapContentLookupMatches(term, limit).map((record) => ({
+    kind: "map-content",
+    source: record.source ?? "map-content",
+    contentId: record.contentId ?? record.id,
+    name: record.name,
+    sub: record.path ? `${record.kind} | ${record.path}` : record.kind,
+    lat: record.lat,
+    lon: record.lon,
+    bounds: record.bounds
+      ? {
+          north: Number(record.bounds.northEast?.lat),
+          south: Number(record.bounds.southWest?.lat),
+          east: Number(record.bounds.northEast?.lon),
+          west: Number(record.bounds.southWest?.lon),
+        }
+      : null,
+  }));
+  if (localMatches.length || !allowRemote) {
+    return localMatches;
+  }
+
+  try {
+    return await fetchRemoteLookupMatches(term, limit);
+  } catch {
+    return [];
+  }
 }
 
 function collectMapLookupAliases(entry, detail) {
@@ -10589,7 +10835,7 @@ function extractImportedMetadataName(value) {
   return "";
 }
 
-function tryResolveAiMapLookup(prompt) {
+async function tryResolveAiMapLookup(prompt) {
   const raw = String(prompt ?? "").trim();
   if (!raw || !isLookupPrompt(raw)) {
     return null;
@@ -10605,12 +10851,15 @@ function tryResolveAiMapLookup(prompt) {
     return null;
   }
 
-  const sections = terms.map((term) => ({
-    term,
-    matches: findMapContentLookupMatches(term),
-  }));
+  const sections = [];
+  for (const term of terms) {
+    sections.push({
+      term,
+      matches: await searchLookupTargets(term, { allowRemote: true, limit: 6 }),
+    });
+  }
 
-  // No local matches — fall through to AI rather than returning a dead-end error
+  // No deterministic matches — fall through to AI rather than returning a dead-end error
   if (!sections.some((section) => section.matches.length)) {
     return null;
   }
@@ -10619,7 +10868,7 @@ function tryResolveAiMapLookup(prompt) {
   if (sections.length === 1 && sections[0].matches.length) {
     const best = sections[0].matches[0];
     return {
-      assistantMessage: formatLookupCoordinateOnly(best, preferMgrs),
+      assistantMessage: formatLookupSentence(best, preferMgrs),
       actions: [],
     };
   }
@@ -10632,13 +10881,14 @@ function tryResolveAiMapLookup(prompt) {
     }
     section.matches.slice(0, 3).forEach((record, index) => {
       const prefix = index === 0 ? `- ${section.term}:` : "  alt:";
-      const locationText = preferMgrs ? formatLookupCoordinateOnly(record, true) : formatLookupLocation(record);
-      lines.push(`${prefix} ${record.name} | ${locationText}${preferMgrs ? "" : ` | ${record.path}`}`);
+      const locationText = formatLookupCoordinateOnly(record, preferMgrs);
+      const suffix = record.path && !preferMgrs ? ` | ${record.path}` : "";
+      lines.push(`${prefix} ${record.name} | ${locationText}${suffix}`);
     });
   });
 
   return {
-    assistantMessage: `Map lookup results:\n${lines.join("\n")}`,
+    assistantMessage: lines.join("\n"),
     actions: [],
   };
 }
@@ -11825,7 +12075,9 @@ async function testAiProviderConnection({ openPanelOnSuccess = true } = {}) {
 }
 
 async function callAiPlanningAssistant(prompt, images = [], files = [], contextIds = [], { onStatus, onToken } = {}) {
-  const localLookup = images.length === 0 && files.length === 0 ? tryResolveAiMapLookup(prompt) : null;
+  const localLookup = images.length === 0 && files.length === 0
+    ? await tryResolveAiMapLookup(prompt)
+    : null;
   if (localLookup) {
     onStatus?.("Searching map contents");
     return localLookup;
@@ -11961,13 +12213,15 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  3. NEVER use assetId for newly added assets — the ID doesn't exist yet at prompt time.",
     "  4. NEVER run-simulation without a placedIndex or assetId — it will run on the wrong asset.",
     "",
+    "  5. When the user asks for terrain, weather, hybrid, diffraction, or building-aware coverage, ALWAYS set propagationModel explicitly in every run-simulation action. Never rely on the current UI selection.",
+    "",
     "Example for 3 radios + 3 simulations:",
     '  {"type":"add-asset","lat":34.41,"lon":-116.57,"emitterType":"PRC-163","name":"PRC-163 Alpha",...}',
     '  {"type":"add-asset","lat":34.42,"lon":-116.55,"emitterType":"PRC-163","name":"PRC-163 Bravo",...}',
     '  {"type":"add-asset","lat":34.40,"lon":-116.55,"emitterType":"PRC-163","name":"PRC-163 Charlie",...}',
-    '  {"type":"run-simulation","placedIndex":0,"radiusKm":30}',
-    '  {"type":"run-simulation","placedIndex":1,"radiusKm":30}',
-    '  {"type":"run-simulation","placedIndex":2,"radiusKm":30}',
+    '  {"type":"run-simulation","placedIndex":0,"propagationModel":"itu-p526","radiusKm":30}',
+    '  {"type":"run-simulation","placedIndex":1,"propagationModel":"itu-p526","radiusKm":30}',
+    '  {"type":"run-simulation","placedIndex":2,"propagationModel":"itu-p526","radiusKm":30}',
     "",
     "═══════════════════════════════════════",
     "TERRAIN LINE-OF-SIGHT AWARENESS:",
@@ -11986,6 +12240,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  If terrainAvailable=false in the scenario summary, it means no DTED is loaded — but Cesium Ion terrain MAY still be available.",
     "  The check-los action and post-placement LOS checks ALWAYS attempt Cesium Ion terrain as a fallback. NEVER skip LOS checks just because terrainAvailable=false in the summary.",
     "",
+    "  NEVER describe propagation as FSPL-only just because no DTED is loaded. If Cesium terrain is configured, terrain-aware propagation and LOS checks use streamed Cesium terrain (quantized mesh).",
     "BEFORE recommending or placing assets, CHECK the terrainLosMatrix for existing assets.",
     "WHEN PLACING NEW ASSETS, the system will automatically compute LOS after placement using the best available terrain source and report warnings.",
     "ALWAYS emit check-los actions before placement when you need to pre-verify candidate positions — even with no DTED, Cesium Ion terrain will be used.",
@@ -12009,6 +12264,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "- IVO / 'in vicinity of' / 'near' / 'at' / 'around' a named place: find that place in importedItems[], get its coordinates, use them as the reference point. Place assets using contentRef=contentId + placementMode='near' or extract the lat/lon and use them directly.",
     "- When the user says 'the linked shape', 'that shape', 'the context shape', 'make it red', or refers to a shape without naming it, they mean the first item in explicitAiContextObjects[]. Use its 'name' field directly as the 'name' value in update-shape/remove-shape. Do NOT use the contentId string.",
     "- Example: explicitAiContextObjects = [{contentId:'imported:abc',name:'OP CRAMPTON'}], user says 'best relay IVO OP Crampton' → find 'OP CRAMPTON' in importedItems[], get geometry.coordinates {lat,lon}, use check-los to find elevated terrain nearby, place relay with add-asset near those coords, run-simulation.",
+    "- For direct coordinate questions, search mapLookupIndex[] first. It contains compact coordinate records for map contents and recent searched places with {contentId, name, aliases, lat, lon, bounds, source}.",
+    "- Prompts like 'where is X', 'give me the grid coordinate of X', 'what are the coordinates for X', or 'find X' should resolve from mapLookupIndex[] before you say the item is missing.",
     "- update-shape supports: color (#hex), fillOpacity (0–1), weight (px), lineStyle (solid|dashed|dotted), newName (rename), radiusM (resize circle by center+radius), coordinates (replace geometry).",
     "",
     "KMZ/KML ITEM STRUCTURE — importedItems[] uses two tiers:",
@@ -12218,7 +12475,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "- Otherwise lat and lon MUST be plain numbers from the scenario geometry. NEVER null or strings.",
       "- If the user references a named area (e.g. Range 400), prefer contentRef plus placementMode over manual coordinates.",
       "- force must be: friendly, enemy, host-nation, or civilian.",
-      "- propagationModel values: itu-p525 (free space), itu-p526 (terrain), itu-hybrid (terrain+weather), itu-buildings-weather (buildings).",
+      "- propagationModel values: itu-p525 (free space), itu-p526 (terrain), itu-hybrid (terrain+weather), itu-buildings-weather (terrain+buildings+weather).",
+      "- If the user asks for terrain, weather, hybrid, diffraction, or building-aware coverage, ALWAYS include propagationModel explicitly in each run-simulation action. Use itu-p526 for terrain, itu-hybrid for terrain+weather, itu-buildings-weather for terrain+buildings+weather, and itu-p525 only when the user explicitly wants free-space.",
       "- For run-simulation after add-asset in the same response, use placedIndex:0 (not assetId).",
       "- If no polygon is found for the named area, say so in assistantMessage and use empty actions [].",
       "- To answer elevation/terrain questions, use sample-terrain: {\"type\":\"sample-terrain\",\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":8}. Get the bounds from the relevant polygon in the scenario summary.",
@@ -12965,11 +13223,19 @@ function linkifyAiResponseEntity(text, label, target) {
   if (!text || !label || !target) {
     return text;
   }
+  const normalizedLabel = String(label ?? "").replace(/\s+/g, " ").trim();
+  if (!normalizedLabel || normalizedLabel.length > 160) {
+    return text;
+  }
 
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text
-    .replace(new RegExp(`(?<!\[)\*\*${escaped}\*\*(?!\]\()`, "g"), `[**${label}**](${target})`)
-    .replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${label}**](${target})`);
+  try {
+    const escaped = normalizedLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text
+      .replace(new RegExp(`(?<!\\[)\\*\\*${escaped}\\*\\*(?!\\]\\()`, "g"), () => `[**${normalizedLabel}**](${target})`)
+      .replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), () => `[**${normalizedLabel}**](${target})`);
+  } catch {
+    return text;
+  }
 }
 
 function enrichAiResponseWithLinks(text, placedAssets = []) {
@@ -14962,12 +15228,17 @@ function updateTerrainSummary() {
   const terrain = getActiveTerrain();
   if (!terrain) {
     const propagationModel = dom.propagationModel.value;
+    const hasCesiumTerrain = usesConfiguredCesiumTerrain();
     const propagationSummary = usesCesiumBuildingsInPropagation(propagationModel)
-      ? `Propagation can sample streamed Cesium terrain plus OSM buildings using the ${getBuildingMaterialModel().label} material preset.`
+      ? `Terrain-aware propagation uses streamed Cesium terrain (quantized mesh) plus OSM buildings using the ${getBuildingMaterialModel().label} material preset.`
       : simulationUsesTerrainModel(propagationModel)
-        ? (simulationUsesAtmosphericModel(propagationModel)
-          ? "Propagation uses streamed Cesium terrain plus weather attenuation."
-          : "Propagation uses streamed Cesium terrain only.")
+        ? (hasCesiumTerrain
+          ? (simulationUsesAtmosphericModel(propagationModel)
+            ? "Terrain-aware propagation uses streamed Cesium terrain (quantized mesh) plus weather attenuation."
+            : "Terrain-aware propagation uses streamed Cesium terrain (quantized mesh).")
+          : (simulationUsesAtmosphericModel(propagationModel)
+            ? "No Cesium terrain is configured, so terrain and weather propagation falls back to free-space path loss."
+            : "No Cesium terrain is configured, so terrain-aware propagation falls back to free-space path loss."))
         : "Propagation uses free-space path loss only.";
     const visualSummary = usesCesiumPhotorealisticTiles()
       ? " 3D view uses Google Photorealistic 3D Tiles for visual rendering."
@@ -17176,6 +17447,13 @@ function setGeocoderActiveIndex(idx) {
 
 function navigateToGeocoderResult(result) {
   if (!result) return;
+  if (!result.contentId || result.source === "geocoder") {
+    cacheRecentPlaceLookup(result.query || result.name, result);
+  }
+  if (result.contentId && /^((asset|imported|tactical|taklive|viewshed|terrain):|planning-region|planning-results$)/.test(result.contentId)) {
+    focusMapContent(result.contentId);
+    return;
+  }
   if (result.bounds) {
     const { north, south, east, west } = result.bounds;
     state.map.fitBounds([[south, west], [north, east]], { maxZoom: result.zoom ?? 16, animate: true });
@@ -17253,25 +17531,8 @@ async function runGeocoderSearch(query) {
   // Nominatim geocoding (OpenStreetMap)
   showGeocoderStatus("Searching…");
   try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`;
-    const resp = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "RFSim/1.0" } });
-    if (!resp.ok) throw new Error("Nominatim error");
-    const data = await resp.json();
-    if (!data.length) { showGeocoderStatus("No results found."); return; }
-
-    const results = data.map((item) => {
-      const lat = parseFloat(item.lat);
-      const lon = parseFloat(item.lon);
-      const bb = item.boundingbox;
-      const bounds = bb ? { south: parseFloat(bb[0]), north: parseFloat(bb[1]), west: parseFloat(bb[2]), east: parseFloat(bb[3]) } : null;
-      const addr = item.address ?? {};
-      const parts = [addr.city ?? addr.town ?? addr.village ?? addr.county, addr.state, addr.country].filter(Boolean);
-      const sub = parts.join(", ");
-      // Zoom based on OSM type
-      const zoomMap = { country: 5, state: 7, county: 9, city: 11, town: 12, suburb: 13, road: 15, house: 17 };
-      const zoom = zoomMap[item.type] ?? zoomMap[item.addresstype] ?? 13;
-      return { kind: "place", name: item.display_name.split(",")[0], sub, lat, lon, bounds, zoom };
-    });
+    const results = await searchLookupTargets(q, { allowRemote: true, limit: 6 });
+    if (!results.length) { showGeocoderStatus("No results found."); return; }
     renderGeocoderResults(results);
   } catch (_) {
     showGeocoderStatus("Search unavailable — check connection.");
@@ -23934,9 +24195,7 @@ function initAnalytics() {
   });
 
   dom.analyticsModalCloseBtn?.addEventListener("click", closeAnalyticsModal);
-  dom.analyticsModal?.addEventListener("click", (e) => {
-    if (e.target === dom.analyticsModal) closeAnalyticsModal();
-  });
+  addModalBackdropClose(dom.analyticsModal, closeAnalyticsModal);
   dom.analyticsRefreshBtn?.addEventListener("click", fetchAndRenderAnalytics);
   dom.analyticsSearchInput?.addEventListener("input", () => {
     _analytics.filterText = dom.analyticsSearchInput.value;
@@ -26690,8 +26949,13 @@ function redrawTopoLinks() {
 
     const leftMetrics = nodeMetrics.get(leftKey) || { width: 170, height: 240 };
     const rightMetrics = nodeMetrics.get(rightKey) || { width: 170, height: 240 };
-    const dx = rightPos.x - leftPos.x;
-    const dy = rightPos.y - leftPos.y;
+    // Node positions are top-left; shift to center for ray-exit math
+    const leftCx = leftPos.x + leftMetrics.width / 2;
+    const leftCy = leftPos.y + leftMetrics.height / 2;
+    const rightCx = rightPos.x + rightMetrics.width / 2;
+    const rightCy = rightPos.y + rightMetrics.height / 2;
+    const dx = rightCx - leftCx;
+    const dy = rightCy - leftCy;
     const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
     const baseAngle = Math.atan2(dy, dx);
     const nx = -dy / dist;
@@ -26709,16 +26973,16 @@ function redrawTopoLinks() {
     orderedGroup.forEach((lnk, idx) => {
       const offsetPx = (idx - (orderedGroup.length - 1) / 2) * LINK_SPACING;
       const start = getRectRayExitPoint(
-        leftPos.x + nx * offsetPx,
-        leftPos.y + ny * offsetPx,
+        leftCx + nx * offsetPx,
+        leftCy + ny * offsetPx,
         leftMetrics.width,
         leftMetrics.height,
         baseAngle,
         EDGE_CLEARANCE
       );
       const end = getRectRayExitPoint(
-        rightPos.x + nx * offsetPx,
-        rightPos.y + ny * offsetPx,
+        rightCx + nx * offsetPx,
+        rightCy + ny * offsetPx,
         rightMetrics.width,
         rightMetrics.height,
         baseAngle + Math.PI,

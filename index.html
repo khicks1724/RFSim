@@ -277,7 +277,7 @@
               <input id="dtedInput" type="file" accept=".dt0,.dt1,.dt2,.dted,.tif,.tiff">
             </label>
             <div class="terrain-summary" id="terrainSummary">
-              No terrain loaded. Propagation uses free-space or terrain diffraction only.
+              No local DTED loaded. Terrain-aware propagation uses Cesium terrain when configured, otherwise it falls back to free-space path loss.
             </div>
             <div class="list-shell compact-shell">
               <div class="list-header">
@@ -1723,7 +1723,7 @@
               </label>
               <label class="emitter-checkbox-label">
                 <input id="emTerrainEnabled" type="checkbox" checked>
-                <span>Terrain-aware (DTED)</span>
+                <span>Terrain-aware (DTED / Cesium)</span>
               </label>
               <label class="emitter-checkbox-label">
                 <input id="emDiffractionEnabled" type="checkbox" checked>
@@ -2438,7 +2438,7 @@
             </label>
             <label class="sim-checkbox-label">
               <input id="simTerrainEnabled" type="checkbox" checked>
-              <span>Terrain-aware (DTED)</span>
+              <span>Terrain-aware (DTED / Cesium)</span>
             </label>
             <label class="sim-checkbox-label">
               <input id="simDiffractionEnabled" type="checkbox" checked>
