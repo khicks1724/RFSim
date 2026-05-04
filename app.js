@@ -1974,7 +1974,7 @@ const dom = {
   aiAgentPurpose: document.querySelector("#aiAgentPurpose"),
   aiAgentModeShell: document.querySelector("#aiAgentModeShell"),
   aiAgentModeIndicator: document.querySelector("#aiAgentModeIndicator"),
-  aiAgentModeLabel: document.querySelector("#aiAgentModeLabel"),
+  aiAgentModeSelect: document.querySelector("#aiAgentModeSelect"),
   aiPanelStatus: document.querySelector("#aiPanelStatus"),
   aiChatMessages: document.querySelector("#aiChatMessages"),
   aiChatForm: document.querySelector("#aiChatForm"),
@@ -2050,6 +2050,8 @@ const state = {
     refreshTimer: null,
     requestId: 0,
     lastBoundsKey: "",
+    inFlight: false,
+    pendingRefresh: null,
   },
   viewshedRootLayer: L.layerGroup(),
   viewsheds: [],
@@ -4846,6 +4848,25 @@ function setAiAgentProfile(profileId, { confidence = 1, reason = "", pinned = fa
   state.ai.agentProfileLastUpdatedAt = new Date().toISOString();
 }
 
+function syncAiAgentModeSelect() {
+  const select = dom.aiAgentModeSelect;
+  if (!select) return;
+  const currentValue = state.ai.agentProfileId || "general";
+  const profiles = Object.entries(AI_AGENT_PROFILES)
+    .sort((a, b) => (b[1].routingPriority || 0) - (a[1].routingPriority || 0));
+  const expected = profiles.length;
+  if (select.options.length !== expected) {
+    select.innerHTML = "";
+    profiles.forEach(([profileId, profile]) => {
+      const option = document.createElement("option");
+      option.value = profileId;
+      option.textContent = profile.label;
+      select.appendChild(option);
+    });
+  }
+  select.value = AI_AGENT_PROFILES[currentValue] ? currentValue : "general";
+}
+
 function syncAiViewMeta() {
   const profile = getAiViewProfile();
   const agentProfile = getAiAgentProfile();
@@ -7012,9 +7033,18 @@ function wireEvents() {
     }
   });
   dom.collapseAiPanelBtn?.addEventListener("click", toggleAiPanelCollapse);
-  dom.aiAgentModeIndicator?.addEventListener("click", () => {
-    const profile = getAiAgentProfile();
-    setStatus(`${profile.label}: ${state.ai.agentProfileReason || profile.summary}`);
+  dom.aiAgentModeSelect?.addEventListener("change", () => {
+    const profileId = dom.aiAgentModeSelect.value || "general";
+    const profile = getAiAgentProfile(profileId);
+    setAiAgentProfile(profileId, {
+      confidence: 1,
+      reason: profileId === "general"
+        ? "User reset the AI mode to general."
+        : `User selected ${profile.label} from the mode dropdown.`,
+      pinned: profileId !== "general",
+    });
+    syncAiUi();
+    setStatus(`AI mode set to ${profile.label}.`);
   });
   dom.aiChatForm.addEventListener("submit", onAiChatSubmit);
   dom.aiChatModelSelect.addEventListener("change", onAiModelChanged);
@@ -9416,10 +9446,10 @@ function syncAiUi() {
       ? "Connected"
       : "Offline";
   }
-  if (dom.aiAgentModeIndicator && dom.aiAgentModeLabel) {
+  if (dom.aiAgentModeIndicator && dom.aiAgentModeSelect) {
     const activeProfile = getAiAgentProfile();
+    syncAiAgentModeSelect();
     dom.aiAgentModeShell?.classList.toggle("hidden", (state.ai.agentProfileId || "general") === "general");
-    dom.aiAgentModeLabel.textContent = activeProfile.indicatorLabel;
     dom.aiAgentModeIndicator.dataset.mode = state.ai.agentProfileId || "general";
     dom.aiAgentModeIndicator.title = `${activeProfile.label} · ${Math.round((state.ai.agentProfileConfidence || 0) * 100)}% confidence\n${state.ai.agentProfileReason || activeProfile.summary}`;
   }
@@ -9604,6 +9634,7 @@ function clearAiChat() {
   state.ai.messages = [];
   setAiAgentProfile("general", { confidence: 0.35, reason: "Chat cleared; reverted to general mode.", pinned: false });
   clearAiAttachments();
+  syncAiUi();
   renderAiEmptyState();
 }
 
@@ -10663,6 +10694,17 @@ function buildTerrainHeatmapBoundsKey(bounds) {
   ].join(":");
 }
 
+function getCurrentTerrainHeatmapZoomEstimate() {
+  if (!state.view3dEnabled) {
+    return clamp(Number(state.map?.getZoom?.()) || DEFAULT_MAP_VIEW.zoom || 10, 2, 18);
+  }
+  const carto = state.cesiumViewer?.camera?.positionCartographic;
+  if (carto && Number.isFinite(carto.height)) {
+    return clamp(Math.round(Math.log2(40000000 / Math.max(carto.height, 100))), 2, 18);
+  }
+  return clamp(Number(state.map?.getZoom?.()) || DEFAULT_MAP_VIEW.zoom || 10, 2, 18);
+}
+
 function getCurrentTerrainHeatmapBounds() {
   if (!state.map) return null;
   if (state.view3dEnabled && state.cesiumViewer) {
@@ -10688,29 +10730,61 @@ function getCurrentTerrainHeatmapBounds() {
   };
 }
 
-function getTerrainHeatmapGridMeters(bounds) {
-  const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
-  const widthMeters = haversineKm(centerLat, bounds.sw.lon, centerLat, bounds.ne.lon) * 1000;
-  const heightMeters = haversineKm(bounds.sw.lat, bounds.sw.lon, bounds.ne.lat, bounds.sw.lon) * 1000;
-  const dominantSpan = Math.max(widthMeters, heightMeters, 240);
-  return clamp(dominantSpan / 42, 40, 1200);
+function getTerrainHeatmapViewportSize() {
+  if (state.view3dEnabled) {
+    const canvas = state.cesiumViewer?.scene?.canvas;
+    if (canvas?.clientWidth && canvas?.clientHeight) {
+      return { x: canvas.clientWidth, y: canvas.clientHeight };
+    }
+  }
+  const size = state.map?.getSize?.();
+  return size ? { x: size.x, y: size.y } : { x: 1280, y: 720 };
 }
 
-async function sampleCesiumTerrainGridForHeatmap(bounds, gridMeters) {
+function getTerrainHeatmapGridProfile(bounds) {
+  const size = getTerrainHeatmapViewportSize();
+  const aspect = clamp((size.x || 1280) / Math.max(size.y || 720, 1), 0.7, 2.4);
+  const totalCells = 300;
+  const cols = clamp(Math.round(Math.sqrt(totalCells * aspect)), 18, 28);
+  const rows = clamp(Math.round(totalCells / cols), 10, 18);
+  const latSpan = Math.max(0.0001, bounds.ne.lat - bounds.sw.lat);
+  const lonSpan = Math.max(0.0001, bounds.ne.lon - bounds.sw.lon);
+  const latStepDeg = latSpan / rows;
+  const lonStepDeg = lonSpan / cols;
+  const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
+  const sampleDistanceMeters = Math.max(
+    20,
+    ((latStepDeg * 111320) + (lonStepDeg * 111320 * Math.cos(centerLat * Math.PI / 180))) / 2
+  );
+  const zoomEstimate = getCurrentTerrainHeatmapZoomEstimate();
+  const terrainLevel = clamp(Math.round(zoomEstimate) + 1, 6, 12);
+  return { rows, cols, latStepDeg, lonStepDeg, sampleDistanceMeters, terrainLevel, zoomEstimate };
+}
+
+async function sampleCesiumTerrainGridForHeatmap(bounds, profile) {
   const provider = await getConfiguredCesiumTerrainProvider();
   if (!provider) {
     throw new Error("Cesium terrain is not configured.");
   }
-  const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
-  const latStepDeg = metersToLatitudeDegrees(gridMeters);
-  const lonStepDeg = metersToLongitudeDegrees(gridMeters, centerLat);
-  const rows = Math.max(2, Math.round((bounds.ne.lat - bounds.sw.lat) / latStepDeg) + 1);
-  const cols = Math.max(2, Math.round((bounds.ne.lon - bounds.sw.lon) / lonStepDeg) + 1);
+  const {
+    rows,
+    cols,
+    latStepDeg,
+    lonStepDeg,
+    sampleDistanceMeters,
+    terrainLevel,
+    zoomEstimate,
+  } = profile;
   const positions = [];
+  const latitudes = new Float64Array(rows * cols);
+  const longitudes = new Float64Array(rows * cols);
   for (let row = 0; row < rows; row += 1) {
-    const lat = bounds.sw.lat + (row * latStepDeg);
+    const lat = bounds.sw.lat + ((row + 0.5) * latStepDeg);
     for (let col = 0; col < cols; col += 1) {
-      const lon = bounds.sw.lon + (col * lonStepDeg);
+      const lon = bounds.sw.lon + ((col + 0.5) * lonStepDeg);
+      const index = (row * cols) + col;
+      latitudes[index] = lat;
+      longitudes[index] = lon;
       positions.push(window.Cesium.Cartographic.fromDegrees(lon, lat));
     }
   }
@@ -10721,11 +10795,13 @@ async function sampleCesiumTerrainGridForHeatmap(bounds, gridMeters) {
   nodataMask.fill(1);
   let minElevationM = Number.POSITIVE_INFINITY;
   let maxElevationM = Number.NEGATIVE_INFINITY;
-  const batchSize = Math.max(192, Math.min(1024, cols * 6));
+  const batchSize = Math.max(72, Math.min(192, cols * 4));
 
   for (let start = 0; start < positions.length; start += batchSize) {
     const batch = positions.slice(start, start + batchSize);
-    const samples = await window.Cesium.sampleTerrainMostDetailed(provider, batch);
+    const samples = typeof window.Cesium.sampleTerrain === "function"
+      ? await window.Cesium.sampleTerrain(provider, terrainLevel, batch)
+      : await window.Cesium.sampleTerrainMostDetailed(provider, batch);
     samples.forEach((sample, batchIndex) => {
       if (!Number.isFinite(sample?.height)) {
         return;
@@ -10749,10 +10825,15 @@ async function sampleCesiumTerrainGridForHeatmap(bounds, gridMeters) {
     cols,
     latStepDeg,
     lonStepDeg,
+    latitudes,
+    longitudes,
     elevations,
     nodataMask,
     minElevationM,
     maxElevationM,
+    terrainLevel,
+    zoomEstimate,
+    sampleDistanceMeters,
   };
 }
 
@@ -10786,6 +10867,12 @@ async function refreshTerrainHeatmap(options = {}) {
   if (!state.terrainHeatmap.enabled) {
     return;
   }
+  if (state.terrainHeatmap.inFlight) {
+    state.terrainHeatmap.pendingRefresh = {
+      force: Boolean(options.force) || Boolean(state.terrainHeatmap.pendingRefresh?.force),
+    };
+    return;
+  }
   if (!usesConfiguredCesiumTerrain()) {
     state.terrainHeatmap.enabled = false;
     state.terrainHeatmap.sample = null;
@@ -10800,7 +10887,8 @@ async function refreshTerrainHeatmap(options = {}) {
   if (!bounds) {
     return;
   }
-  const boundsKey = buildTerrainHeatmapBoundsKey(bounds);
+  const profile = getTerrainHeatmapGridProfile(bounds);
+  const boundsKey = `${buildTerrainHeatmapBoundsKey(bounds)}:${profile.rows}x${profile.cols}:L${profile.terrainLevel}`;
   if (!options.force && boundsKey === state.terrainHeatmap.lastBoundsKey && state.terrainHeatmap.sample) {
     syncTerrainHeatmap2dLayer();
     updateTerrainHeatmapLegend();
@@ -10809,19 +10897,28 @@ async function refreshTerrainHeatmap(options = {}) {
     return;
   }
 
+  state.terrainHeatmap.inFlight = true;
   const requestId = ++state.terrainHeatmap.requestId;
-  const gridMeters = getTerrainHeatmapGridMeters(bounds);
-  const sample = await sampleCesiumTerrainGridForHeatmap(bounds, gridMeters);
-  if (requestId !== state.terrainHeatmap.requestId || !state.terrainHeatmap.enabled) {
-    return;
+  try {
+    const sample = await sampleCesiumTerrainGridForHeatmap(bounds, profile);
+    if (requestId !== state.terrainHeatmap.requestId || !state.terrainHeatmap.enabled) {
+      return;
+    }
+    state.terrainHeatmap.sample = sample;
+    state.terrainHeatmap.lastBoundsKey = boundsKey;
+    syncTerrainHeatmap2dLayer();
+    updateTerrainHeatmapButtonUi();
+    updateTerrainHeatmapLegend();
+    updateTerrainHeatmapLegendVisibility();
+    syncCesiumEntities();
+  } finally {
+    state.terrainHeatmap.inFlight = false;
+    const pending = state.terrainHeatmap.pendingRefresh;
+    state.terrainHeatmap.pendingRefresh = null;
+    if (pending && state.terrainHeatmap.enabled) {
+      scheduleTerrainHeatmapRefresh({ ...pending, delay: 0 });
+    }
   }
-  state.terrainHeatmap.sample = sample;
-  state.terrainHeatmap.lastBoundsKey = boundsKey;
-  syncTerrainHeatmap2dLayer();
-  updateTerrainHeatmapButtonUi();
-  updateTerrainHeatmapLegend();
-  updateTerrainHeatmapLegendVisibility();
-  syncCesiumEntities();
 }
 
 function scheduleTerrainHeatmapRefresh(options = {}) {
@@ -10834,6 +10931,12 @@ function scheduleTerrainHeatmapRefresh(options = {}) {
   const delay = Number.isFinite(options.delay) ? options.delay : 220;
   state.terrainHeatmap.refreshTimer = setTimeout(() => {
     state.terrainHeatmap.refreshTimer = null;
+    if (state.terrainHeatmap.inFlight) {
+      state.terrainHeatmap.pendingRefresh = {
+        force: Boolean(options.force) || Boolean(state.terrainHeatmap.pendingRefresh?.force),
+      };
+      return;
+    }
     refreshTerrainHeatmap({ force: options.force }).catch((error) => {
       setStatus(error.message || "Terrain heatmap refresh failed.", true);
     });
@@ -10845,6 +10948,7 @@ async function setTerrainHeatmapEnabled(enabled) {
     state.terrainHeatmap.enabled = false;
     state.terrainHeatmap.sample = null;
     state.terrainHeatmap.lastBoundsKey = "";
+    state.terrainHeatmap.pendingRefresh = null;
     closeTerrainHeatmapDropdown();
     syncTerrainHeatmap2dLayer();
     syncCesiumEntities();
@@ -23609,31 +23713,28 @@ function _syncCesiumEntitiesImmediate() {
     const lonHalf = sample.lonStepDeg / 2;
     const span = Math.max(0.0001, sample.maxElevationM - sample.minElevationM);
     const instances = [];
-    for (let row = 0; row < sample.rows; row += 1) {
-      for (let col = 0; col < sample.cols; col += 1) {
-        const index = (row * sample.cols) + col;
-        if (sample.nodataMask[index] === 1 || !Number.isFinite(sample.elevations[index])) {
-          continue;
-        }
-        const lat = sample.bounds.sw.lat + (row * sample.latStepDeg);
-        const lon = sample.bounds.sw.lon + (col * sample.lonStepDeg);
-        const color = C.Color.fromCssColorString(
-          terrainHeatmapGradientColor((sample.elevations[index] - sample.minElevationM) / span, state.terrainHeatmap.opacity)
-        );
-        instances.push(new C.GeometryInstance({
-          id: `terrain-heatmap:${index}`,
-          geometry: new C.RectangleGeometry({
-            rectangle: C.Rectangle.fromDegrees(
-              lon - lonHalf, lat - latHalf,
-              lon + lonHalf, lat + latHalf,
-            ),
-            vertexFormat: C.PerInstanceColorAppearance.VERTEX_FORMAT,
-          }),
-          attributes: {
-            color: C.ColorGeometryInstanceAttribute.fromColor(color),
-          },
-        }));
+    for (let index = 0; index < sample.latitudes.length; index += 1) {
+      if (sample.nodataMask[index] === 1 || !Number.isFinite(sample.elevations[index])) {
+        continue;
       }
+      const lat = sample.latitudes[index];
+      const lon = sample.longitudes[index];
+      const color = C.Color.fromCssColorString(
+        terrainHeatmapGradientColor((sample.elevations[index] - sample.minElevationM) / span, state.terrainHeatmap.opacity)
+      );
+      instances.push(new C.GeometryInstance({
+        id: `terrain-heatmap:${index}`,
+        geometry: new C.RectangleGeometry({
+          rectangle: C.Rectangle.fromDegrees(
+            lon - lonHalf, lat - latHalf,
+            lon + lonHalf, lat + latHalf,
+          ),
+          vertexFormat: C.PerInstanceColorAppearance.VERTEX_FORMAT,
+        }),
+        attributes: {
+          color: C.ColorGeometryInstanceAttribute.fromColor(color),
+        },
+      }));
     }
     if (instances.length) {
       const primitive = new C.GroundPrimitive({
@@ -25385,20 +25486,19 @@ const CanvasTerrainHeatmapLayer = L.Layer.extend({
 
     const latHalf = sample.latStepDeg / 2;
     const lonHalf = sample.lonStepDeg / 2;
-    for (let row = 0; row < sample.rows; row += 1) {
-      for (let col = 0; col < sample.cols; col += 1) {
-        const index = (row * sample.cols) + col;
-        const fill = this._colorCache?.[index];
-        if (!fill) continue;
-        const lat = sample.bounds.sw.lat + (row * sample.latStepDeg);
-        const lon = sample.bounds.sw.lon + (col * sample.lonStepDeg);
-        const northWest = this._map.latLngToLayerPoint([lat + latHalf, lon - lonHalf]).subtract(topLeft);
-        const southEast = this._map.latLngToLayerPoint([lat - latHalf, lon + lonHalf]).subtract(topLeft);
-        const width = Math.max(1, southEast.x - northWest.x);
-        const height = Math.max(1, southEast.y - northWest.y);
-        context.fillStyle = fill;
-        context.fillRect(northWest.x, northWest.y, width, height);
-      }
+    const latitudes = sample.latitudes;
+    const longitudes = sample.longitudes;
+    for (let index = 0; index < latitudes.length; index += 1) {
+      const fill = this._colorCache?.[index];
+      if (!fill) continue;
+      const lat = latitudes[index];
+      const lon = longitudes[index];
+      const northWest = this._map.latLngToLayerPoint([lat + latHalf, lon - lonHalf]).subtract(topLeft);
+      const southEast = this._map.latLngToLayerPoint([lat - latHalf, lon + lonHalf]).subtract(topLeft);
+      const width = Math.max(1, southEast.x - northWest.x);
+      const height = Math.max(1, southEast.y - northWest.y);
+      context.fillStyle = fill;
+      context.fillRect(northWest.x, northWest.y, width, height);
     }
   },
 });
