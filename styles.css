@@ -1149,7 +1149,7 @@ body.panel-collapsed .control-panel {
   display: block;
   width: 14px;
   height: 14px;
-  color: var(--muted);
+  color: var(--text);
 }
 
 /* ── Map-contents icon buttons: shared hover label ── */
