@@ -6582,7 +6582,6 @@ function wireEvents() {
   dom.collapsePanelBtn.addEventListener("click", togglePanelCollapse);
   if (dom.panelModeBtn) dom.panelModeBtn.addEventListener("click", togglePanelMode);
   dom.mapPanelModeToggle?.addEventListener("click", toggleMapPanelMode);
-  requestAnimationFrame(syncMapPanelModeToggleLayout);
   initViewModeToggle();
   dom.mcSelectBtn.addEventListener("click", toggleMcSelectMode);
   dom.undoBannerBtn.addEventListener("click", performUndo);
@@ -6596,7 +6595,6 @@ function wireEvents() {
   window.addEventListener("mouseup", endPanelResize);
   window.addEventListener("mouseup", endControlPanelSectionResize);
   window.addEventListener("mouseup", endAiPanelResize);
-  window.addEventListener("resize", syncMapPanelModeToggleLayout);
   dom.imageryMenuBtn.addEventListener("click", toggleImageryMenu);
   dom.imageryMenu.addEventListener("click", (event) => event.stopPropagation());
   dom.terrainMenuBtn.addEventListener("click", toggleTerrainMenu);
@@ -8584,21 +8582,6 @@ function togglePanelMode() {
 
 function toggleMapPanelMode() {
   setMapPanelMode(state.ui.mapPanelMode === "features" ? "contents" : "features");
-}
-
-function syncMapPanelModeToggleLayout() {
-  const toggle = dom.mapPanelModeToggle;
-  if (!toggle) return;
-  const labels = [...toggle.querySelectorAll(".panel-mode-label")];
-  if (labels.length < 2) return;
-  const segmentPadding = 24;
-  const togglePadding = 4;
-  const leftWidth = Math.ceil((labels[0].scrollWidth || 0) + segmentPadding);
-  const rightWidth = Math.ceil((labels[1].scrollWidth || 0) + segmentPadding);
-  toggle.style.setProperty("--panel-mode-left-width", `${leftWidth}px`);
-  toggle.style.setProperty("--panel-mode-right-width", `${rightWidth}px`);
-  toggle.style.setProperty("--panel-mode-right-left", `${togglePadding + leftWidth}px`);
-  toggle.style.setProperty("--panel-mode-total-width", `${togglePadding + leftWidth + rightWidth}px`);
 }
 
 function setMapPanelMode(mode) {
