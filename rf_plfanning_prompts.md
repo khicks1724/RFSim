@@ -141,7 +141,7 @@ Analyze convoy comms through canyon terrain using AN/PRC-117G, AN/PRC-119, and A
 
 **User Prompt**
 
-Plan a defense of an urban strongpoint using AN/PRC-148 MBITR and AN/PRC-163 UHF LOS nets between rooftops, interior strongpoints, and a reserve element underground. Recommend relay floors, antenna placement, and a power plan that limits exposure while keeping command and breach alarms reliable.
+Plan a defense of an urban strongpoint using AN/PRC-148 MBITR and AN/PRC-163 UHF LOS nets between rooftops, interior strongpoints, and a reserve element staged in a walled courtyard behind adjacent buildings. Recommend relay floors, antenna placement, and a power plan that limits exposure while keeping command and breach alarms reliable.
 
 - **Primary Radios:** AN/PRC-148 MBITR (VHF LOS), AN/PRC-163 Falcon IV (UHF LOS - Tactical)
 - **Tags:** urban, defense, rooftop, indoor, relay, power, emcon
@@ -1190,14 +1190,14 @@ Build a Silvus backhaul for an FPV strike cell using 4200 4.9 GHz nodes between 
 - **Primary Radios:** Silvus StreamCaster 4200 (MIMO 2x2 - 4.9 GHz), ExpressLRS Control Link (915 MHz), Analog FPV Video Downlink (5.8 GHz)
 - **Tags:** silvus, fpv, backhaul, 4.9ghz, 915mhz, 5.8ghz, strike-cell
 
-## RF-133 - Silvus Urban Underground Access Nodes
+## RF-133 - Silvus Urban Access Node Screen
 
 **User Prompt**
 
-Assess a Silvus 4200 2.4 GHz mesh feeding teams that enter parking ramps and subway portals from street level. Recommend where above-ground relay nodes belong, whether a portal-edge drop node is required, and what degree of latency increase to expect once the signal path bends below grade.
+Assess a Silvus 4200 2.4 GHz mesh feeding teams moving through parking ramps, walled service roads, and rail-cut approaches from street level. Recommend where above-ground relay nodes belong, whether a ramp-edge drop node is required, and what degree of latency increase to expect once the signal path bends around concrete corners and retaining walls.
 
-- **Primary Radios:** Silvus StreamCaster 4200 (MIMO 2x2 - 2.4 GHz), Tunnel Access Relay (2.4 GHz), AN/PRC-163 Falcon IV (SRW MANET - Soldier Radio)
-- **Tags:** silvus, underground, portal, 2.4ghz, latency, relay, urban
+- **Primary Radios:** Silvus StreamCaster 4200 (MIMO 2x2 - 2.4 GHz), Access Ramp Relay (2.4 GHz), AN/PRC-163 Falcon IV (SRW MANET - Soldier Radio)
+- **Tags:** silvus, urban, access-ramp, 2.4ghz, latency, relay, concrete
 
 ## RF-134 - Silvus 5.8 GHz With Airborne Midspan Relay
 
@@ -1343,14 +1343,14 @@ Plan an MPU-5 5.8 GHz battalion ISR push carrying multiple camera and sensor fee
 - **Primary Radios:** Persistent Systems Wave Relay MPU-5 (Wave Relay MANET - 5.8 GHz), Scout Sensor Feed (5.8 GHz), Relay Overwatch Node (5.8 GHz)
 - **Tags:** mpu-5, 5.8ghz, isr, ridgeline, throughput, scouts, relay
 
-## RF-150 - MPU-5 Mesh For Urban Reserve Tunnel Exit
+## RF-150 - MPU-5 Mesh For Urban Reserve Street Entry
 
 **User Prompt**
 
-Design an MPU-5 2.4 GHz layout that supports a reserve force moving from underground staging to street-level fighting positions. Show where to put portal-edge nodes, whether a rooftop relay is needed immediately outside the exit, and how to avoid a complete mesh collapse if one portal node is hit.
+Design an MPU-5 2.4 GHz layout that supports a reserve force moving from a sheltered rear courtyard and parking ramp to street-level fighting positions. Show where to put ramp-edge nodes, whether a rooftop relay is needed immediately outside the entry point, and how to avoid a complete mesh collapse if one edge node is hit.
 
-- **Primary Radios:** Persistent Systems Wave Relay MPU-5 (Wave Relay MANET - 2.4 GHz), Portal Relay Node (2.4 GHz), Rooftop Relay Node (2.4 GHz)
-- **Tags:** mpu-5, underground, 2.4ghz, portal, reserve, rooftop, node-loss
+- **Primary Radios:** Persistent Systems Wave Relay MPU-5 (Wave Relay MANET - 2.4 GHz), Access Edge Relay Node (2.4 GHz), Rooftop Relay Node (2.4 GHz)
+- **Tags:** mpu-5, urban, 2.4ghz, access-edge, reserve, rooftop, node-loss
 
 ## RF-151 - MPU-5 Mesh For Drone Hunter Teams
 
@@ -1505,14 +1505,14 @@ Plan an FPV relay supporting a reverse-slope mortar team using 915 MHz control a
 - **Primary Radios:** ExpressLRS Control Link (915 MHz), Analog FPV Video Downlink (5.8 GHz), Airborne FPV Relay (915 MHz / 5.8 GHz)
 - **Tags:** fpv, reverse-slope, mortar, 915mhz, 5.8ghz, airborne-relay, survivability
 
-## RF-168 - FPV Relay For Urban Sewer Portal Attack
+## RF-168 - FPV Relay For Urban Service Alley Attack
 
 **User Prompt**
 
-Build a relay concept for FPVs launched near sewer portals and basement access points using 868 MHz control and 1.2 GHz video. Show where surface relays must sit, what parts of the route are impossible without a second relay, and whether the launch team should remain at the portal or displace after launch.
+Build a relay concept for FPVs launched near service alleys, loading ramps, and walled access courts using 868 MHz control and 1.2 GHz video. Show where surface relays must sit, what parts of the route are impossible without a second relay, and whether the launch team should remain at the entry point or displace after launch.
 
 - **Primary Radios:** ExpressLRS Control Link (868 MHz), Digital FPV Video Downlink (1.2 GHz), Surface FPV Relay (868 MHz / 1.2 GHz)
-- **Tags:** fpv, sewer, portal, 868mhz, 1.2ghz, urban, relay
+- **Tags:** fpv, urban, service-alley, 868mhz, 1.2ghz, relay, access-court
 
 ## RF-169 - FPV Repeater For Forest Firebreak Assault
 
@@ -1604,14 +1604,14 @@ Build a Silvus 4400 2.4 GHz network linking counterbattery observers, a fires ce
 - **Primary Radios:** Silvus StreamCaster 4400 (MIMO 4x4 - 2.4 GHz (High-Cap)), FPV Spotter Feed (5.8 GHz), Fire Direction Data Link (2.4 GHz)
 - **Tags:** silvus, counterbattery, 2.4ghz, fires, fpv, throughput, relay-isolation
 
-## RF-179 - MPU-5 Mesh For Underground Entrance Defense
+## RF-179 - MPU-5 Mesh For Transit Entrance Defense
 
 **User Prompt**
 
-Design an MPU-5 2.4 GHz mesh covering subway entrances, stair towers, and nearby rooftops during a defense of multiple underground access points. Recommend which entrances get direct mesh nodes, where rooftop relays should sit, and how to avoid all traffic funneling through one exposed roof.
+Design an MPU-5 2.4 GHz mesh covering transit entrances, stair towers, pedestrian overpasses, and nearby rooftops during a defense of multiple urban access points. Recommend which entrances get direct mesh nodes, where rooftop relays should sit, and how to avoid all traffic funneling through one exposed roof.
 
 - **Primary Radios:** Persistent Systems Wave Relay MPU-5 (Wave Relay MANET - 2.4 GHz), Rooftop Relay Node (2.4 GHz), Entrance Defense Link (2.4 GHz)
-- **Tags:** mpu-5, underground, defense, 2.4ghz, rooftop, funnel-risk, relay
+- **Tags:** mpu-5, urban, defense, 2.4ghz, rooftop, funnel-risk, relay
 
 ## RF-180 - High Density FPV And Mesh EW Deconfliction
 
@@ -2288,14 +2288,14 @@ Plan a strike-defense architecture at a river port using Silvus 4.9 GHz fixed ba
 - **Primary Radios:** Silvus StreamCaster 4200 (MIMO 2x2 - 4.9 GHz), Persistent Systems Wave Relay MPU-5 (Wave Relay MANET - 2.4 GHz), FPV Interceptor Link (915 MHz / 5.8 GHz)
 - **Tags:** hybrid, river-port, silvus, mpu-5, fpv, defense, relay-loss
 
-## RF-255 - FPV Control Path For Tunnel Exit Interdiction
+## RF-255 - FPV Control Path For Cut Approach Interdiction
 
 **User Prompt**
 
-Design a control path for FPVs covering tunnel exits and cut-and-cover approaches using 868 MHz control and 1.2 GHz video. Recommend where surface relays must sit, what sectors are impossible without airborne support, and how to preserve control continuity during repeated tunnel-edge attacks.
+Design a control path for FPVs covering road cuts, underpass approaches, and retaining-wall corridors using 868 MHz control and 1.2 GHz video. Recommend where surface relays must sit, what sectors are impossible without airborne support, and how to preserve control continuity during repeated edge-of-cut attacks.
 
-- **Primary Radios:** ExpressLRS Control Link (868 MHz), Digital FPV Video Downlink (1.2 GHz), Tunnel Exit FPV Relay (868 MHz / 1.2 GHz)
-- **Tags:** fpv, tunnel-exit, 868mhz, 1.2ghz, relay, airborne-support, continuity
+- **Primary Radios:** ExpressLRS Control Link (868 MHz), Digital FPV Video Downlink (1.2 GHz), Cut Approach FPV Relay (868 MHz / 1.2 GHz)
+- **Tags:** fpv, road-cut, 868mhz, 1.2ghz, relay, airborne-support, continuity
 
 ## RF-256 - Silvus Mesh For Rooftop Drone Command Cell
 
@@ -2423,14 +2423,14 @@ Plan FPV support for a rooftop infiltration team using 915 MHz control and 5.8 G
 - **Primary Radios:** ExpressLRS Control Link (915 MHz), Analog FPV Video Downlink (5.8 GHz), Rooftop and Airborne FPV Relays (915 MHz / 5.8 GHz)
 - **Tags:** fpv, rooftop-infiltration, 915mhz, 5.8ghz, urban, pop-up-relay, terminal-phase
 
-## RF-270 - Silvus Mesh For Command And Drone Repair In Tunnels
+## RF-270 - Silvus Mesh For Command And Drone Repair In Covered Yards
 
 **User Prompt**
 
-Design a Silvus 2.4 GHz mesh supporting command and drone repair sections working from tunnel mouths and cut shelters. Recommend portal relays, how far inside the mesh remains useful, and where outside nodes should sit to keep the repair site hidden but reachable.
+Design a Silvus 2.4 GHz mesh supporting command and drone repair sections working from covered vehicle yards and retaining-wall shelters. Recommend yard-edge relays, how far inside the covered work area the mesh remains useful, and where outside nodes should sit to keep the repair site hidden but reachable.
 
-- **Primary Radios:** Silvus StreamCaster 4400 (MIMO 4x4 - 2.4 GHz (High-Cap)), Portal Relay Node (2.4 GHz), Drone Repair Coordination Link (2.4 GHz)
-- **Tags:** silvus, tunnels, 2.4ghz, drone-repair, portal, hidden-site, mesh
+- **Primary Radios:** Silvus StreamCaster 4400 (MIMO 4x4 - 2.4 GHz (High-Cap)), Yard Edge Relay Node (2.4 GHz), Drone Repair Coordination Link (2.4 GHz)
+- **Tags:** silvus, covered-yard, 2.4ghz, drone-repair, edge-relay, hidden-site, mesh
 
 ## RF-271 - MPU-5 Relay Discipline For Long Urban Pursuit
 
@@ -2657,14 +2657,14 @@ Design a summit-centered Silvus 4.9 GHz mesh supporting mountain observers, an F
 - **Primary Radios:** Silvus StreamCaster 4200 (MIMO 2x2 - 4.9 GHz), FPV Relay Control Link (4.9 GHz), Hidden TAC Backhaul (4.9 GHz)
 - **Tags:** silvus, mountain, summit, 4.9ghz, fpv-relay, alternate-route, tac
 
-## RF-296 - Wave Relay For Deep Urban Utility Tunnel Teams
+## RF-296 - Wave Relay For Deep Urban Service Corridor Teams
 
 **User Prompt**
 
-Build an MPU-5 2.4 GHz support network for teams inspecting utility tunnels and above-ground entrances while FPV scouts cover nearby streets. Recommend where portal relays must sit, where rooftop relays become necessary, and how to retain a command path when one entrance team goes below grade.
+Build an MPU-5 2.4 GHz support network for teams inspecting deep service corridors, retaining-wall access roads, and above-ground entry points while FPV scouts cover nearby streets. Recommend where edge relays must sit, where rooftop relays become necessary, and how to retain a command path when one team moves into a heavily occluded concrete corridor.
 
-- **Primary Radios:** Persistent Systems Wave Relay MPU-5 (Wave Relay MANET - 2.4 GHz), Portal Relay Node (2.4 GHz), FPV Street Scout Link (915 MHz / 5.8 GHz)
-- **Tags:** mpu-5, utility-tunnels, 2.4ghz, portal, rooftop, fpv, below-grade
+- **Primary Radios:** Persistent Systems Wave Relay MPU-5 (Wave Relay MANET - 2.4 GHz), Edge Relay Node (2.4 GHz), FPV Street Scout Link (915 MHz / 5.8 GHz)
+- **Tags:** mpu-5, service-corridor, 2.4ghz, edge-relay, rooftop, fpv, concrete
 
 ## RF-297 - Hybrid Mesh For River Delta Drone Security
 

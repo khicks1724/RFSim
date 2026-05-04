@@ -1748,6 +1748,10 @@ const dom = {
   terrainList: document.querySelector("#terrainList"),
   terrainSection: document.querySelector("#terrainSection"),
   mapContentsCard: document.querySelector("#mapContentsCard"),
+  mapPanelModeToggle: document.querySelector("#mapPanelModeToggle"),
+  mapContentsActions: document.querySelector("#mapContentsActions"),
+  siteStudyActions: document.querySelector("#siteStudyActions"),
+  mapContentsPanel: document.querySelector("#mapContentsPanel"),
   mapContentsList: document.querySelector("#mapContentsList"),
   mapContentsSearchInput: document.querySelector("#mapContentsSearchInput"),
   mapContentsSearchClearBtn: document.querySelector("#mapContentsSearchClearBtn"),
@@ -1972,6 +1976,7 @@ const dom = {
   aiAddAttachmentBtn: document.querySelector("#aiAddAttachmentBtn"),
   aiFileInput: document.querySelector("#aiFileInput"),
   aiAttachmentMenu: document.querySelector("#aiAttachmentMenu"),
+  aiAddCurrentMapViewOption: document.querySelector("#aiAddCurrentMapViewOption"),
   aiAddMapContextOption: document.querySelector("#aiAddMapContextOption"),
   aiAddFilesOption: document.querySelector("#aiAddFilesOption"),
   aiContextPicker: document.querySelector("#aiContextPicker"),
@@ -2135,6 +2140,7 @@ const state = {
     aiResizeActive: false,
     aiPanelWidth: 400,
     panelMode: "edit",
+    mapPanelMode: "contents",
     currentView: "map",
     topologyBandFilter: ["HF", "VHF", "UHF", "SATCOM"],
     topologyDisplayMode: "units",
@@ -2163,14 +2169,16 @@ const state = {
     localModelUrl: "",
     status: "offline",
     statusMessage: "Add a provider and API key to enable the AI planning assistant.",
-    pendingImages: [],    // [{dataUrl, mediaType}]
+    pendingImages: [],    // [{id, dataUrl, mediaType, name}]
     pendingFiles: [],     // [{id, name, mediaType, size, textExcerpt, contentAvailable}]
     contextItemIds: [],  // content IDs to include as extra context
+    autoContextItemIds: [],
     activeContextId: null,
     voiceRecording: false,
     panelOpen: false,
     messages: [],
     requestInFlight: false,
+    mapViewCaptureInFlight: false,
     recentPlaceLookups: [],
     agentProfileId: "general",
     agentProfileConfidence: 0,
@@ -6343,6 +6351,7 @@ async function init() {
   updateImageryMenuValue();
   wireEvents();
   applyPanelMode();
+  setMapPanelMode(state.ui.mapPanelMode);
   await loadMapState();
   renderAssets();
   renderTerrains();
@@ -6566,6 +6575,7 @@ function initMap() {
 function wireEvents() {
   dom.collapsePanelBtn.addEventListener("click", togglePanelCollapse);
   if (dom.panelModeBtn) dom.panelModeBtn.addEventListener("click", togglePanelMode);
+  dom.mapPanelModeToggle?.addEventListener("click", toggleMapPanelMode);
   initViewModeToggle();
   dom.mcSelectBtn.addEventListener("click", toggleMcSelectMode);
   dom.undoBannerBtn.addEventListener("click", performUndo);
@@ -6982,6 +6992,11 @@ function wireEvents() {
   dom.aiChatInput.addEventListener("input", onAiChatInput);
   dom.aiAddAttachmentBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleAiAttachmentMenu(); });
   dom.aiFileInput.addEventListener("change", onAiFileInputChange);
+  dom.aiAddCurrentMapViewOption?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dom.aiAttachmentMenu.classList.add("hidden");
+    void addCurrentMapViewAttachment();
+  });
   dom.aiAddMapContextOption.addEventListener("click", (e) => {
     e.stopPropagation();
     dom.aiAttachmentMenu.classList.add("hidden");
@@ -7851,20 +7866,12 @@ function updateMapOverlayMetrics() {
 }
 
 function sampleTerrainElevation(lat, lon) {
-  return sampleTerrainElevationForTerrain(lat, lon, getActiveTerrain());
+  return resolveLocalTerrainFieldSample(lat, lon, "elevations").elevation;
 }
 
 async function sampleTerrainElevationAsync(lat, lon) {
-  const localElevation = sampleTerrainElevation(lat, lon);
-  if (localElevation !== null) {
-    return localElevation;
-  }
-
-  if (!usesConfiguredCesiumTerrain()) {
-    return null;
-  }
-
-  return await sampleCesiumTerrainElevation(lat, lon);
+  const resolved = await resolveTerrainPointSample(lat, lon);
+  return resolved.elevation;
 }
 
 function sampleTerrainElevationForTerrainId(lat, lon, terrainId) {
@@ -7872,30 +7879,143 @@ function sampleTerrainElevationForTerrainId(lat, lon, terrainId) {
 }
 
 function sampleTerrainElevationForTerrain(lat, lon, terrain) {
-  if (!terrain) {
-    return null;
-  }
+  return sampleTerrainFieldForTerrain(lat, lon, terrain, "elevations");
+}
 
-  if (
-    lat < terrain.bounds.sw.lat || lat > terrain.bounds.ne.lat
-    || lon < terrain.bounds.sw.lon || lon > terrain.bounds.ne.lon
-  ) {
+function sampleTerrainBaseElevationForTerrain(lat, lon, terrain) {
+  return sampleTerrainFieldForTerrain(lat, lon, terrain, "baseElevations");
+}
+
+function terrainContainsCoordinate(terrain, lat, lon) {
+  if (!terrain?.bounds) {
+    return false;
+  }
+  return (
+    lat >= terrain.bounds.sw.lat
+    && lat <= terrain.bounds.ne.lat
+    && lon >= terrain.bounds.sw.lon
+    && lon <= terrain.bounds.ne.lon
+  );
+}
+
+function getTerrainCellResolutionMeters(terrain, latitude = terrain?.origin?.lat ?? 0) {
+  if (!terrain) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const latMeters = Math.abs(terrain.latStepDeg ?? 0) * 111320;
+  const lonMeters = Math.abs(terrain.lonStepDeg ?? 0) * 111320 * Math.max(Math.cos((latitude * Math.PI) / 180), 1e-6);
+  return Math.max(latMeters || Number.POSITIVE_INFINITY, lonMeters || Number.POSITIVE_INFINITY);
+}
+
+function findBestLocalTerrainForCoordinate(lat, lon) {
+  const terrains = getLocalTerrainsCoveringCoordinate(lat, lon);
+  return terrains[0] ?? null;
+}
+
+function getLocalTerrainsCoveringCoordinate(lat, lon) {
+  return state.terrains
+    .filter((terrain) => terrainContainsCoordinate(terrain, lat, lon))
+    .sort((left, right) => getTerrainCellResolutionMeters(left, lat) - getTerrainCellResolutionMeters(right, lat));
+}
+
+function resolveLocalTerrainFieldSample(lat, lon, fieldName = "elevations") {
+  const terrains = getLocalTerrainsCoveringCoordinate(lat, lon);
+  let fallbackTerrain = terrains[0] ?? null;
+  for (const terrain of terrains) {
+    const elevation = sampleTerrainFieldForTerrain(lat, lon, terrain, fieldName);
+    if (elevation !== null) {
+      return { elevation, terrain };
+    }
+  }
+  return { elevation: null, terrain: fallbackTerrain };
+}
+
+function getTerrainSourceLabel(sourceType) {
+  switch (sourceType) {
+    case "geotiff":
+      return "GeoTIFF";
+    case "cesium-world":
+    case "cesium-custom":
+    case "cesium":
+      return "Cesium";
+    case "hybrid":
+      return "Hybrid";
+    case "dted":
+    default:
+      return "DTED";
+  }
+}
+
+function getTerrainSourceMaskCode(sourceType) {
+  switch (sourceType) {
+    case "dted":
+      return 1;
+    case "geotiff":
+      return 2;
+    case "cesium-world":
+      return 3;
+    case "cesium-custom":
+      return 4;
+    case "hybrid":
+      return 5;
+    default:
+      return 0;
+  }
+}
+
+function getTerrainAnalysisSampleCount(distanceMeters) {
+  return clamp(Math.ceil(distanceMeters / 150), 48, 240);
+}
+
+function terrainSampleIsValid(terrain, fieldName, index) {
+  if (!terrain) {
+    return false;
+  }
+  const source = terrain[fieldName] ?? terrain.elevations;
+  const value = source?.[index];
+  if (!Number.isFinite(value)) {
+    return false;
+  }
+  return !(terrain.nodataMask instanceof Uint8Array) || terrain.nodataMask[index] !== 1;
+}
+
+function sampleTerrainFieldForTerrain(lat, lon, terrain, fieldName = "elevations") {
+  if (!terrain || !terrainContainsCoordinate(terrain, lat, lon)) {
     return null;
   }
 
   const rowFloat = (lat - terrain.origin.lat) / terrain.latStepDeg;
   const colFloat = (lon - terrain.origin.lon) / terrain.lonStepDeg;
-  const row = clamp(Math.floor(rowFloat), 0, terrain.rows - 1);
-  const col = clamp(Math.floor(colFloat), 0, terrain.cols - 1);
-  const nextRow = Math.min(row + 1, terrain.rows - 1);
-  const nextCol = Math.min(col + 1, terrain.cols - 1);
+  const row = Math.floor(rowFloat);
+  const col = Math.floor(colFloat);
+  if (row < 0 || col < 0 || row >= terrain.rows - 1 || col >= terrain.cols - 1) {
+    return null;
+  }
+
   const rowRatio = clamp(rowFloat - row, 0, 1);
   const colRatio = clamp(colFloat - col, 0, 1);
-  const q11 = terrain.elevations[row * terrain.cols + col];
-  const q21 = terrain.elevations[row * terrain.cols + nextCol];
-  const q12 = terrain.elevations[nextRow * terrain.cols + col];
-  const q22 = terrain.elevations[nextRow * terrain.cols + nextCol];
-  return bilinear(q11, q21, q12, q22, colRatio, rowRatio);
+  const source = terrain[fieldName] ?? terrain.elevations;
+  const corners = [
+    { weight: (1 - colRatio) * (1 - rowRatio), index: row * terrain.cols + col },
+    { weight: colRatio * (1 - rowRatio), index: row * terrain.cols + col + 1 },
+    { weight: (1 - colRatio) * rowRatio, index: (row + 1) * terrain.cols + col },
+    { weight: colRatio * rowRatio, index: (row + 1) * terrain.cols + col + 1 },
+  ];
+
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const corner of corners) {
+    if (!terrainSampleIsValid(terrain, fieldName, corner.index)) {
+      continue;
+    }
+    weighted += source[corner.index] * corner.weight;
+    totalWeight += corner.weight;
+  }
+
+  if (totalWeight <= 0) {
+    return null;
+  }
+  return weighted / totalWeight;
 }
 
 function hasCesiumTerrainToken() {
@@ -7910,7 +8030,7 @@ function getEffectiveCesiumTerrainMode() {
   if (selected === "cesium-world") {
     return hasCesiumTerrainToken() ? "cesium-world" : "ellipsoid";
   }
-  if (!getActiveTerrain() && hasCesiumTerrainToken()) {
+  if (hasCesiumTerrainToken()) {
     return "cesium-world";
   }
   return "ellipsoid";
@@ -7967,6 +8087,40 @@ async function sampleCesiumTerrainElevation(lat, lon) {
   const elevation = Number.isFinite(sampled?.height) ? sampled.height : null;
   state.cesiumPointElevationCache.set(cacheKey, elevation);
   return elevation;
+}
+
+async function resolveTerrainPointSample(lat, lon, options = {}) {
+  const localFieldName = options.fieldName ?? "elevations";
+  const localResolved = options.terrain
+    ? { elevation: sampleTerrainFieldForTerrain(lat, lon, options.terrain, localFieldName), terrain: options.terrain }
+    : resolveLocalTerrainFieldSample(lat, lon, localFieldName);
+  const localTerrain = localResolved.terrain;
+  const localElevation = localResolved.elevation;
+  if (localElevation !== null) {
+    return {
+      elevation: localElevation,
+      source: localTerrain?.sourceType ?? "dted",
+      terrainCompleteness: "full",
+      terrain: localTerrain,
+    };
+  }
+
+  if (!usesConfiguredCesiumTerrain()) {
+    return {
+      elevation: null,
+      source: null,
+      terrainCompleteness: "none",
+      terrain: localTerrain ?? null,
+    };
+  }
+
+  const elevation = await sampleCesiumTerrainElevation(lat, lon);
+  return {
+    elevation,
+    source: elevation === null ? null : "cesium",
+    terrainCompleteness: elevation === null ? "none" : "full",
+    terrain: localTerrain ?? null,
+  };
 }
 
 async function sampleCesiumSceneSurfaceElevation(lat, lon) {
@@ -8037,10 +8191,13 @@ async function refreshAssetGroundElevation(asset) {
 }
 
 function refreshAllAssetGroundElevations() {
-  if (!usesConfiguredCesiumTerrain() || state.activeTerrainId) {
+  if (!usesConfiguredCesiumTerrain()) {
     return;
   }
   state.assets.forEach((asset) => {
+    if (sampleTerrainElevation(asset.lat, asset.lon) !== null) {
+      return;
+    }
     refreshAssetGroundElevation(asset).catch(() => {});
   });
 }
@@ -8362,6 +8519,22 @@ function onControlPanelSectionResize(event) {
 function togglePanelMode() {
   state.ui.panelMode = state.ui.panelMode === "edit" ? "plan" : "edit";
   applyPanelMode();
+}
+
+function toggleMapPanelMode() {
+  setMapPanelMode(state.ui.mapPanelMode === "features" ? "contents" : "features");
+}
+
+function setMapPanelMode(mode) {
+  const nextMode = mode === "features" ? "features" : "contents";
+  const isFeatures = nextMode === "features";
+  state.ui.mapPanelMode = nextMode;
+  dom.mapContentsPanel?.classList.toggle("hidden", isFeatures);
+  dom.siteStudySection?.classList.toggle("hidden", !isFeatures);
+  dom.mapContentsActions?.classList.toggle("hidden", isFeatures);
+  dom.siteStudyActions?.classList.toggle("hidden", !isFeatures);
+  dom.mapPanelModeToggle?.setAttribute("aria-checked", String(isFeatures));
+  dom.mapPanelModeToggle?.setAttribute("aria-label", isFeatures ? "Show contents" : "Show features");
 }
 
 function applyPanelMode() {
@@ -9216,8 +9389,8 @@ async function onAiChatSubmit(event) {
 
   const images = [...state.ai.pendingImages];
   const files = [...state.ai.pendingFiles];
-  const contextIds = getAiContextIds(state.ai.contextItemIds);
-  const contextItems = state.ai.contextItemIds.map((id) => ({ id, name: getMapContentName(id) })).filter((c) => c.name);
+  const contextIds = getEffectiveAiContextIds();
+  const contextItems = getAiDisplayContextItems();
   const canUseLocalLookupOnly = images.length === 0 && files.length === 0;
   const routing = resolveAiAgentProfile({
     prompt,
@@ -9648,9 +9821,11 @@ function createAiMessageController(role, text = "", images = [], contextItems = 
   if (images.length) {
     const imgRow = document.createElement("div");
     imgRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;";
-    images.forEach(({ dataUrl }) => {
+    images.forEach(({ dataUrl, name }) => {
       const img = document.createElement("img");
       img.src = dataUrl;
+      img.alt = name || "Attached image";
+      img.title = name || "Attached image";
       img.className = "ai-chat-message-image";
       imgRow.appendChild(img);
     });
@@ -9669,13 +9844,18 @@ function createAiMessageController(role, text = "", images = [], contextItems = 
     const badges = document.createElement("div");
     badges.className = "ai-message-context-badges";
     contextItems.forEach(({ id, name }) => {
-      const badge = document.createElement("button");
+      const isInteractive = Boolean(id && !String(id).startsWith("__"));
+      const badge = document.createElement(isInteractive ? "button" : "div");
       badge.className = "ai-message-context-badge";
-      badge.dataset.contentId = id;
+      if (isInteractive) {
+        badge.dataset.contentId = id;
+        badge.type = "button";
+      }
       badge.title = `Context: ${name}`;
       badge.textContent = name;
-      badge.type = "button";
-      badge.addEventListener("click", () => focusMapContent(id));
+      if (isInteractive) {
+        badge.addEventListener("click", () => focusMapContent(id));
+      }
       badges.appendChild(badge);
     });
     article.appendChild(badges);
@@ -10381,6 +10561,7 @@ function clearAiAttachments() {
   state.ai.pendingImages = [];
   state.ai.pendingFiles = [];
   state.ai.contextItemIds = [];
+  state.ai.autoContextItemIds = [];
   dom.aiImagePreviews.innerHTML = "";
   dom.aiFileChips.innerHTML = "";
   dom.aiContextChips.innerHTML = "";
@@ -10389,8 +10570,61 @@ function clearAiAttachments() {
   dom.aiAttachmentBar.classList.add("hidden");
 }
 
+function getEffectiveAiContextIds() {
+  return getAiContextIds([
+    ...state.ai.contextItemIds,
+    ...state.ai.autoContextItemIds,
+  ]);
+}
+
+function getAiDisplayContextItems() {
+  const manualItems = state.ai.contextItemIds
+    .map((id) => ({ id, name: getMapContentName(id), synthetic: false }))
+    .filter((item) => item.name);
+  if (state.ai.autoContextItemIds.length) {
+    manualItems.push({ id: "__current_map_view__", name: "Current Map View", synthetic: true });
+  }
+  return manualItems;
+}
+
+function syncAiContextChips() {
+  if (!dom.aiContextChips) {
+    return;
+  }
+  dom.aiContextChips.innerHTML = "";
+  getAiDisplayContextItems().forEach((item) => {
+    const chip = document.createElement("div");
+    chip.className = "ai-context-chip";
+    chip.dataset.contextId = item.id;
+    chip.title = item.name;
+    const label = document.createElement("span");
+    label.textContent = item.name;
+    label.style.cssText = "overflow:hidden;text-overflow:ellipsis;";
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "ai-context-chip-remove";
+    removeBtn.textContent = "x";
+    removeBtn.type = "button";
+    removeBtn.title = item.synthetic ? "Remove current map view context" : "Remove context";
+    removeBtn.addEventListener("click", () => {
+      if (item.synthetic) {
+        state.ai.autoContextItemIds = [];
+      } else {
+        state.ai.contextItemIds = state.ai.contextItemIds.filter((contextId) => contextId !== item.id);
+      }
+      syncAiContextChips();
+      syncAttachmentBar();
+      renderAiContextPicker();
+    });
+    chip.append(label, removeBtn);
+    dom.aiContextChips.appendChild(chip);
+  });
+}
+
 function syncAttachmentBar() {
-  const hasContent = state.ai.pendingImages.length > 0 || state.ai.pendingFiles.length > 0 || state.ai.contextItemIds.length > 0;
+  const hasContent = state.ai.pendingImages.length > 0
+    || state.ai.pendingFiles.length > 0
+    || state.ai.contextItemIds.length > 0
+    || state.ai.autoContextItemIds.length > 0;
   dom.aiAttachmentBar.classList.toggle("hidden", !hasContent);
 }
 
@@ -10409,7 +10643,7 @@ function onAiFileInputChange(event) {
   const files = [...(event.target.files ?? [])];
   files.forEach((file) => {
     if (file.type.startsWith("image/")) {
-      addAiPendingImage(file, file.type);
+      void addAiPendingImage(file, file.type, { name: file.name || "Attached image" });
       return;
     }
     void addAiPendingFile(file);
@@ -10436,6 +10670,15 @@ function readFileAsText(file) {
     reader.onload = () => resolve(String(reader.result ?? ""));
     reader.onerror = () => reject(reader.error ?? new Error("Failed to read file."));
     reader.readAsText(file);
+  });
+}
+
+function readBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read image data."));
+    reader.readAsDataURL(blob);
   });
 }
 
@@ -10494,6 +10737,209 @@ function addAiPendingImage(blob, mediaType) {
     syncAttachmentBar();
   };
   reader.readAsDataURL(blob);
+}
+
+function addAiPendingImageDataUrl(dataUrl, mediaType, name = "Attached image") {
+  const validType = ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mediaType) ? mediaType : "image/png";
+  state.ai.pendingImages.push({ dataUrl, mediaType: validType, name });
+  const idx = state.ai.pendingImages.length - 1;
+
+  const thumb = document.createElement("div");
+  thumb.className = "ai-image-thumb";
+  thumb.title = name;
+  const img = document.createElement("img");
+  img.src = dataUrl;
+  img.alt = name;
+  img.title = name;
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "ai-image-thumb-remove";
+  removeBtn.textContent = "Ã—";
+  removeBtn.type = "button";
+  removeBtn.addEventListener("click", () => {
+    state.ai.pendingImages.splice(idx, 1);
+    thumb.remove();
+    syncAttachmentBar();
+  });
+  thumb.append(img, removeBtn);
+  dom.aiImagePreviews.appendChild(thumb);
+  syncAttachmentBar();
+}
+
+function getVisibleBaseLayerTiles() {
+  const container = state.baseLayer?.getContainer?.();
+  if (!container || !dom.map) {
+    return [];
+  }
+  const mapRect = dom.map.getBoundingClientRect();
+  if (!mapRect.width || !mapRect.height) {
+    return [];
+  }
+  return [...container.querySelectorAll("img.leaflet-tile")].filter((tile) => {
+    const rect = tile.getBoundingClientRect();
+    return rect.width > 0
+      && rect.height > 0
+      && rect.right > mapRect.left
+      && rect.left < mapRect.right
+      && rect.bottom > mapRect.top
+      && rect.top < mapRect.bottom;
+  });
+}
+
+function waitForTileImage(tile, timeoutMs = 2000) {
+  if (tile.complete && tile.naturalWidth > 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      tile.removeEventListener("load", onLoad);
+      tile.removeEventListener("error", onError);
+      window.clearTimeout(timerId);
+    };
+    const onLoad = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("One or more imagery tiles failed to load."));
+    };
+    const timerId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Imagery tiles are still loading. Try again in a moment."));
+    }, timeoutMs);
+    tile.addEventListener("load", onLoad, { once: true });
+    tile.addEventListener("error", onError, { once: true });
+  });
+}
+
+async function captureCurrentMapViewDataUrl() {
+  if (!state.map || !state.baseLayer || !dom.map) {
+    throw new Error("Map imagery is not ready yet.");
+  }
+  if (state.view3dEnabled) {
+    throw new Error("Add Current Map View currently supports the 2D map view only.");
+  }
+
+  let tiles = getVisibleBaseLayerTiles();
+  if (!tiles.length) {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    tiles = getVisibleBaseLayerTiles();
+  }
+  if (!tiles.length) {
+    throw new Error("No imagery tiles are available in the current map view.");
+  }
+
+  await Promise.all(tiles.map((tile) => waitForTileImage(tile)));
+  tiles = getVisibleBaseLayerTiles().filter((tile) => tile.complete && tile.naturalWidth > 0);
+  if (!tiles.length) {
+    throw new Error("No loaded imagery tiles are available to capture.");
+  }
+
+  const mapRect = dom.map.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(mapRect.width));
+  const height = Math.max(1, Math.round(mapRect.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * dpr));
+  canvas.height = Math.max(1, Math.round(height * dpr));
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Failed to create an image canvas for map capture.");
+  }
+  context.scale(dpr, dpr);
+  context.imageSmoothingEnabled = true;
+
+  tiles
+    .map((tile) => ({ tile, rect: tile.getBoundingClientRect() }))
+    .sort((a, b) => (a.rect.top - b.rect.top) || (a.rect.left - b.rect.left))
+    .forEach(({ tile, rect }) => {
+      context.drawImage(tile, rect.left - mapRect.left, rect.top - mapRect.top, rect.width, rect.height);
+    });
+
+  try {
+    return canvas.toDataURL("image/png");
+  } catch {
+    throw new Error("The current imagery source does not allow browser-based capture.");
+  }
+}
+
+function doesSerializedBoundsIntersectMapView(bounds, mapBounds = state.map?.getBounds?.()) {
+  if (!bounds?.southWest || !bounds?.northEast || !mapBounds) {
+    return false;
+  }
+  const contentBounds = L.latLngBounds(
+    [Number(bounds.southWest.lat), Number(bounds.southWest.lon)],
+    [Number(bounds.northEast.lat), Number(bounds.northEast.lon)],
+  );
+  return contentBounds.isValid() && mapBounds.intersects(contentBounds);
+}
+
+function isSerializedMapContentInCurrentView(detail, mapBounds = state.map?.getBounds?.()) {
+  if (!detail || !mapBounds) {
+    return false;
+  }
+  const anchor = extractLookupAnchor(detail);
+  if (anchor.bounds && doesSerializedBoundsIntersectMapView(anchor.bounds, mapBounds)) {
+    return true;
+  }
+  if (Number.isFinite(anchor.lat) && Number.isFinite(anchor.lon)) {
+    return mapBounds.contains(L.latLng(anchor.lat, anchor.lon));
+  }
+  return false;
+}
+
+function collectCurrentMapViewContextIds() {
+  const mapBounds = state.map?.getBounds?.();
+  if (!mapBounds) {
+    return [];
+  }
+  return getMapContentEntries()
+    .filter((entry) => !entry.id.startsWith("folder:"))
+    .map((entry) => entry.id)
+    .filter((contentId, index, allIds) => allIds.indexOf(contentId) === index)
+    .filter((contentId) => !state.hiddenContentIds.has(contentId))
+    .filter((contentId) => isSerializedMapContentInCurrentView(serializeMapContentForAi(contentId), mapBounds));
+}
+
+async function addCurrentMapViewAttachment() {
+  if (state.ai.mapViewCaptureInFlight) {
+    return;
+  }
+  state.ai.mapViewCaptureInFlight = true;
+  const trigger = dom.aiAddCurrentMapViewOption;
+  const previousLabel = trigger?.textContent || "Add Current Map View";
+  if (trigger) {
+    trigger.disabled = true;
+    trigger.textContent = "Capturing...";
+  }
+  try {
+    const dataUrl = await captureCurrentMapViewDataUrl();
+    const zoomLevel = state.map?.getZoom?.();
+    state.ai.autoContextItemIds = collectCurrentMapViewContextIds();
+    syncAiContextChips();
+    syncAttachmentBar();
+    addAiPendingImageDataUrl(
+      dataUrl,
+      "image/png",
+      Number.isFinite(zoomLevel) ? `Current Map View (Zoom ${zoomLevel})` : "Current Map View",
+    );
+    setStatus("Added the current map view as image context.");
+  } catch (error) {
+    setStatus(error?.message || "Failed to capture the current map view.", true);
+  } finally {
+    state.ai.mapViewCaptureInFlight = false;
+    if (trigger) {
+      trigger.disabled = false;
+      trigger.textContent = previousLabel;
+    }
+  }
 }
 
 function toggleAiContextPicker(forceOpen = false) {
@@ -10563,11 +11009,10 @@ function toggleAiContextItem(id, name) {
   const idx = state.ai.contextItemIds.indexOf(id);
   if (idx === -1) {
     state.ai.contextItemIds.push(id);
-    addAiContextChip(id, name);
   } else {
     state.ai.contextItemIds.splice(idx, 1);
-    dom.aiContextChips.querySelector(`[data-context-id="${CSS.escape(id)}"]`)?.remove();
   }
+  syncAiContextChips();
   syncAttachmentBar();
   renderAiContextPicker();
 }
@@ -11095,7 +11540,7 @@ function buildDeterministicLookupReply(prompt) {
     return "";
   }
   const preferMgrs = wantsMgrsLookup(raw);
-  const linkedRecords = getLookupRecordsForContentIds(state.ai.contextItemIds);
+  const linkedRecords = getLookupRecordsForContentIds(getEffectiveAiContextIds());
   const sections = terms.map((term) => {
     const matches = findMapContentLookupMatches(term, 6);
     return { term, matches: matches.length ? matches : linkedRecords };
@@ -11288,7 +11733,7 @@ async function tryResolveAiMapLookup(prompt) {
     });
   }
 
-  const linkedRecords = getLookupRecordsForContentIds(state.ai.contextItemIds);
+  const linkedRecords = getLookupRecordsForContentIds(getEffectiveAiContextIds());
   if (linkedRecords.length) {
     sections.forEach((section) => {
       if (!section.matches.length) {
@@ -11545,7 +11990,9 @@ function serializeTerrainForAi(terrain) {
     name: terrain.name,
     rows: terrain.rows,
     cols: terrain.cols,
-    sourceLabel: terrain.sourceLabel ?? null,
+    sourceType: terrain.sourceType ?? null,
+    sourceLabel: terrain.sourceLabel ?? getTerrainSourceLabel(terrain.sourceType),
+    terrainCoverageMode: terrain.terrainCoverageMode ?? "local-only",
     extentVisible: Boolean(terrain.extentVisible),
     hasCoverageLayer: state.terrainCoverageLayers.has(terrain.id),
     hidden: state.hiddenContentIds.has(`terrain:${terrain.id}`),
@@ -13355,25 +13802,22 @@ function normalizeAiAssistantPayload(payload, rawText = "", prompt = "") {
 // the index and coordinates of the worst obstruction, and a compact profile.
 // Uses ~60 samples — fast enough to run synchronously for up to ~15 pairs.
 function computeTerrainLos(lat1, lon1, h1m, lat2, lon2, h2m, terrain) {
-  const SAMPLES = 60;
   const EARTH_R = 6371000;
-  // k-factor for effective Earth radius (standard atmosphere)
   const K = 4 / 3;
   const Re = K * EARTH_R;
 
   if (!terrain) {
-    return { hasTerrain: false };
+    return { hasTerrain: false, terrainCompleteness: "none" };
   }
 
   const distM = state.map.distance({ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 });
   if (distM < 10) {
-    return { hasTerrain: true, blocked: false, minClearanceM: 9999, distanceM: distM };
+    return { hasTerrain: true, blocked: false, minClearanceM: 9999, distanceM: distM, terrainCompleteness: "full" };
   }
 
+  const SAMPLES = getTerrainAnalysisSampleCount(distM);
   const el1 = sampleTerrainElevationForTerrain(lat1, lon1, terrain) ?? 0;
   const el2 = sampleTerrainElevationForTerrain(lat2, lon2, terrain) ?? 0;
-
-  // Heights above MSL at each end
   const msl1 = el1 + h1m;
   const msl2 = el2 + h2m;
 
@@ -13382,26 +13826,22 @@ function computeTerrainLos(lat1, lon1, h1m, lat2, lon2, h2m, terrain) {
   let worstLat = lat1;
   let worstLon = lon1;
   let blocked = false;
+  let sampledCount = 0;
 
   for (let i = 1; i < SAMPLES; i++) {
     const frac = i / SAMPLES;
-    // Interpolate lat/lon linearly (close enough for <200 km paths)
     const lat = lat1 + (lat2 - lat1) * frac;
     const lon = lon1 + (lon2 - lon1) * frac;
 
     const terrainElM = sampleTerrainElevationForTerrain(lat, lon, terrain);
     if (terrainElM === null) continue;
+    sampledCount += 1;
 
-    // LOS height at this fraction (straight line in MSL)
     const losHeightM = msl1 + (msl2 - msl1) * frac;
-
-    // Earth bulge correction: depresses the effective LOS by d1*d2/(2*Re)
     const d = frac * distM;
     const d1 = d;
     const d2 = distM - d;
     const bulgeCorrectionM = (d1 * d2) / (2 * Re);
-
-    // Effective clearance: how far the LOS line clears the terrain at this point
     const clearanceM = (losHeightM - bulgeCorrectionM) - terrainElM;
 
     if (clearanceM < minClearanceM) {
@@ -13415,11 +13855,21 @@ function computeTerrainLos(lat1, lon1, h1m, lat2, lon2, h2m, terrain) {
     }
   }
 
+  const terrainCompleteness = sampledCount === SAMPLES - 1
+    ? "full"
+    : sampledCount > 0
+      ? "partial"
+      : "none";
+  if (terrainCompleteness === "none") {
+    return { hasTerrain: false, distanceM: Math.round(distM), terrainCompleteness };
+  }
+
   return {
     hasTerrain: true,
     blocked,
     minClearanceM: Math.round(minClearanceM),
     distanceM: Math.round(distM),
+    terrainCompleteness,
     obstructionFrac: blocked ? Math.round(worstFrac * 100) / 100 : null,
     obstructionLat: blocked ? Math.round(worstLat * 10000) / 10000 : null,
     obstructionLon: blocked ? Math.round(worstLon * 10000) / 10000 : null,
@@ -13429,7 +13879,6 @@ function computeTerrainLos(lat1, lon1, h1m, lat2, lon2, h2m, terrain) {
 // Build a compact LOS matrix for all asset pairs (capped at 10 assets = 45 pairs).
 // Returns an array of link summaries the AI can use for placement decisions.
 function buildLosMatrix(assetsToCheck) {
-  const terrain = getActiveTerrain();
   const links = [];
   const cap = Math.min(assetsToCheck.length, 10);
   for (let i = 0; i < cap; i++) {
@@ -13438,6 +13887,7 @@ function buildLosMatrix(assetsToCheck) {
       const b = assetsToCheck[j];
       const h1 = Number.isFinite(a.antennaHeightM) ? a.antennaHeightM : 2;
       const h2 = Number.isFinite(b.antennaHeightM) ? b.antennaHeightM : 2;
+      const terrain = findBestLocalTerrainForCoordinate((a.lat + b.lat) / 2, (a.lon + b.lon) / 2);
       const result = computeTerrainLos(a.lat, a.lon, h1, b.lat, b.lon, h2, terrain);
       links.push({
         from: a.name ?? a.id,
@@ -13449,6 +13899,7 @@ function buildLosMatrix(assetsToCheck) {
         obstructionLat: result.obstructionLat ?? null,
         obstructionLon: result.obstructionLon ?? null,
         terrainAvailable: result.hasTerrain,
+        terrainCompleteness: result.terrainCompleteness ?? (result.hasTerrain ? "full" : "none"),
       });
     }
   }
@@ -13458,7 +13909,7 @@ function buildLosMatrix(assetsToCheck) {
 // Async version of computeTerrainLos — falls back to Cesium Ion terrain sampling
 // when no DTED file is loaded. Uses distance-scaled sampling so narrow ridges
 // do not get skipped on long or complex paths.
-async function computeTerrainLosAsync(lat1, lon1, h1m, lat2, lon2, h2m) {
+async function computeTerrainLosAsyncLegacy(lat1, lon1, h1m, lat2, lon2, h2m) {
   const terrain = getActiveTerrain();
   if (terrain) {
     return computeTerrainLos(lat1, lon1, h1m, lat2, lon2, h2m, terrain);
@@ -13544,6 +13995,102 @@ async function computeTerrainLosAsync(lat1, lon1, h1m, lat2, lon2, h2m) {
 }
 
 // Async LOS matrix — uses Cesium terrain fallback when no DTED is loaded.
+async function computeTerrainLosAsync(lat1, lon1, h1m, lat2, lon2, h2m) {
+  if (!state.terrains.length && !usesConfiguredCesiumTerrain()) {
+    return { hasTerrain: false, terrainCompleteness: "none" };
+  }
+
+  const EARTH_R = 6371000;
+  const Re = (4 / 3) * EARTH_R;
+  const distM = state.map.distance({ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 });
+  if (distM < 10) {
+    return {
+      hasTerrain: true,
+      blocked: false,
+      minClearanceM: 9999,
+      distanceM: distM,
+      source: state.terrains.length ? "dted" : "cesium",
+      terrainCompleteness: "full",
+    };
+  }
+
+  const SAMPLES = getTerrainAnalysisSampleCount(distM);
+  const sampleFractions = [];
+  for (let i = 1; i < SAMPLES; i++) {
+    sampleFractions.push(i / SAMPLES);
+  }
+
+  const [sourceSample, targetSample] = await Promise.all([
+    resolveTerrainPointSample(lat1, lon1),
+    resolveTerrainPointSample(lat2, lon2),
+  ]);
+  const el1 = sourceSample.elevation ?? 0;
+  const el2 = targetSample.elevation ?? 0;
+  const msl1 = el1 + h1m;
+  const msl2 = el2 + h2m;
+
+  let minClearanceM = Infinity;
+  let worstFrac = 0;
+  let worstLat = lat1;
+  let worstLon = lon1;
+  let blocked = false;
+  let sampledCount = 0;
+  const sourcesUsed = new Set([sourceSample.source, targetSample.source].filter(Boolean));
+
+  const CHUNK_SIZE = 12;
+  for (let offset = 0; offset < sampleFractions.length; offset += CHUNK_SIZE) {
+    const chunk = sampleFractions.slice(offset, offset + CHUNK_SIZE);
+    const chunkSamples = await Promise.all(chunk.map(async (frac) => {
+      const lat = lat1 + (lat2 - lat1) * frac;
+      const lon = lon1 + (lon2 - lon1) * frac;
+      const resolved = await resolveTerrainPointSample(lat, lon);
+      return { frac, lat, lon, ...resolved };
+    }));
+
+    for (const sample of chunkSamples) {
+      if (sample.elevation === null) continue;
+      sampledCount += 1;
+      if (sample.source) {
+        sourcesUsed.add(sample.source);
+      }
+
+      const losHeightM = msl1 + (msl2 - msl1) * sample.frac;
+      const d = sample.frac * distM;
+      const bulgeCorrectionM = (d * (distM - d)) / (2 * Re);
+      const clearanceM = (losHeightM - bulgeCorrectionM) - sample.elevation;
+
+      if (clearanceM < minClearanceM) {
+        minClearanceM = clearanceM;
+        worstFrac = sample.frac;
+        worstLat = sample.lat;
+        worstLon = sample.lon;
+      }
+      if (clearanceM < 0) blocked = true;
+    }
+  }
+
+  const terrainCompleteness = sampledCount === SAMPLES - 1
+    ? "full"
+    : sampledCount > 0
+      ? "partial"
+      : "none";
+  if (terrainCompleteness === "none") {
+    return { hasTerrain: false, distanceM: Math.round(distM), terrainCompleteness };
+  }
+
+  return {
+    hasTerrain: true,
+    source: sourcesUsed.size > 1 ? "hybrid" : (sourcesUsed.has("cesium") ? "cesium" : "dted"),
+    blocked,
+    minClearanceM: Math.round(minClearanceM),
+    distanceM: Math.round(distM),
+    terrainCompleteness,
+    obstructionFrac: blocked ? Math.round(worstFrac * 100) / 100 : null,
+    obstructionLat: blocked ? Math.round(worstLat * 10000) / 10000 : null,
+    obstructionLon: blocked ? Math.round(worstLon * 10000) / 10000 : null,
+  };
+}
+
 async function buildLosMatrixAsync(assetsToCheck) {
   const links = [];
   const cap = Math.min(assetsToCheck.length, 10);
@@ -13564,6 +14111,7 @@ async function buildLosMatrixAsync(assetsToCheck) {
         obstructionLat: result.obstructionLat ?? null,
         obstructionLon: result.obstructionLon ?? null,
         terrainAvailable: result.hasTerrain,
+        terrainCompleteness: result.terrainCompleteness ?? (result.hasTerrain ? "full" : "none"),
         terrainSource: result.hasTerrain ? (result.source ?? "dted") : null,
       });
     }
@@ -13667,8 +14215,8 @@ function buildAiScenarioSummary() {
     mapContents,
     activeAiContextId: state.ai.activeContextId,
     activeAiContext,
-    explicitAiContextIds: [...state.ai.contextItemIds],
-    explicitAiContextObjects: state.ai.contextItemIds.map((cid) => {
+    explicitAiContextIds: getEffectiveAiContextIds(),
+    explicitAiContextObjects: getEffectiveAiContextIds().map((cid) => {
       const name = getMapContentName(cid);
       return { contentId: cid, name };
     }).filter((o) => o.name),
@@ -13815,7 +14363,13 @@ async function executeAiActions(actions) {
     const blockedLinks = checkedLinks.filter((l) => l.losBlocked === true);
     const marginalLinks = checkedLinks.filter((l) => l.losBlocked === false && l.minClearanceM !== null && l.minClearanceM < 10);
     const terrainSource = losLinks.find((l) => l.terrainSource)?.terrainSource;
-    const sourceLabel = terrainSource === "cesium" ? " (Cesium Ion terrain)" : terrainSource === "dted" ? " (DTED)" : "";
+    const sourceLabel = terrainSource === "cesium"
+      ? " (Cesium Ion terrain)"
+      : terrainSource === "hybrid"
+        ? " (local terrain + Cesium)"
+        : terrainSource === "dted"
+          ? " (DTED)"
+          : "";
 
     if (blockedLinks.length > 0) {
       blockedLinks.forEach((l) =>
@@ -14431,7 +14985,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
   // Check LOS between a set of candidate coordinates before committing to placement.
   // action.candidates: [{lat, lon, name, antennaHeightM?}]
   if (action.type === "check-los") {
-    const hasDted = Boolean(getActiveTerrain());
+    const hasDted = state.terrains.length > 0;
     const hasCesium = usesConfiguredCesiumTerrain();
     if (!hasDted && !hasCesium) {
       return "LOS check skipped: no terrain source available (no DTED loaded and no Cesium Ion terrain configured).";
@@ -14447,7 +15001,11 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
       antennaHeightM: Number(c.antennaHeightM) || 2,
     }));
     const links = await buildLosMatrixAsync(mapped);
-    const source = links.some((l) => l.terrainSource === "cesium") ? " (via Cesium Ion terrain)" : " (via DTED)";
+    const source = links.some((l) => l.terrainSource === "hybrid")
+      ? " (via local terrain + Cesium)"
+      : links.some((l) => l.terrainSource === "cesium")
+        ? " (via Cesium Ion terrain)"
+        : " (via DTED)";
     const lines = links.map((l) =>
       !l.terrainAvailable
         ? `UNKNOWN: ${l.from} ↔ ${l.to} — terrain data unavailable for this link`
@@ -14463,7 +15021,7 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const bounds = action.bounds; // {north,south,east,west} for grid sampling
     const gridN = Math.min(Number(action.gridN) || 5, 20); // max 20×20 = 400 samples
 
-    const hasDted = Boolean(getActiveTerrain());
+    const hasDted = state.terrains.length > 0;
     const hasCesium = usesConfiguredCesiumTerrain();
 
     if (!hasDted && !hasCesium) {
@@ -14492,14 +15050,14 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
 
     // Sample each point using best available source
     const results = await Promise.all(sampleList.map(async ({ lat, lon, label }) => {
-      let elevM = null;
-      if (hasDted) {
-        elevM = sampleTerrainElevationForTerrain(lat, lon, getActiveTerrain());
-      }
-      if ((elevM === null || !Number.isFinite(elevM)) && hasCesium) {
-        try { elevM = await sampleCesiumTerrainElevation(lat, lon); } catch (_) {}
-      }
-      return { label, lat, lon, elevM: Number.isFinite(elevM) ? Math.round(elevM) : null };
+      const resolved = await resolveTerrainPointSample(lat, lon);
+      return {
+        label,
+        lat,
+        lon,
+        source: resolved.source,
+        elevM: Number.isFinite(resolved.elevation) ? Math.round(resolved.elevation) : null,
+      };
     }));
 
     const valid = results.filter((r) => r.elevM !== null);
@@ -14510,7 +15068,11 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     const peak = valid.reduce((a, b) => (b.elevM > a.elevM ? b : a));
     const lowest = valid.reduce((a, b) => (b.elevM < a.elevM ? b : a));
     const avgElev = Math.round(valid.reduce((s, r) => s + r.elevM, 0) / valid.length);
-    const source = hasDted ? "DTED" : "Cesium Ion terrain";
+    const source = valid.some((entry) => entry.source === "hybrid")
+      ? "Local terrain + Cesium"
+      : valid.some((entry) => entry.source === "cesium")
+        ? "Cesium Ion terrain"
+        : "DTED";
 
     const pointLines = valid.slice(0, 20).map((r) =>
       `  ${r.label}: ${r.elevM} m (${(r.elevM * 3.28084).toFixed(0)} ft) @ ${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}`
@@ -15633,7 +16195,7 @@ function renderTerrains() {
           ${terrain.extentVisible ? "Hide Coverage" : "Show Coverage"}
         </button>
         <button class="primary-button small" type="button" data-terrain-action="activate" data-terrain-id="${terrain.id}">
-          ${terrain.id === state.activeTerrainId ? "In Use" : "Use In Sim"}
+          ${terrain.id === state.activeTerrainId ? "Selected" : "Set Primary"}
         </button>
       </div>
     `;
@@ -15666,7 +16228,7 @@ function updateTerrainMenuValue() {
 
   const terrain = getActiveTerrain();
   if (terrain) {
-    dom.terrainMenuValue.textContent = terrain.name;
+    dom.terrainMenuValue.textContent = usesConfiguredCesiumTerrain() ? "Hybrid Terrain" : terrain.name;
     return;
   }
 
@@ -16064,7 +16626,7 @@ function onTerrainAction(event) {
     updateTerrainSummary();
     renderTerrains();
     updateMapOverlayMetrics();
-    setStatus(`${terrain.name} selected for simulation.`);
+    setStatus(`${terrain.name} marked as the primary local terrain. Matching areas still use the best local dataset first, then Cesium fallback.`);
     syncCesiumScene();
     return;
   }
@@ -16143,9 +16705,12 @@ function updateTerrainSummary() {
     return;
   }
 
+  const hybridSummary = usesConfiguredCesiumTerrain()
+    ? " Local terrain is prioritized where loaded; uncovered or invalid cells stream from Cesium in online mode."
+    : " Only loaded local terrain is available in local-only mode.";
   dom.terrainSummary.textContent =
-    `Active terrain: ${terrain.name}. ${terrain.rows} x ${terrain.cols} posts with ` +
-    `${terrain.latStepDeg.toFixed(6)} x ${terrain.lonStepDeg.toFixed(6)} degree spacing.` +
+    `Primary local terrain: ${terrain.name}. ${terrain.rows} x ${terrain.cols} posts with ` +
+    `${terrain.latStepDeg.toFixed(6)} x ${terrain.lonStepDeg.toFixed(6)} degree spacing.${hybridSummary}` +
     (terrain.osmBuildingsEnabled ? ` OSM building obstructions enabled with ${getBuildingMaterialModel().label} loss model.` : "") +
     (usesCesiumPhotorealisticTiles() ? " 3D view uses Google Photorealistic 3D Tiles for visual rendering." : "");
   updateTerrainMenuValue();
@@ -16248,10 +16813,19 @@ async function onTerrainImport(event) {
 
     state.terrains.push(terrain);
     state.activeTerrainId = terrain.id;
+    invalidateDerivedTerrainCaches();
     renderTerrains();
     updateTerrainSummary();
     updateMapOverlayMetrics();
     await cacheTerrainInWorker(terrain);
+    state.assets.forEach((asset) => {
+      asset.groundElevationM = sampleTerrainElevation(asset.lat, asset.lon);
+      if (!Number.isFinite(asset.groundElevationM) && usesConfiguredCesiumTerrain()) {
+        refreshAssetGroundElevation(asset).catch(() => {});
+      } else {
+        updateAssetMarker(asset);
+      }
+    });
     syncCesiumScene();
     setStatus("Terrain imported.");
   } catch (error) {
@@ -16276,18 +16850,25 @@ async function parseGeoTiffTerrain(buffer, fileName) {
   const rasters = await image.readRasters({ interleave: false });
   const band = rasters[0];
 
-  // TanDEM-X NoData is -32768; replace with 0
+  const metadataNoData = Number(image.getGDALNoData?.());
   const TANDEMX_NODATA = -32768;
+  const nodataValue = Number.isFinite(metadataNoData) ? metadataNoData : TANDEMX_NODATA;
   const elevations = new Float32Array(height * width);
+  const nodataMask = new Uint8Array(height * width);
   for (let i = 0; i < band.length; i++) {
-    elevations[i] = band[i] === TANDEMX_NODATA ? 0 : band[i];
+    const value = Number(band[i]);
+    const isNoData = Number.isFinite(nodataValue) && value === nodataValue;
+    nodataMask[i] = isNoData ? 1 : 0;
+    elevations[i] = isNoData ? Number.NaN : value;
   }
 
   // GeoTIFF stores rows top-to-bottom; DTED pipeline expects bottom-to-top (south first)
   const flipped = new Float32Array(height * width);
+  const flippedMask = new Uint8Array(height * width);
   for (let row = 0; row < height; row++) {
     const srcRow = height - 1 - row;
     flipped.set(elevations.subarray(srcRow * width, srcRow * width + width), row * width);
+    flippedMask.set(nodataMask.subarray(srcRow * width, srcRow * width + width), row * width);
   }
 
   const originLon = bbox[0];
@@ -16310,6 +16891,11 @@ async function parseGeoTiffTerrain(buffer, fileName) {
     latStepDeg,
     lonStepDeg,
     elevations: flipped,
+    nodataMask: flippedMask,
+    sourceType: "geotiff",
+    sourceLabel: "GeoTIFF",
+    sampledSurfaceType: "terrain",
+    terrainCoverageMode: "local-only",
     sourceName: fileName,
   };
 }
@@ -16317,8 +16903,14 @@ async function parseGeoTiffTerrain(buffer, fileName) {
 function cacheTerrainInWorker(terrain) {
   const elevations = terrain.elevations.slice(0);
   const baseElevations = terrain.baseElevations?.slice?.(0) ?? null;
+  const nodataMask = terrain.nodataMask?.slice?.(0) ?? null;
+  const sourceMask = terrain.sourceMask?.slice?.(0) ?? null;
   return new Promise((resolve) => {
     state.terrainCacheResolvers.set(terrain.id, resolve);
+    const transferables = [elevations.buffer];
+    if (baseElevations) transferables.push(baseElevations.buffer);
+    if (nodataMask) transferables.push(nodataMask.buffer);
+    if (sourceMask) transferables.push(sourceMask.buffer);
     state.worker.postMessage(
       {
         type: "terrain:cache",
@@ -16333,11 +16925,17 @@ function cacheTerrainInWorker(terrain) {
           lonStepDeg: terrain.lonStepDeg,
           elevations,
           baseElevations,
+          nodataMask,
+          sourceMask,
+          sourceType: terrain.sourceType ?? "dted",
+          sourceLabel: terrain.sourceLabel ?? getTerrainSourceLabel(terrain.sourceType),
+          terrainCoverageMode: terrain.terrainCoverageMode ?? "local-only",
+          terrainCompleteness: terrain.terrainCompleteness ?? "full",
           osmBuildingsEnabled: Boolean(terrain.osmBuildingsEnabled),
           buildingMaterialPreset: terrain.buildingMaterialPreset ?? state.settings.buildingMaterialPreset,
         },
       },
-      baseElevations ? [elevations.buffer, baseElevations.buffer] : [elevations.buffer],
+      transferables,
     );
   });
 }
@@ -16347,8 +16945,7 @@ function clearTerrain() {
   state.terrains = [];
   state.activeTerrainId = null;
   state.terrainReadyIds.clear();
-  state.ionTerrainCache.clear();
-  state.cesiumPointElevationCache.clear();
+  invalidateDerivedTerrainCaches();
   state.worker.postMessage({ type: "terrain:clear" });
   renderTerrains();
   updateTerrainSummary();
@@ -16586,6 +17183,25 @@ function getTerrainById(terrainId) {
 
 function getActiveTerrain() {
   return getTerrainById(state.activeTerrainId);
+}
+
+function buildLoadedTerrainCacheKey() {
+  return state.terrains
+    .map((terrain) => `${terrain.id}:${terrain.sourceType ?? "dted"}:${terrain.rows}x${terrain.cols}`)
+    .sort()
+    .join("|");
+}
+
+function invalidateDerivedTerrainCaches() {
+  state.ionTerrainCache.forEach((terrain) => {
+    state.worker.postMessage({
+      type: "terrain:remove",
+      payload: { id: terrain.id },
+    });
+    state.terrainReadyIds.delete(terrain.id);
+  });
+  state.ionTerrainCache.clear();
+  state.cesiumPointElevationCache.clear();
 }
 
 function loadProfiles() {
@@ -17722,12 +18338,7 @@ async function resolveTerrainIdForSimulation(asset) {
   if (!simulationUsesTerrainModel(propagationModel)) {
     return null;
   }
-  if (state.activeTerrainId) {
-    await ensureTerrainReady(state.activeTerrainId);
-    return state.activeTerrainId;
-  }
-
-  if (!usesConfiguredCesiumTerrain()) {
+  if (!state.terrains.length && !usesConfiguredCesiumTerrain()) {
     return null;
   }
 
@@ -17736,23 +18347,18 @@ async function resolveTerrainIdForSimulation(asset) {
   return await ensureIonTerrainGrid(
     bounds,
     Number(dom.gridMeters.value),
-    `sim:${asset.id}:${radiusMeters}:${dom.gridMeters.value}:${propagationModel}:${usesCesiumBuildingsInPropagation(propagationModel) ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}`,
+    `sim:${asset.id}:${radiusMeters}:${dom.gridMeters.value}:${propagationModel}:${usesCesiumBuildingsInPropagation(propagationModel) ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}:${buildLoadedTerrainCacheKey()}:${buildCesiumTerrainProviderKey()}`,
   );
 }
 
 async function resolveTerrainIdForPlanning(polygon, gridMeters) {
-  if (state.activeTerrainId) {
-    await ensureTerrainReady(state.activeTerrainId);
-    return state.activeTerrainId;
-  }
-
-  if (!usesConfiguredCesiumTerrain()) {
+  if (!state.terrains.length && !usesConfiguredCesiumTerrain()) {
     return null;
   }
 
   const bounds = boundsFromPolygon(polygon);
   const propagationModel = dom.propagationModel.value;
-  const key = `plan:${polygon.map((point) => `${point.lat.toFixed(4)},${point.lon.toFixed(4)}`).join("|")}:${gridMeters}:${propagationModel}:${usesCesiumBuildingsInPropagation(propagationModel) ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}`;
+  const key = `plan:${polygon.map((point) => `${point.lat.toFixed(4)},${point.lon.toFixed(4)}`).join("|")}:${gridMeters}:${propagationModel}:${usesCesiumBuildingsInPropagation(propagationModel) ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}:${buildLoadedTerrainCacheKey()}:${buildCesiumTerrainProviderKey()}`;
   return await ensureIonTerrainGrid(bounds, gridMeters, key);
 }
 
@@ -17773,9 +18379,15 @@ async function ensureIonTerrainGrid(bounds, gridMeters, cacheKey) {
     return cached.id;
   }
 
-  setStatus(usesCesiumBuildingsInPropagation()
-    ? "Sampling Cesium terrain and OSM buildings for propagation..."
-    : "Sampling Cesium terrain for propagation...");
+  const hasLocalTerrain = state.terrains.length > 0;
+  const hasCesiumTerrain = usesConfiguredCesiumTerrain();
+  setStatus(hasLocalTerrain && hasCesiumTerrain
+    ? "Blending local terrain with streamed Cesium terrain for propagation..."
+    : usesCesiumBuildingsInPropagation()
+      ? "Sampling Cesium terrain and OSM buildings for propagation..."
+      : hasLocalTerrain
+        ? "Preparing local terrain for propagation..."
+        : "Sampling Cesium terrain for propagation...");
   updateSimulationTerrainPrepProgress(0.02, "Resolving terrain source...", "9%");
   const terrain = await sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey);
   throwIfSimulationCanceled(state.simulationProgress.requestId);
@@ -17789,47 +18401,96 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
   const requestId = state.simulationProgress.requestId;
   const propagationModel = dom.propagationModel.value;
   const includeBuildings = usesCesiumBuildingsInPropagation(propagationModel);
+  const cesiumMode = getEffectiveCesiumTerrainMode();
+  const canUseCesium = cesiumMode === "cesium-world" || cesiumMode === "custom";
   throwIfSimulationCanceled(requestId);
   updateSimulationTerrainPrepProgress(0.08, "Resolving terrain source...", "10%");
-  const provider = await getConfiguredCesiumTerrainProvider();
+  const provider = canUseCesium ? await getConfiguredCesiumTerrainProvider() : null;
   const centerLat = (bounds.sw.lat + bounds.ne.lat) / 2;
   const latStepDeg = metersToLatitudeDegrees(gridMeters);
   const lonStepDeg = metersToLongitudeDegrees(gridMeters, centerLat);
   const rows = Math.max(2, Math.round((bounds.ne.lat - bounds.sw.lat) / latStepDeg) + 1);
   const cols = Math.max(2, Math.round((bounds.ne.lon - bounds.sw.lon) / lonStepDeg) + 1);
-  const positions = [];
+  const allPositions = [];
+  const cesiumPositions = [];
+  const cesiumIndexMap = [];
 
   for (let row = 0; row < rows; row += 1) {
     const lat = bounds.sw.lat + row * latStepDeg;
     for (let col = 0; col < cols; col += 1) {
       const lon = bounds.sw.lon + col * lonStepDeg;
-      positions.push(window.Cesium.Cartographic.fromDegrees(lon, lat));
+      allPositions.push(window.Cesium.Cartographic.fromDegrees(lon, lat));
     }
   }
 
   const baseElevations = new Float32Array(rows * cols);
-  updateSimulationTerrainPrepProgress(0.2, "Sampling Cesium terrain...", `${rows} x ${cols} grid`);
-  const terrainBatchSize = Math.max(256, Math.min(2048, cols * 6));
-  for (let start = 0; start < positions.length; start += terrainBatchSize) {
-    throwIfSimulationCanceled(requestId);
-    const batch = positions.slice(start, start + terrainBatchSize);
-    const terrainSamples = await window.Cesium.sampleTerrainMostDetailed(provider, batch);
-    terrainSamples.forEach((position, index) => {
-      baseElevations[start + index] = Number.isFinite(position.height) ? position.height : 0;
-    });
-    const fraction = (start + batch.length) / positions.length;
-    updateSimulationTerrainPrepProgress(
-      0.2 + fraction * 0.38,
-      "Sampling Cesium terrain...",
-      `${Math.round(fraction * 100)}% of terrain grid`,
-    );
-    await yieldToMainThread();
+  const nodataMask = new Uint8Array(rows * cols);
+  const sourceMask = new Uint8Array(rows * cols);
+  baseElevations.fill(Number.NaN);
+  nodataMask.fill(1);
+
+  let localSampleCount = 0;
+  let cesiumSampleCount = 0;
+  const sourceTypesUsed = new Set();
+
+  for (let index = 0; index < allPositions.length; index += 1) {
+    const position = allPositions[index];
+    const lon = window.Cesium.Math.toDegrees(position.longitude);
+    const lat = window.Cesium.Math.toDegrees(position.latitude);
+    const localResolved = resolveLocalTerrainFieldSample(lat, lon, "elevations");
+    const localTerrain = localResolved.terrain;
+    const localElevation = localResolved.elevation;
+    if (localElevation !== null) {
+      const localBase = localTerrain
+        ? (resolveLocalTerrainFieldSample(lat, lon, "baseElevations").elevation ?? localElevation)
+        : localElevation;
+      baseElevations[index] = localBase;
+      nodataMask[index] = 0;
+      const sourceType = localTerrain?.sourceType ?? "dted";
+      sourceMask[index] = getTerrainSourceMaskCode(sourceType);
+      sourceTypesUsed.add(sourceType);
+      localSampleCount += 1;
+      continue;
+    }
+
+    if (provider) {
+      cesiumIndexMap.push(index);
+      cesiumPositions.push(position);
+    }
+  }
+
+  updateSimulationTerrainPrepProgress(0.2, provider ? "Sampling hybrid terrain..." : "Sampling local terrain...", `${rows} x ${cols} grid`);
+  if (provider && cesiumPositions.length) {
+    const terrainBatchSize = Math.max(256, Math.min(2048, cols * 6));
+    for (let start = 0; start < cesiumPositions.length; start += terrainBatchSize) {
+      throwIfSimulationCanceled(requestId);
+      const batch = cesiumPositions.slice(start, start + terrainBatchSize);
+      const terrainSamples = await window.Cesium.sampleTerrainMostDetailed(provider, batch);
+      terrainSamples.forEach((position, index) => {
+        const targetIndex = cesiumIndexMap[start + index];
+        if (!Number.isFinite(position?.height)) {
+          return;
+        }
+        baseElevations[targetIndex] = position.height;
+        nodataMask[targetIndex] = 0;
+        sourceMask[targetIndex] = getTerrainSourceMaskCode(cesiumMode === "custom" ? "cesium-custom" : "cesium-world");
+        sourceTypesUsed.add(cesiumMode === "custom" ? "cesium-custom" : "cesium-world");
+        cesiumSampleCount += 1;
+      });
+      const fraction = (start + batch.length) / cesiumPositions.length;
+      updateSimulationTerrainPrepProgress(
+        0.2 + fraction * 0.38,
+        "Sampling hybrid terrain...",
+        `${Math.round(fraction * 100)}% of fallback terrain`,
+      );
+      await yieldToMainThread();
+    }
   }
 
   const elevations = new Float32Array(baseElevations);
   let sampledSurfaceType = "terrain";
 
-  if (includeBuildings) {
+  if (includeBuildings && provider) {
     updateSimulationTerrainPrepProgress(0.62, "Sampling OSM building surface...", "62%");
     await initCesiumIfNeeded();
     await syncCesiumScene();
@@ -17846,7 +18507,10 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
         const surfaceProbePositions = [];
         const probeIndexMap = [];
 
-        positions.forEach((position, index) => {
+        allPositions.forEach((position, index) => {
+          if (nodataMask[index] === 1) {
+            return;
+          }
           const lonDeg = window.Cesium.Math.toDegrees(position.longitude);
           const latDeg = window.Cesium.Math.toDegrees(position.latitude);
           const probes = [
@@ -17900,7 +18564,7 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
         });
 
         maxSurfaceHeights.forEach((height, index) => {
-          if (Number.isFinite(height)) {
+          if (Number.isFinite(height) && nodataMask[index] === 0) {
             elevations[index] = Math.max(elevations[index], height);
           }
         });
@@ -17917,11 +18581,33 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
     includeBuildings ? "30%" : "29%",
   );
 
+  const resolvedSamples = nodataMask.reduce((sum, value) => sum + (value === 0 ? 1 : 0), 0);
+  const terrainCompleteness = resolvedSamples === nodataMask.length
+    ? "full"
+    : resolvedSamples > 0
+      ? "partial"
+      : "none";
+  const terrainCoverageMode = localSampleCount && cesiumSampleCount
+    ? "hybrid"
+    : cesiumSampleCount
+      ? "cesium-only"
+      : "local-only";
+  let sourceType = terrainCoverageMode === "hybrid"
+    ? "hybrid"
+    : Array.from(sourceTypesUsed)[0] ?? (cesiumMode === "custom" ? "cesium-custom" : "dted");
+  if (sourceTypesUsed.size > 1) {
+    sourceType = "hybrid";
+  }
+
   return {
     id: `ion:${cacheKey}:${includeBuildings ? "buildings" : "terrain"}:${state.settings.buildingMaterialPreset}`,
-    name: includeBuildings
-      ? "Cesium Terrain + OSM Buildings"
-      : (dom.terrainSourceSelect.value === "custom" ? "Custom Cesium Terrain" : "Cesium World Terrain"),
+    name: terrainCoverageMode === "hybrid"
+      ? (includeBuildings ? "Hybrid Terrain + OSM Buildings" : "Hybrid Terrain")
+      : terrainCoverageMode === "local-only"
+        ? "Local Terrain Mosaic"
+        : (includeBuildings
+          ? "Cesium Terrain + OSM Buildings"
+          : (dom.terrainSourceSelect.value === "custom" ? "Custom Cesium Terrain" : "Cesium World Terrain")),
     origin: { lat: bounds.sw.lat, lon: bounds.sw.lon },
     bounds,
     rows,
@@ -17930,7 +18616,13 @@ async function sampleCesiumTerrainGrid(bounds, gridMeters, cacheKey) {
     lonStepDeg,
     elevations,
     baseElevations,
+    nodataMask,
+    sourceMask,
+    sourceType,
+    sourceLabel: terrainCoverageMode === "hybrid" ? "Hybrid" : getTerrainSourceLabel(sourceType),
     sampledSurfaceType,
+    terrainCoverageMode,
+    terrainCompleteness,
     buildingMaterialPreset: state.settings.buildingMaterialPreset,
     osmBuildingsEnabled: includeBuildings,
   };
@@ -22854,6 +23546,7 @@ function parseDted(buffer, fileName, overrideLat, overrideLon) {
   const rows = declaredLatPoints;
   const cols = declaredLonLines;
   const elevations = new Float32Array(rows * cols);
+  const nodataMask = new Uint8Array(rows * cols);
   const recordSize = 8 + rows * 2 + 4;
 
   for (let col = 0; col < cols; col += 1) {
@@ -22864,7 +23557,13 @@ function parseDted(buffer, fileName, overrideLat, overrideLon) {
 
     for (let row = 0; row < rows; row += 1) {
       const sampleOffset = offset + 8 + row * 2;
-      elevations[row * cols + col] = decodeSignedMagnitude(bytes[sampleOffset], bytes[sampleOffset + 1]);
+      const sampleIndex = row * cols + col;
+      if (isDtedVoidSample(bytes[sampleOffset], bytes[sampleOffset + 1])) {
+        nodataMask[sampleIndex] = 1;
+        elevations[sampleIndex] = Number.NaN;
+        continue;
+      }
+      elevations[sampleIndex] = decodeSignedMagnitude(bytes[sampleOffset], bytes[sampleOffset + 1]);
     }
   }
 
@@ -22895,6 +23594,11 @@ function parseDted(buffer, fileName, overrideLat, overrideLon) {
     latStepDeg,
     lonStepDeg,
     elevations,
+    nodataMask,
+    sourceType: "dted",
+    sourceLabel: "DTED",
+    sampledSurfaceType: "terrain",
+    terrainCoverageMode: "local-only",
     sourceName: fileName,
   };
 }
@@ -22920,6 +23624,11 @@ function decodeSignedMagnitude(hi, lo) {
   const sign = raw & 0x8000 ? -1 : 1;
   const magnitude = raw & 0x7fff;
   return sign * magnitude;
+}
+
+function isDtedVoidSample(hi, lo) {
+  const raw = (hi << 8) | lo;
+  return raw === 0xffff || raw === 0x8000 || raw === 0x7fff;
 }
 
 function parseArcSeconds(value) {
@@ -27033,7 +27742,7 @@ async function assessLinkQualityLegacyOld(a, b) {
         : 6.9 + 20 * Math.log10(Math.sqrt((v - 0.1) ** 2 + 1) + v - 0.1);
       diffractionDb = Math.min(diffractionDb, 40); // cap at 40 dB
 
-      const src = los.source === "cesium" ? "Cesium terrain" : "DTED";
+      const src = los.source === "hybrid" ? "local terrain + Cesium" : los.source === "cesium" ? "Cesium terrain" : "DTED";
       score -= diffractionDb >= 30 ? 50 : diffractionDb >= 15 ? 30 : 15;
       reasons.push(
         `Terrain BLOCKED (${src}): LOS obstructed by ${obstrM.toFixed(0)} m. ` +
@@ -27041,7 +27750,7 @@ async function assessLinkQualityLegacyOld(a, b) {
         (los.obstructionLat ? `Worst obstruction ~${(los.obstructionFrac * distKm).toFixed(1)} km from TX.` : "")
       );
     } else {
-      const src = los.source === "cesium" ? "Cesium terrain" : "DTED";
+      const src = los.source === "hybrid" ? "local terrain + Cesium" : los.source === "cesium" ? "Cesium terrain" : "DTED";
       const clr = Number.isFinite(los.minClearanceM) ? `${los.minClearanceM.toFixed(0)} m clearance` : "clear";
       reasons.push(`Terrain LOS clear (${src}): ${clr}.`);
     }
@@ -27284,10 +27993,10 @@ async function assessLinkQuality(a, b) {
           score = Math.min(score, 6);
           reasons.push("Terrain blockage is severe enough that this ground link should be treated as effectively non-viable, not merely degraded.");
         }
-        reasons.push(`Terrain blocked (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${obstructionM.toFixed(0)} m obstruction, ${fresnelRadiusM.toFixed(1)} m Fresnel radius, ~${terrainPenaltyDb.toFixed(1)} dB excess loss.`);
+        reasons.push(`Terrain blocked (${los.source === "hybrid" ? "local terrain + Cesium" : los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${obstructionM.toFixed(0)} m obstruction, ${fresnelRadiusM.toFixed(1)} m Fresnel radius, ~${terrainPenaltyDb.toFixed(1)} dB excess loss.`);
       } else {
         const clr = Number.isFinite(los.minClearanceM) ? `${los.minClearanceM.toFixed(0)} m clearance` : "clear";
-        reasons.push(`Terrain LOS clear (${los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${clr}.`);
+        reasons.push(`Terrain LOS clear (${los.source === "hybrid" ? "local terrain + Cesium" : los.source === "cesium" ? "Cesium terrain" : "DTED"}): ${clr}.`);
       }
     } else {
       reasons.push("No terrain data available — terrain effects omitted from the estimate.");
@@ -27402,8 +28111,8 @@ function showTopoLinkDetail(a, b, quality, nameA, nameB) {
   const t = quality.terrain;
   const terrainBadge = !t ? `<span style="color:var(--muted);font-size:0.65rem">⛰ No terrain data</span>`
     : t.blocked
-      ? `<span style="color:#ef4444;font-size:0.65rem">⛰ LOS BLOCKED · ${Math.abs(t.minClearanceM).toFixed(0)} m obstruction${t.source === "cesium" ? " · Cesium" : " · DTED"}</span>`
-      : `<span style="color:#10b981;font-size:0.65rem">⛰ LOS Clear · ${t.minClearanceM?.toFixed(0) ?? "?"}m clearance${t.source === "cesium" ? " · Cesium" : " · DTED"}</span>`;
+      ? `<span style="color:#ef4444;font-size:0.65rem">⛰ LOS BLOCKED · ${Math.abs(t.minClearanceM).toFixed(0)} m obstruction${t.source === "hybrid" ? " · Hybrid" : t.source === "cesium" ? " · Cesium" : " · DTED"}</span>`
+      : `<span style="color:#10b981;font-size:0.65rem">⛰ LOS Clear · ${t.minClearanceM?.toFixed(0) ?? "?"}m clearance${t.source === "hybrid" ? " · Hybrid" : t.source === "cesium" ? " · Cesium" : " · DTED"}</span>`;
 
   const statsRow = (quality.distKm != null)
     ? `<div style="display:flex;gap:14px;font-size:0.68rem;color:var(--muted);margin:6px 0 8px">
@@ -27777,13 +28486,20 @@ function syncTopologyToolbarUi() {
   dom.topoDisplayEmittersBtn?.classList.toggle("is-active", mode === "emitters");
   dom.topoDisplayEmittersBtn?.setAttribute("aria-selected", String(mode === "emitters"));
   if (dom.topoTerrainStatus) {
-    const terrainLabel = getActiveTerrain()
+    const terrainLabel = state.terrains.length && usesConfiguredCesiumTerrain()
       ? "ON · DTED"
       : usesConfiguredCesiumTerrain()
         ? "ON · CESIUM"
         : "OFF";
-    dom.topoTerrainStatus.textContent = terrainLabel;
-    dom.topoTerrainStatus.dataset.state = terrainLabel === "OFF" ? "off" : "on";
+    const effectiveTerrainLabel = state.terrains.length && usesConfiguredCesiumTerrain()
+      ? "ON · HYBRID"
+      : state.terrains.length
+        ? "ON · LOCAL"
+        : usesConfiguredCesiumTerrain()
+          ? "ON · CESIUM"
+          : "OFF";
+    dom.topoTerrainStatus.textContent = effectiveTerrainLabel;
+    dom.topoTerrainStatus.dataset.state = effectiveTerrainLabel === "OFF" ? "off" : "on";
   }
 }
 

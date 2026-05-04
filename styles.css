@@ -915,17 +915,61 @@ body.panel-collapsed .control-panel {
   display: flex;
   flex-direction: column;
 }
-.map-contents-card .section-title-row {
+.map-contents-card-header {
+  display: grid;
+  gap: 10px;
   flex-shrink: 0;
 }
 
-.map-contents-card .section-title-row {
+.map-contents-card .section-title-row,
+.map-contents-card-header {
+  flex-shrink: 0;
+}
+
+.map-contents-card .section-title-row,
+.map-contents-card-header {
   overflow: visible;
 }
 
+.map-contents-toolbar-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.map-panel-mode-toggle {
+  width: 126px;
+}
+
+.map-panel-actions,
 .map-contents-card .button-row {
   overflow: visible;
   gap: 4px;
+}
+
+.map-panel-actions {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.map-panel-view {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-panel-features {
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.map-panel-body-header {
+  flex-shrink: 0;
+  padding-bottom: 2px;
 }
 
 .map-contents-search-row {
