@@ -1326,7 +1326,13 @@ const CESIUM_ION_TOKEN_STORAGE_KEY = "ew-sim-cesium-ion-token";
 const AI_PROVIDER_STORAGE_KEY = "ew-sim-ai-provider";
 const TAK_IDENTITY_STORAGE_KEY_PREFIX = "ew-sim-tak-identity";
 const MAP_STATE_STORAGE_KEY = "ew-sim-map-state";
+const MAP_VIEW_CACHE_STORAGE_KEY = "ew-sim-map-view-cache";
 const MAP_STATE_STORAGE_KEY_LEGACY = null; // no prior keys to migrate
+const DEFAULT_MAP_VIEW = Object.freeze({
+  lat: 34.296261,
+  lng: -116.166038,
+  zoom: 10,
+});
 const KMZ_ITEMS_STORAGE_KEY_PREFIX = "ew-sim-kmz-items";
 
 function getKmzStorageKey(projectId) {
@@ -6567,7 +6573,7 @@ function initMap() {
     // Throttle wheel zoom so the viewport doesn't request a new tile set on
     // every scroll tick.
     wheelDebounceTime: 100,
-  }).setView([34.744, -116.151], 10);
+  }).setView([DEFAULT_MAP_VIEW.lat, DEFAULT_MAP_VIEW.lng], DEFAULT_MAP_VIEW.zoom);
   ensureSharedPanes();
   state.viewshedRootLayer.addTo(state.map);
 }
@@ -7205,8 +7211,59 @@ function serializeImportedItem(item) {
   };
 }
 
-function serializeCurrentMapState() {
+function getDefaultMapView() {
+  return { ...DEFAULT_MAP_VIEW };
+}
+
+function getCurrentMapView() {
   const center = state.map.getCenter();
+  return {
+    lat: center.lat,
+    lng: center.lng,
+    zoom: state.map.getZoom(),
+  };
+}
+
+function getMapViewCacheScopeKey() {
+  return state.session.activeProjectId || "__local__";
+}
+
+function readMapViewCache() {
+  try {
+    const raw = window.localStorage.getItem(MAP_VIEW_CACHE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    window.localStorage.removeItem(MAP_VIEW_CACHE_STORAGE_KEY);
+    return {};
+  }
+}
+
+function getCachedMapViewForCurrentScope() {
+  const cached = readMapViewCache()[getMapViewCacheScopeKey()];
+  if (!cached) {
+    return null;
+  }
+  const lat = Number(cached.lat);
+  const lng = Number(cached.lng);
+  const zoom = Number(cached.zoom);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(zoom)) {
+    return null;
+  }
+  return { lat, lng, zoom };
+}
+
+function applyCachedMapViewForCurrentScope() {
+  const cached = getCachedMapViewForCurrentScope();
+  if (!cached) {
+    return false;
+  }
+  state.map.setView([cached.lat, cached.lng], cached.zoom, { animate: false });
+  return true;
+}
+
+function serializeCurrentMapState(options = {}) {
+  const mapView = options.includeCurrentMapView ? getCurrentMapView() : getDefaultMapView();
   const serializedImported = state.importedItems
     .filter((item) => !isTakLiveImportedItem(item))
     .map(serializeImportedItem);
@@ -7220,7 +7277,7 @@ function serializeCurrentMapState() {
   return {
     schemaVersion: STATE_SCHEMA_VERSION,
     savedAt: nowIso(),
-    mapView: { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() },
+    mapView,
     assets: state.assets,
     plan: serializeToPlanState(),
     profiles: state.profiles,
@@ -7250,17 +7307,15 @@ function serializeMapStateForServer() {
   return serverState;
 }
 
-// Cheap map-view-only save triggered on every pan/zoom. Only patches the
-// mapView key in the existing localStorage blob — never re-serializes KMZ
-// geometry or queues an autosave, so large overlays don't cause lag.
+// Cheap browser-only map-view cache triggered on every pan/zoom. This is
+// intentionally separate from project/autosave state so saved projects can
+// reopen at the default view while browser refresh still restores the last
+// local viewport for the current project scope.
 function saveMapViewPosition() {
   try {
-    const raw = window.localStorage.getItem(MAP_STATE_STORAGE_KEY);
-    const existing = raw ? JSON.parse(raw) : null;
-    if (!existing) return; // nothing saved yet; full saveMapState will run at next real change
-    const center = state.map.getCenter();
-    existing.mapView = { lat: center.lat, lng: center.lng, zoom: state.map.getZoom() };
-    window.localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(existing));
+    const cache = readMapViewCache();
+    cache[getMapViewCacheScopeKey()] = getCurrentMapView();
+    window.localStorage.setItem(MAP_VIEW_CACHE_STORAGE_KEY, JSON.stringify(cache));
   } catch {
     // quota or parse error — skip silently
   }
@@ -7324,6 +7379,7 @@ function applySavedMapState(rawSaved) {
   if (saved.mapView) {
     state.map.setView([saved.mapView.lat, saved.mapView.lng], saved.mapView.zoom, { animate: false });
   }
+  applyCachedMapViewForCurrentScope();
 
   // Restore folders
   if (Array.isArray(saved.mapContentFolders)) {
@@ -7531,7 +7587,10 @@ async function loadMapState() {
       ...localState,
       importedItems: [...guestKmzItems, ...drawnItems],
     });
+    return;
   }
+
+  applyCachedMapViewForCurrentScope();
 }
 
 function toggleSettingsMenu(event) {
@@ -9327,6 +9386,7 @@ function syncAiUi() {
   }
   if (dom.aiAgentModeIndicator && dom.aiAgentModeLabel) {
     const activeProfile = getAiAgentProfile();
+    dom.aiAgentModeShell?.classList.toggle("hidden", (state.ai.agentProfileId || "general") === "general");
     dom.aiAgentModeLabel.textContent = activeProfile.indicatorLabel;
     dom.aiAgentModeIndicator.dataset.mode = state.ai.agentProfileId || "general";
     dom.aiAgentModeIndicator.title = `${activeProfile.label} · ${Math.round((state.ai.agentProfileConfidence || 0) * 100)}% confidence\n${state.ai.agentProfileReason || activeProfile.summary}`;
@@ -10725,7 +10785,7 @@ function addAiPendingImage(blob, mediaType) {
     img.alt = "Attached image";
     const removeBtn = document.createElement("button");
     removeBtn.className = "ai-image-thumb-remove";
-    removeBtn.textContent = "×";
+    removeBtn.textContent = "x";
     removeBtn.type = "button";
     removeBtn.addEventListener("click", () => {
       state.ai.pendingImages.splice(idx, 1);
@@ -10753,7 +10813,7 @@ function addAiPendingImageDataUrl(dataUrl, mediaType, name = "Attached image") {
   img.title = name;
   const removeBtn = document.createElement("button");
   removeBtn.className = "ai-image-thumb-remove";
-  removeBtn.textContent = "Ã—";
+    removeBtn.textContent = "x";
   removeBtn.type = "button";
   removeBtn.addEventListener("click", () => {
     state.ai.pendingImages.splice(idx, 1);
@@ -28260,7 +28320,9 @@ function syncMapTakDebugPanelState() {
     toggle.setAttribute("aria-label", _mapTakDebugCollapsed ? "Expand TAK debug panel" : "Collapse TAK debug panel");
   }
   if (_mapTakDebugCollapsed) {
+    panel.style.removeProperty("width");
     panel.style.removeProperty("height");
+    panel.style.removeProperty("max-height");
   } else {
     applyMapTakDebugPanelSize(panel);
   }
