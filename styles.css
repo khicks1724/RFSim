@@ -1455,11 +1455,16 @@ body:not(.ai-panel-open) .ai-panel {
 }
 
 /* Context item badges pinned to user messages */
+.ai-message-context-sep {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 6px 0 4px;
+}
+
 .ai-message-context-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  order: -1;
 }
 
 .ai-message-context-badge {

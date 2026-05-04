@@ -6801,10 +6801,14 @@ function wireEvents() {
   });
   dom.exportMenuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    closeDrawDropdown();
     const hidden = dom.exportDropdown.classList.toggle("hidden");
     if (!hidden) positionTopBarDropdown(dom.exportDropdown, dom.exportMenuBtn);
   });
-  document.addEventListener("click", () => dom.exportDropdown.classList.add("hidden"));
+  document.addEventListener("click", () => {
+    dom.exportDropdown.classList.add("hidden");
+    closeDrawDropdown();
+  });
 
   const closeExport = () => dom.exportDropdown.classList.add("hidden");
   const importFileInputEl = document.querySelector("#importFileInput");
@@ -7563,7 +7567,8 @@ function updateMapOverlayMetrics() {
 
   const center = state.map.getCenter();
   dom.centerCoordinateLabel.textContent = state.settings.coordinateSystem === "mgrs" ? "Center Grid" : "Center Pos";
-  dom.centerCoordinateValue.textContent = formatCoordinate(center.lat, center.lng, state.settings.coordinateSystem);
+  const centerCoordRaw = formatCoordinate(center.lat, center.lng, state.settings.coordinateSystem);
+  dom.centerCoordinateValue.textContent = state.settings.coordinateSystem === "mgrs" ? formatMgrsDisplay(centerCoordRaw) : centerCoordRaw;
 
   const centerElevationM = sampleTerrainElevation(center.lat, center.lng);
   if (centerElevationM !== null) {
@@ -9074,9 +9079,8 @@ function renderMarkdown(text) {
     result = result.replace(/\x00COORD\x00(\d+)\x00/g, (_, idx) => {
       const { lat, lon, mgrsHint } = coordTokens[Number(idx)];
       const sys = state.settings.coordinateSystem;
-      const display = mgrsHint && sys === "mgrs"
-        ? formatMgrsDisplay(mgrsHint)
-        : formatCoordinate(lat, lon, sys);
+      const raw = mgrsHint && sys === "mgrs" ? mgrsHint : formatCoordinate(lat, lon, sys);
+      const display = sys === "mgrs" ? formatMgrsDisplay(raw) : raw;
       const safeDisplay = escapeHtml(display);
       return `<button class="ai-coord-link" data-lat="${lat}" data-lon="${lon}" title="Pan map to ${safeDisplay}">${safeDisplay}</button>`;
     });
@@ -9332,7 +9336,15 @@ function createAiMessageController(role, text = "", images = [], contextItems = 
     article.appendChild(imgRow);
   }
 
+  const body = document.createElement("div");
+  body.className = "ai-chat-message-body";
+  body.innerHTML = renderMarkdown(text);
+  article.appendChild(body);
+
   if (role === "user" && contextItems.length > 0) {
+    const sep = document.createElement("hr");
+    sep.className = "ai-message-context-sep";
+    article.appendChild(sep);
     const badges = document.createElement("div");
     badges.className = "ai-message-context-badges";
     contextItems.forEach(({ id, name }) => {
@@ -9347,11 +9359,6 @@ function createAiMessageController(role, text = "", images = [], contextItems = 
     });
     article.appendChild(badges);
   }
-
-  const body = document.createElement("div");
-  body.className = "ai-chat-message-body";
-  body.innerHTML = renderMarkdown(text);
-  article.appendChild(body);
 
   dom.aiChatMessages.append(article);
   dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
@@ -15036,7 +15043,9 @@ async function onTerrainImport(event) {
 
   try {
     const buffer = await file.arrayBuffer();
-    const terrain = parseDted(buffer, file.name);
+    const lowerName = file.name.toLowerCase();
+    const isGeoTiff = lowerName.endsWith(".tif") || lowerName.endsWith(".tiff");
+    const terrain = isGeoTiff ? await parseGeoTiffTerrain(buffer, file.name) : parseDted(buffer, file.name);
     terrain.id = generateId();
     terrain.name = file.name;
     terrain.extentVisible = false;
@@ -15050,11 +15059,63 @@ async function onTerrainImport(event) {
     syncCesiumScene();
     setStatus("Terrain imported.");
   } catch (error) {
-    dom.terrainSummary.textContent = "Terrain import failed. Check DTED format.";
+    dom.terrainSummary.textContent = "Terrain import failed.";
     setStatus(error.message, true);
   } finally {
     dom.dtedInput.value = "";
   }
+}
+
+async function parseGeoTiffTerrain(buffer, fileName) {
+  if (typeof GeoTIFF === "undefined") {
+    throw new Error("GeoTIFF library not loaded.");
+  }
+  const tiff = await GeoTIFF.fromArrayBuffer(buffer);
+  const image = await tiff.getImage();
+  const bbox = image.getBoundingBox(); // [minX, minY, maxX, maxY] in image CRS
+  const width = image.getWidth();
+  const height = image.getHeight();
+
+  // Read first band as float
+  const rasters = await image.readRasters({ interleave: false });
+  const band = rasters[0];
+
+  // TanDEM-X NoData is -32768; replace with 0
+  const TANDEMX_NODATA = -32768;
+  const elevations = new Float32Array(height * width);
+  for (let i = 0; i < band.length; i++) {
+    elevations[i] = band[i] === TANDEMX_NODATA ? 0 : band[i];
+  }
+
+  // GeoTIFF stores rows top-to-bottom; DTED pipeline expects bottom-to-top (south first)
+  const flipped = new Float32Array(height * width);
+  for (let row = 0; row < height; row++) {
+    const srcRow = height - 1 - row;
+    flipped.set(elevations.subarray(srcRow * width, srcRow * width + width), row * width);
+  }
+
+  const originLon = bbox[0];
+  const originLat = bbox[1];
+  const lonStepDeg = (bbox[2] - bbox[0]) / Math.max(width - 1, 1);
+  const latStepDeg = (bbox[3] - bbox[1]) / Math.max(height - 1, 1);
+
+  if (!Number.isFinite(originLat) || !Number.isFinite(originLon) || !latStepDeg || !lonStepDeg) {
+    throw new Error(`GeoTIFF georeference could not be resolved from ${fileName}.`);
+  }
+
+  return {
+    origin: { lat: originLat, lon: originLon },
+    bounds: {
+      sw: { lat: originLat, lon: originLon },
+      ne: { lat: originLat + latStepDeg * Math.max(height - 1, 0), lon: originLon + lonStepDeg * Math.max(width - 1, 0) },
+    },
+    rows: height,
+    cols: width,
+    latStepDeg,
+    lonStepDeg,
+    elevations: flipped,
+    sourceName: fileName,
+  };
 }
 
 function cacheTerrainInWorker(terrain) {
@@ -18737,6 +18798,7 @@ function formatShapeArea(areaSqMeters) {
 // ── Draw toolbar ──────────────────────────────────────────────────────────────
 
 function toggleDrawDropdown() {
+  dom.exportDropdown?.classList.add("hidden");
   const hidden = dom.drawDropdown.classList.toggle("hidden");
   if (!hidden) {
     closeShapeStylePanel();
@@ -20315,7 +20377,7 @@ async function parseKmlFeatures(text, fileName, options = {}) {
   let parsedPlacemarks = 0;
 
   const parsePlacemark = async (placemark, folderPath) => {
-    const rawName = directText(placemark, "name");
+    const rawName = stripHtmlTags(directText(placemark, "name"));
     const properties = {};
     const extData = findChild(placemark, "ExtendedData");
     if (extData) {
