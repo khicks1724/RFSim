@@ -459,7 +459,92 @@
               </button>
             </div>
             <div id="mapContentsList" class="map-contents-list"></div>
-          </section>
+        </section>
+
+        <section id="siteStudySection" class="card">
+          <div class="section-title-row">
+            <h2>Site Studies</h2>
+            <div class="button-row">
+              <button id="runSiteStudyBtn" class="primary-button small" type="button">Run Study</button>
+            </div>
+          </div>
+          <div class="two-column">
+            <label class="span-2">
+              Study Type
+              <select id="siteStudyTypeSelect">
+                <option value="relay">Relay Siting</option>
+                <option value="sensor">RF Sensor Site</option>
+                <option value="command-post">Command Post Site</option>
+                <option value="link">Direct Link Study</option>
+              </select>
+            </label>
+            <label class="span-2">
+              Primary Asset / Endpoint
+              <select id="siteStudyPrimaryAsset"></select>
+            </label>
+            <label class="span-2">
+              Secondary Asset / Endpoint
+              <select id="siteStudySecondaryAsset"></select>
+            </label>
+            <label class="span-2">
+              Candidate Area / Corridor
+              <select id="siteStudyCandidateContent"></select>
+            </label>
+            <label class="span-2">
+              Objective / Threat / Target Area
+              <select id="siteStudyObjectiveContent"></select>
+            </label>
+            <label>
+              Link Preset
+              <select id="siteStudyLinkPreset">
+                <option value="rocket-m5-omni">Rocket M5 + Omni</option>
+                <option value="rocket-m5-sector">Rocket M5 + Sector</option>
+                <option value="rocket-m5-dish">Rocket M5 + Dish</option>
+                <option value="generic-5ghz-ptp">Generic 5 GHz PtP</option>
+                <option value="generic-vhf-relay">Generic VHF Relay</option>
+                <option value="generic-uhf-relay">Generic UHF Relay</option>
+              </select>
+            </label>
+            <label>
+              Clearance Policy
+              <select id="siteStudyClearancePolicy">
+                <option value="geometric-los">Geometric LOS</option>
+                <option value="fresnel-60" selected>LOS + 60% Fresnel</option>
+                <option value="fresnel-100">LOS + 100% Fresnel</option>
+                <option value="fresnel-60-buildings">LOS + 60% Fresnel + Buildings</option>
+              </select>
+            </label>
+            <label>
+              Candidate Step m
+              <input id="siteStudyGridMeters" type="number" min="25" max="5000" step="25" value="100">
+            </label>
+            <label>
+              Max Mast Height m
+              <input id="siteStudyMaxMastHeight" type="number" min="1" max="300" step="1" value="30">
+            </label>
+            <label>
+              Top Candidates
+              <input id="siteStudyTopCount" type="number" min="1" max="25" step="1" value="8">
+            </label>
+          </div>
+          <div id="siteStudySummary" class="terrain-summary">
+            Run deterministic relay, sensor, command-post, or direct-link studies using placed assets and map geometry.
+          </div>
+          <div class="list-shell">
+            <div class="list-header">
+              <span>Study Results</span>
+            </div>
+            <div id="siteStudyList" class="asset-list"></div>
+          </div>
+          <div class="list-shell site-study-detail-shell">
+            <div class="list-header">
+              <span>Selected Candidate</span>
+            </div>
+            <div id="siteStudyDetail" class="terrain-summary">
+              Select a study result to inspect terrain, clearance, and link details.
+            </div>
+          </div>
+        </section>
         </div>
 
         <div id="controlPanelSectionDivider" class="control-panel-section-divider" role="separator" aria-orientation="horizontal" aria-label="Resize map contents panel"></div>
@@ -1168,6 +1253,13 @@
           <div class="ai-panel-title-copy">
             <strong>AI Agent</strong>
             <span class="eyebrow" id="aiPanelStatus">Offline</span>
+          </div>
+          <div class="ai-agent-mode-shell" id="aiAgentModeShell" title="Active agent mode">
+            <span class="eyebrow">Mode</span>
+            <button id="aiAgentModeIndicator" class="ai-agent-mode-indicator" type="button" aria-label="Active agent mode">
+              <span class="ai-agent-mode-dot" aria-hidden="true"></span>
+              <span id="aiAgentModeLabel">General</span>
+            </button>
           </div>
           <label class="ai-model-toggle">
             <span class="eyebrow">Model</span>

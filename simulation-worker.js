@@ -61,6 +61,14 @@ self.addEventListener("message", (event) => {
         type: "planning:complete",
         payload: planSites(payload),
       });
+      return;
+    }
+
+    if (type === "site-study:start") {
+      self.postMessage({
+        type: "site-study:complete",
+        payload: runSiteStudy(payload),
+      });
     }
   } catch (error) {
     if (error instanceof Error && error.message === "SIMULATION_CANCELED") {
@@ -343,6 +351,358 @@ function planSites(payload) {
     terrainId,
     recommendations: best.slice(0, 5),
     candidateCount: candidates.length,
+  };
+}
+
+function runSiteStudy(payload) {
+  const {
+    requestId,
+    studyType,
+    primaryAsset,
+    secondaryAsset,
+    candidateGeometry,
+    objectiveGeometry,
+    gridMeters,
+    maxMastHeightM,
+    topCount,
+    weather,
+    terrainId,
+    propagationModel,
+    clearancePolicy,
+    linkPreset,
+  } = payload;
+
+  if (!candidateGeometry?.points?.length) {
+    throw new Error("Select a candidate area or corridor first.");
+  }
+
+  const terrain = resolveTerrain(terrainId);
+  const candidates = generateCandidatePoints(candidateGeometry, gridMeters);
+  if (!candidates.length) {
+    throw new Error("No candidate points could be generated from the selected geometry.");
+  }
+
+  const results = [];
+  if (studyType === "relay" || studyType === "link") {
+    if (!primaryAsset) {
+      throw new Error("A primary endpoint asset is required for this study.");
+    }
+    const endpoint = normalizeAssetEndpoint(primaryAsset);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = materializeCandidateEndpoint(candidates[index], linkPreset, maxMastHeightM, index, candidateGeometry.name);
+      const profile = buildPathProfile(candidate, endpoint, terrain, weather, propagationModel, clearancePolicy);
+      const score = scoreRelayCandidate(profile, linkPreset);
+      results.push({
+        name: candidate.name,
+        lat: candidate.lat,
+        lon: candidate.lon,
+        score,
+        distanceKm: profile.distanceKm,
+        requiredMastHeightM: candidate.antennaHeightM + profile.requiredExtraTxHeightM,
+        summary: `${profile.distanceKm.toFixed(1)} km · ${profile.fadeMarginDb.toFixed(1)} dB fade`,
+        confidenceLabel: terrain ? (terrain.osmBuildingsEnabled ? "Terrain + approximate buildings" : "Terrain only") : "No terrain",
+        modeLabel: studyType === "link" ? "Direct Link" : "Relay",
+        policyLabel: clearancePolicyLabel(clearancePolicy),
+        sourceLabel: terrain ? (terrain.osmBuildingsEnabled ? "Approx Buildings" : "DTED/Cesium") : "No terrain",
+        worstPointLabel: profile.worstPoint ? `${profile.worstPoint.lat.toFixed(4)}, ${profile.worstPoint.lon.toFixed(4)}` : "Not available",
+        legs: [serializeLeg("Candidate → Endpoint", candidate, endpoint, profile)],
+      });
+    }
+  } else if (studyType === "sensor") {
+    const objectiveSamples = sampleObjectivePoints(objectiveGeometry ?? candidateGeometry);
+    const backhaul = primaryAsset ? normalizeAssetEndpoint(primaryAsset) : null;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = materializeCandidateEndpoint(candidates[index], linkPreset, maxMastHeightM, index, candidateGeometry.name);
+      const visibilityProfiles = objectiveSamples.map((sample) => buildPathProfile(candidate, sample, terrain, weather, propagationModel, "geometric-los"));
+      const backhaulProfile = backhaul ? buildPathProfile(candidate, backhaul, terrain, weather, propagationModel, clearancePolicy) : null;
+      const visibleCount = visibilityProfiles.filter((profile) => profile.geometricLosClear).length;
+      const visibilityScore = objectiveSamples.length ? (visibleCount / objectiveSamples.length) * 100 : 0;
+      const score = visibilityScore + (backhaulProfile ? clamp(backhaulProfile.fadeMarginDb + 40, 0, 40) : 20);
+      results.push({
+        name: `${candidateGeometry.name || "Sensor"} ${index + 1}`,
+        lat: candidate.lat,
+        lon: candidate.lon,
+        score,
+        distanceKm: backhaulProfile?.distanceKm ?? 0,
+        requiredMastHeightM: candidate.antennaHeightM + (backhaulProfile?.requiredExtraTxHeightM ?? 0),
+        summary: `${visibleCount}/${objectiveSamples.length} objective rays clear`,
+        confidenceLabel: terrain ? "Terrain only" : "No terrain",
+        modeLabel: "Sensor",
+        policyLabel: "Visibility + Backhaul",
+        sourceLabel: terrain ? "DTED/Cesium" : "No terrain",
+        worstPointLabel: backhaulProfile?.worstPoint ? `${backhaulProfile.worstPoint.lat.toFixed(4)}, ${backhaulProfile.worstPoint.lon.toFixed(4)}` : "Not available",
+        legs: backhaulProfile ? [serializeLeg("Sensor → Backhaul", candidate, backhaul, backhaulProfile)] : [],
+      });
+    }
+  } else if (studyType === "command-post") {
+    if (!primaryAsset) {
+      throw new Error("A primary support asset is required for command-post siting.");
+    }
+    const supportA = normalizeAssetEndpoint(primaryAsset);
+    const supportB = secondaryAsset ? normalizeAssetEndpoint(secondaryAsset) : null;
+    const threatSamples = sampleObjectivePoints(objectiveGeometry ?? candidateGeometry);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = materializeCandidateEndpoint(candidates[index], linkPreset, maxMastHeightM, index, candidateGeometry.name);
+      const toA = buildPathProfile(candidate, supportA, terrain, weather, propagationModel, clearancePolicy);
+      const toB = supportB ? buildPathProfile(candidate, supportB, terrain, weather, propagationModel, clearancePolicy) : null;
+      const threatBlocked = threatSamples.filter((sample) => !buildPathProfile(candidate, sample, terrain, weather, propagationModel, "geometric-los").geometricLosClear).length;
+      const maskingScore = threatSamples.length ? (threatBlocked / threatSamples.length) * 100 : 0;
+      const connectivityScore = clamp(toA.fadeMarginDb + 40, 0, 60) + (toB ? clamp(toB.fadeMarginDb + 40, 0, 40) : 0);
+      const score = maskingScore * 0.7 + connectivityScore * 0.6 - Math.max(toA.requiredExtraTxHeightM, toB?.requiredExtraTxHeightM ?? 0) * 1.5;
+      results.push({
+        name: `${candidateGeometry.name || "CP"} ${index + 1}`,
+        lat: candidate.lat,
+        lon: candidate.lon,
+        score,
+        distanceKm: toA.distanceKm,
+        requiredMastHeightM: candidate.antennaHeightM + Math.max(toA.requiredExtraTxHeightM, toB?.requiredExtraTxHeightM ?? 0),
+        summary: `${maskingScore.toFixed(0)}% masked from threat samples`,
+        confidenceLabel: terrain ? "Terrain only" : "No terrain",
+        modeLabel: "Command Post",
+        policyLabel: "Masking + Connectivity",
+        sourceLabel: terrain ? "DTED/Cesium" : "No terrain",
+        worstPointLabel: toA.worstPoint ? `${toA.worstPoint.lat.toFixed(4)}, ${toA.worstPoint.lon.toFixed(4)}` : "Not available",
+        legs: [serializeLeg("CP → Support A", candidate, supportA, toA)].concat(toB ? [serializeLeg("CP → Support B", candidate, supportB, toB)] : []),
+      });
+    }
+  }
+
+  results.sort((left, right) => right.score - left.score);
+  const trimmed = results.slice(0, Math.max(1, topCount || 8));
+  return {
+    requestId,
+    terrainId,
+    summary: `${trimmed.length} ranked ${studyType} candidate${trimmed.length === 1 ? "" : "s"} from ${candidates.length} sampled point${candidates.length === 1 ? "" : "s"}.`,
+    results: trimmed,
+  };
+}
+
+function generateCandidatePoints(geometry, gridMeters) {
+  if (geometry.type === "point") {
+    return geometry.points.slice(0, 1);
+  }
+  if (geometry.type === "polyline") {
+    return densifyPolyline(geometry.points, gridMeters);
+  }
+  if (geometry.type === "polygon") {
+    return samplePolygonGrid(geometry.points, gridMeters);
+  }
+  return [];
+}
+
+function densifyPolyline(points, gridMeters) {
+  const output = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    const distanceMeters = haversineKm(start.lat, start.lon, end.lat, end.lon) * 1000;
+    const steps = Math.max(1, Math.ceil(distanceMeters / Math.max(gridMeters, 1)));
+    for (let step = 0; step < steps; step += 1) {
+      const t = step / steps;
+      output.push({
+        lat: lerp(start.lat, end.lat, t),
+        lon: lerp(start.lon, end.lon, t),
+      });
+    }
+  }
+  output.push(points[points.length - 1]);
+  return dedupePoints(output);
+}
+
+function samplePolygonGrid(points, gridMeters) {
+  const bounds = polygonBounds(points);
+  const candidates = [];
+  const latStep = metersToLatitudeDegrees(gridMeters);
+  const lonStep = metersToLongitudeDegrees(gridMeters, points[0]?.lat ?? bounds.minLat);
+  for (let lat = bounds.minLat; lat <= bounds.maxLat; lat += latStep) {
+    for (let lon = bounds.minLon; lon <= bounds.maxLon; lon += lonStep) {
+      if (pointInPolygon({ lat, lon }, points)) {
+        candidates.push({ lat, lon });
+      }
+    }
+  }
+  return dedupePoints(candidates);
+}
+
+function dedupePoints(points) {
+  const seen = new Set();
+  return points.filter((point) => {
+    const key = `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeAssetEndpoint(asset) {
+  return {
+    ...asset,
+    receiverGainDbi: asset.receiverGainDbi ?? asset.antennaGainDbi ?? 0,
+    antennaHeightM: asset.antennaHeightM ?? 2,
+  };
+}
+
+function materializeCandidateEndpoint(candidate, linkPreset, maxMastHeightM, index, baseName = "Candidate") {
+  return {
+    lat: candidate.lat,
+    lon: candidate.lon,
+    name: `${baseName || "Candidate"} ${index + 1}`,
+    frequencyMHz: linkPreset.frequencyMHz,
+    powerW: linkPreset.powerW,
+    antennaGainDbi: linkPreset.antennaGainDbi,
+    antennaHeightM: Math.min(linkPreset.antennaHeightM ?? 6, maxMastHeightM || 30),
+    receiverSensitivityDbm: linkPreset.receiverSensitivityDbm,
+    receiverGainDbi: linkPreset.antennaGainDbi,
+    systemLossDb: linkPreset.systemLossDb,
+  };
+}
+
+function clearancePolicyLabel(clearancePolicy) {
+  if (clearancePolicy === "fresnel-60") return "LOS + 60% Fresnel";
+  if (clearancePolicy === "fresnel-100") return "LOS + 100% Fresnel";
+  if (clearancePolicy === "fresnel-60-buildings") return "LOS + Fresnel + Buildings";
+  return "Geometric LOS";
+}
+
+function scoreRelayCandidate(profile, linkPreset) {
+  const clearBonus = profile.passesPolicy ? 70 : 0;
+  const fadeScore = clamp(profile.fadeMarginDb + 30, 0, 40);
+  const fresnelScore = clamp(profile.minFresnelClearanceM + 15, 0, 25);
+  const mastPenalty = Math.max(0, profile.requiredExtraTxHeightM) * 1.6;
+  const marginPenalty = profile.passesPolicy ? 0 : 28;
+  return clearBonus + fadeScore + fresnelScore - mastPenalty - marginPenalty;
+}
+
+function sampleObjectivePoints(geometry) {
+  if (!geometry?.points?.length) {
+    return [];
+  }
+  if (geometry.type === "point") {
+    return geometry.points.map((point, index) => ({
+      ...point,
+      name: geometry.name ? `${geometry.name} ${index + 1}` : `Objective ${index + 1}`,
+      antennaHeightM: 2,
+      receiverGainDbi: 0,
+      systemLossDb: 0,
+    }));
+  }
+  const points = geometry.type === "polyline"
+    ? densifyPolyline(geometry.points, Math.max(100, haversineKm(geometry.points[0].lat, geometry.points[0].lon, geometry.points[geometry.points.length - 1].lat, geometry.points[geometry.points.length - 1].lon) * 1000 / 6))
+    : samplePolygonGrid(geometry.points, Math.max(150, 300));
+  return points.slice(0, 12).map((point, index) => ({
+    ...point,
+    name: geometry.name ? `${geometry.name} ${index + 1}` : `Objective ${index + 1}`,
+    antennaHeightM: 2,
+    receiverGainDbi: 0,
+    systemLossDb: 0,
+  }));
+}
+
+function serializeLeg(label, from, to, profile) {
+  return {
+    label,
+    distanceKm: profile.distanceKm,
+    geometricLosClear: profile.geometricLosClear,
+    minClearanceM: profile.minClearanceM,
+    minFresnelClearanceM: profile.minFresnelClearanceM,
+    fadeMarginDb: profile.fadeMarginDb,
+    pathLossDb: profile.pathLossDb,
+    path: [
+      { lat: from.lat, lon: from.lon },
+      { lat: to.lat, lon: to.lon },
+    ],
+  };
+}
+
+function buildPathProfile(source, target, terrain, weather, propagationModel, clearancePolicy = "geometric-los") {
+  const distanceKm = haversineKm(source.lat, source.lon, target.lat, target.lon);
+  const frequencyMHz = source.frequencyMHz ?? target.frequencyMHz ?? 300;
+  const wavelengthM = 300 / Math.max(frequencyMHz, 0.1);
+  const totalDistanceMeters = Math.max(distanceKm * 1000, 1);
+  const txHeightM = source.antennaHeightM ?? 2;
+  const rxHeightM = target.antennaHeightM ?? 2;
+  const sourceGround = terrain ? sampleTerrain(source.lat, source.lon, terrain) : 0;
+  const targetGround = terrain ? sampleTerrain(target.lat, target.lon, terrain) : 0;
+  const sourceAlt = sourceGround + txHeightM;
+  const targetAlt = targetGround + rxHeightM;
+  const traceSampleMeters = terrain ? estimateTraceSampleMeters(terrain, (source.lat + target.lat) / 2) : 30;
+  const steps = Math.max(24, Math.ceil(totalDistanceMeters / traceSampleMeters));
+
+  let minClearanceM = Number.POSITIVE_INFINITY;
+  let minFresnelClearanceM = Number.POSITIVE_INFINITY;
+  let minRequiredFresnelClearanceM = Number.POSITIVE_INFINITY;
+  let maxObstructionM = 0;
+  let maxBuildingObstructionM = 0;
+  let buildingHitSamples = 0;
+  let buildingPathMeters = 0;
+  let worstPoint = null;
+  const stepDistanceMeters = totalDistanceMeters / steps;
+  const fresnelFraction = clearancePolicy === "fresnel-100" ? 1 : clearancePolicy === "fresnel-60" || clearancePolicy === "fresnel-60-buildings" ? 0.6 : 0;
+
+  for (let step = 1; step < steps; step += 1) {
+    const t = step / steps;
+    const lat = lerp(source.lat, target.lat, t);
+    const lon = lerp(source.lon, target.lon, t);
+    const surfaceHeight = terrain ? sampleSurfaceObstruction(lat, lon, terrain) : 0;
+    const baseHeight = terrain ? sampleTerrainBase(lat, lon, terrain) : surfaceHeight;
+    const losHeight = lerp(sourceAlt, targetAlt, t);
+    const earthCurveDrop = earthCurvatureDropMeters(distanceKm * t);
+    const clearanceM = (losHeight - earthCurveDrop) - surfaceHeight;
+    const d1 = totalDistanceMeters * t;
+    const d2 = totalDistanceMeters - d1;
+    const fresnelRadiusM = Math.sqrt(Math.max((wavelengthM * d1 * d2) / Math.max(d1 + d2, 1), 0));
+    const fresnelClearanceM = clearanceM - fresnelRadiusM;
+    const requiredFresnelClearanceM = clearanceM - (fresnelRadiusM * fresnelFraction);
+    const obstruction = Math.max(0, surfaceHeight - (losHeight - earthCurveDrop));
+    const buildingHeight = Math.max(0, surfaceHeight - baseHeight);
+    if (clearanceM < minClearanceM) {
+      minClearanceM = clearanceM;
+      worstPoint = { lat, lon };
+    }
+    if (fresnelClearanceM < minFresnelClearanceM) {
+      minFresnelClearanceM = fresnelClearanceM;
+    }
+    if (requiredFresnelClearanceM < minRequiredFresnelClearanceM) {
+      minRequiredFresnelClearanceM = requiredFresnelClearanceM;
+    }
+    maxObstructionM = Math.max(maxObstructionM, obstruction);
+    if (buildingHeight > 2 && obstruction > 0) {
+      buildingHitSamples += 1;
+      buildingPathMeters += stepDistanceMeters;
+      maxBuildingObstructionM = Math.max(maxBuildingObstructionM, Math.min(obstruction, buildingHeight));
+    }
+  }
+
+  const terrainProfile = {
+    lineOfSight: minClearanceM > 0,
+    maxObstructionM: Math.max(0, maxObstructionM),
+    buildingPathMeters,
+    buildingHitSamples,
+    maxBuildingObstructionM,
+    buildingLineOfSightBlocked: maxBuildingObstructionM > 0.5,
+  };
+  const simulated = simulateLink(source, target, terrain, weather, propagationModel);
+  const fadeMarginDb = simulated.rssiDbm - (target.receiverSensitivityDbm ?? -95);
+  const passesBuildings = clearancePolicy !== "fresnel-60-buildings" || !terrainProfile.buildingLineOfSightBlocked;
+  const passesPolicy = minClearanceM >= 0 && (fresnelFraction === 0 || minRequiredFresnelClearanceM >= 0) && passesBuildings;
+  const geometricDeficit = Math.max(0, -minClearanceM + 1);
+  const fresnelDeficit = fresnelFraction > 0 ? Math.max(0, -(minRequiredFresnelClearanceM) + 1) : 0;
+  const extraHeightNeeded = Math.max(geometricDeficit, fresnelDeficit);
+
+  return {
+    distanceKm,
+    geometricLosClear: minClearanceM >= 0,
+    fresnelClear: fresnelFraction === 0 ? true : minFresnelClearanceM >= 0,
+    passesPolicy,
+    minClearanceM: Number.isFinite(minClearanceM) ? minClearanceM : 0,
+    minFresnelClearanceM: Number.isFinite(minFresnelClearanceM) ? minFresnelClearanceM : 0,
+    buildingBlocked: terrainProfile.buildingLineOfSightBlocked,
+    pathLossDb: simulated.pathLossDb,
+    rssiDbm: simulated.rssiDbm,
+    fadeMarginDb,
+    requiredExtraTxHeightM: extraHeightNeeded,
+    requiredExtraRxHeightM: extraHeightNeeded,
+    worstPoint,
   };
 }
 

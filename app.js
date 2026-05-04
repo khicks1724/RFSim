@@ -1927,6 +1927,21 @@ const dom = {
   planningSummary: document.querySelector("#planningSummary"),
   planningList: document.querySelector("#planningList"),
   planningSection: document.querySelector("#planningSection"),
+  siteStudySection: document.querySelector("#siteStudySection"),
+  siteStudyTypeSelect: document.querySelector("#siteStudyTypeSelect"),
+  siteStudyPrimaryAsset: document.querySelector("#siteStudyPrimaryAsset"),
+  siteStudySecondaryAsset: document.querySelector("#siteStudySecondaryAsset"),
+  siteStudyCandidateContent: document.querySelector("#siteStudyCandidateContent"),
+  siteStudyObjectiveContent: document.querySelector("#siteStudyObjectiveContent"),
+  siteStudyLinkPreset: document.querySelector("#siteStudyLinkPreset"),
+  siteStudyClearancePolicy: document.querySelector("#siteStudyClearancePolicy"),
+  siteStudyGridMeters: document.querySelector("#siteStudyGridMeters"),
+  siteStudyMaxMastHeight: document.querySelector("#siteStudyMaxMastHeight"),
+  siteStudyTopCount: document.querySelector("#siteStudyTopCount"),
+  siteStudySummary: document.querySelector("#siteStudySummary"),
+  siteStudyList: document.querySelector("#siteStudyList"),
+  siteStudyDetail: document.querySelector("#siteStudyDetail"),
+  runSiteStudyBtn: document.querySelector("#runSiteStudyBtn"),
   centerCoordinateLabel: document.querySelector("#centerCoordinateLabel"),
   centerCoordinateValue: document.querySelector("#centerCoordinateValue"),
   centerElevationValue: document.querySelector("#centerElevationValue"),
@@ -1940,6 +1955,9 @@ const dom = {
   collapseAiPanelIcon: document.querySelector("#collapseAiPanelIcon"),
   aiAgentRole: document.querySelector("#aiAgentRole"),
   aiAgentPurpose: document.querySelector("#aiAgentPurpose"),
+  aiAgentModeShell: document.querySelector("#aiAgentModeShell"),
+  aiAgentModeIndicator: document.querySelector("#aiAgentModeIndicator"),
+  aiAgentModeLabel: document.querySelector("#aiAgentModeLabel"),
   aiPanelStatus: document.querySelector("#aiPanelStatus"),
   aiChatMessages: document.querySelector("#aiChatMessages"),
   aiChatForm: document.querySelector("#aiChatForm"),
@@ -2094,6 +2112,23 @@ const state = {
     recommendations: [],
     markersLayer: L.layerGroup(),
   },
+  siteStudy: {
+    type: "relay",
+    primaryAssetId: "",
+    secondaryAssetId: "",
+    candidateContentId: "",
+    objectiveContentId: "",
+    linkPreset: "rocket-m5-omni",
+    clearancePolicy: "fresnel-60",
+    gridMeters: 100,
+    maxMastHeightM: 30,
+    topCount: 8,
+    results: [],
+    activeResultIndex: -1,
+    terrainId: null,
+    markersLayer: L.layerGroup(),
+    lastRunSummary: "",
+  },
   ui: {
     resizeActive: false,
     sectionResizeActive: false,
@@ -2137,6 +2172,11 @@ const state = {
     messages: [],
     requestInFlight: false,
     recentPlaceLookups: [],
+    agentProfileId: "general",
+    agentProfileConfidence: 0,
+    agentProfileReason: "No specialist mode inferred yet.",
+    agentProfilePinned: false,
+    agentProfileLastUpdatedAt: "",
   },
   takSettings: {
     profiles: [],
@@ -4589,8 +4629,103 @@ const AI_VIEW_PROFILES = {
   },
 };
 
+const AI_AGENT_PROFILES = {
+  general: {
+    label: "General",
+    indicatorLabel: "General",
+    routingPriority: 10,
+    summary: "Broad RF planning and map-assistant mode.",
+    systemGuidance: "Operate as a general RF planning assistant. Only shift into specialist workflows when the user clearly asks for them or the scenario strongly implies them.",
+    triggerPhrases: [],
+  },
+  relay_planning: {
+    label: "Relay Planning",
+    indicatorLabel: "Relay",
+    routingPriority: 90,
+    summary: "Optimize relay siting, LOS, Fresnel clearance, and intermediate-node geometry.",
+    systemGuidance: "Prioritize deterministic relay or direct-link studies. Optimize for LOS, Fresnel clearance, mast height, and robust geometry. Do not guess relay coordinates without running a study when study inputs exist.",
+    triggerPhrases: ["relay", "retrans", "repeater", "line of sight", "los", "qth", "beach", "shore", "shoreline"],
+  },
+  rf_sensor_site_selection: {
+    label: "RF Sensor Site Selection",
+    indicatorLabel: "Sensor",
+    routingPriority: 88,
+    summary: "Optimize sensor siting for visibility, terrain dominance, and backhaul.",
+    systemGuidance: "Prioritize deterministic sensor site studies. Optimize for observation quality, terrain dominance, and viable backhaul to friendly nodes.",
+    triggerPhrases: ["sensor site", "isr", "surveillance", "watch", "observation", "sensor placement"],
+  },
+  command_post_site_selection: {
+    label: "Command Post Site Selection",
+    indicatorLabel: "CP",
+    routingPriority: 92,
+    summary: "Optimize command-post siting for masking, survivability, and connectivity.",
+    systemGuidance: "Prioritize deterministic command-post site studies. Optimize for terrain masking, reduced skyline exposure, survivability, and communications to required nodes rather than raw elevation alone.",
+    triggerPhrases: ["command post", "cp ", " cp", "toc", "hide the cp", "cp selection", "tactical operations center"],
+  },
+  microwave_backhaul: {
+    label: "Microwave Backhaul",
+    indicatorLabel: "Microwave",
+    routingPriority: 86,
+    summary: "Optimize directional microwave links and COTS point-to-point backhaul.",
+    systemGuidance: "Prioritize direct-link or relay studies using point-to-point microwave assumptions. Focus on Fresnel clearance, directional gain, fade margin, and building clutter limits for COTS backhaul gear.",
+    triggerPhrases: ["rocket m5", "5 ghz", "backhaul", "dish", "panel antenna", "fresnel", "ubiquiti", "ptp"],
+  },
+  spectrum_deconfliction: {
+    label: "Spectrum Deconfliction",
+    indicatorLabel: "Spectrum",
+    routingPriority: 70,
+    summary: "Optimize net separation, interference avoidance, and band assignments.",
+    systemGuidance: "Prioritize band assignments, conflicts, interference, and deconfliction. Do not switch into siting-first reasoning unless the user explicitly asks for geometry changes.",
+    triggerPhrases: ["deconflict", "frequency conflict", "interference", "spectrum", "channel plan"],
+  },
+  ew_threat_analysis: {
+    label: "EW Threat Analysis",
+    indicatorLabel: "EW",
+    routingPriority: 68,
+    summary: "Analyze jamming, detection risk, and RF threats.",
+    systemGuidance: "Prioritize jammer effects, detection risk, EW coverage, and mitigation options. Use geometry or site studies only when they materially affect the threat analysis.",
+    triggerPhrases: ["ew", "jamming", "jammer", "intercept", "detection risk", "lpi", "lpd"],
+  },
+  movement_route_comms: {
+    label: "Movement / Route Comms",
+    indicatorLabel: "Route",
+    routingPriority: 66,
+    summary: "Analyze route dead zones, handoff points, and movement-driven comms issues.",
+    systemGuidance: "Prioritize route-linked connectivity, handoff requirements, dead zones, and relay needs along movement corridors.",
+    triggerPhrases: ["route", "movement", "convoy", "along the route", "handoff", "on the move"],
+  },
+  link_diagnosis: {
+    label: "Link Diagnosis",
+    indicatorLabel: "Link",
+    routingPriority: 64,
+    summary: "Diagnose why a link is failing or marginal.",
+    systemGuidance: "Prioritize inspection of a specific path, candidate comparison, and root-cause diagnosis for blocked, weak, or mismatched links.",
+    triggerPhrases: ["why can't", "why wont", "blocked link", "diagnose", "why is this link", "marginal"],
+  },
+  terrain_masking: {
+    label: "Terrain Masking",
+    indicatorLabel: "Masking",
+    routingPriority: 62,
+    summary: "Find or explain terrain screening and masked positions.",
+    systemGuidance: "Prioritize terrain masking, protected movement, screened positions, and concealed site selection rather than raw link strength.",
+    triggerPhrases: ["terrain masking", "screened", "concealed", "masked site", "hidden site"],
+  },
+  site_comparison: {
+    label: "Site Comparison",
+    indicatorLabel: "Compare",
+    routingPriority: 60,
+    summary: "Compare candidate sites using deterministic study outputs.",
+    systemGuidance: "Prioritize side-by-side comparison of multiple candidate positions using deterministic study outputs rather than broad recommendations.",
+    triggerPhrases: ["compare sites", "best site", "which site", "compare candidates"],
+  },
+};
+
 function getAiViewProfile(view = state.ui?.currentView) {
   return AI_VIEW_PROFILES[view] ?? AI_VIEW_PROFILES.map;
+}
+
+function getAiAgentProfile(profileId = state.ai?.agentProfileId) {
+  return AI_AGENT_PROFILES[profileId] ?? AI_AGENT_PROFILES.general;
 }
 
 function buildCurrentViewAiContext(view = state.ui?.currentView) {
@@ -4600,13 +4735,97 @@ function buildCurrentViewAiContext(view = state.ui?.currentView) {
   return "";
 }
 
+function normalizeAgentRoutingText(value) {
+  return String(value ?? "").toLowerCase();
+}
+
+function resolveAiAgentProfile({ prompt = "", currentView = state.ui?.currentView, contextIds = [], recentMessages = [] } = {}) {
+  const text = normalizeAgentRoutingText(prompt);
+  const recentText = recentMessages.slice(-6).map((msg) => normalizeAgentRoutingText(msg?.text)).join(" \n ");
+  const combined = `${text}\n${recentText}`;
+  const scores = {};
+  Object.keys(AI_AGENT_PROFILES).forEach((key) => {
+    scores[key] = key === "general" ? 1 : 0;
+  });
+
+  Object.entries(AI_AGENT_PROFILES).forEach(([profileId, profile]) => {
+    (profile.triggerPhrases || []).forEach((phrase) => {
+      if (combined.includes(normalizeAgentRoutingText(phrase))) {
+        scores[profileId] += 18;
+      }
+    });
+  });
+
+  if (/\b(cp|command post|toc)\b/.test(combined)) scores.command_post_site_selection += 30;
+  if (/\b(relay|retrans|repeater|los|line of sight|qth|shore|beach)\b/.test(combined)) scores.relay_planning += 26;
+  if (/\b(rocket m5|ubiquiti|5 ghz|backhaul|fresnel|dish|ptp)\b/.test(combined)) scores.microwave_backhaul += 28;
+  if (/\b(sensor|isr|surveillance|observation|watch)\b/.test(combined)) scores.rf_sensor_site_selection += 24;
+  if (/\b(interference|deconflict|spectrum|channel plan|frequency conflict)\b/.test(combined)) scores.spectrum_deconfliction += 24;
+  if (/\b(jammer|ew|intercept|detection risk|lpi|lpd)\b/.test(combined)) scores.ew_threat_analysis += 24;
+  if (/\b(route|movement|convoy|handoff)\b/.test(combined)) scores.movement_route_comms += 22;
+  if (/\b(compare|best site|which site|candidate)\b/.test(combined)) scores.site_comparison += 18;
+  if (/\b(masked|concealed|screened|terrain masking|hidden site)\b/.test(combined)) scores.terrain_masking += 18;
+  if (/\b(why can't|why cant|blocked link|diagnose|why is this link|marginal)\b/.test(combined)) scores.link_diagnosis += 20;
+
+  if (currentView === "topology") {
+    scores.link_diagnosis += 8;
+    scores.relay_planning += 5;
+  } else if (currentView === "analyze") {
+    scores.spectrum_deconfliction += 4;
+    scores.ew_threat_analysis += 4;
+  }
+
+  if (state.siteStudy?.type === "relay") scores.relay_planning += 6;
+  if (state.siteStudy?.type === "sensor") scores.rf_sensor_site_selection += 6;
+  if (state.siteStudy?.type === "command-post") scores.command_post_site_selection += 6;
+  if (state.siteStudy?.type === "link") scores.link_diagnosis += 6;
+
+  const selectedObjects = contextIds
+    .map((contentId) => getMapContentName(contentId))
+    .filter(Boolean)
+    .map((name) => normalizeAgentRoutingText(name))
+    .join(" ");
+  if (/\b(cp|command post|toc)\b/.test(selectedObjects)) scores.command_post_site_selection += 10;
+  if (/\b(sensor|radar|observation)\b/.test(selectedObjects)) scores.rf_sensor_site_selection += 10;
+
+  const ranked = Object.entries(scores)
+    .sort((left, right) => right[1] - left[1]);
+  const [bestId, bestScore] = ranked[0];
+  const secondScore = ranked[1]?.[1] ?? 0;
+  const spread = bestScore - secondScore;
+  const confidence = bestId === "general"
+    ? 0.35
+    : spread >= 20 ? 0.95 : spread >= 12 ? 0.82 : spread >= 6 ? 0.66 : 0.48;
+  const reason = bestId === "general"
+    ? "No strong specialist task cues detected."
+    : `Matched ${getAiAgentProfile(bestId).label} intent from prompt and scenario context.`;
+  return {
+    profileId: bestId,
+    confidence,
+    reason,
+    alternatives: ranked.slice(1, 3).map(([profileId]) => profileId),
+  };
+}
+
+function setAiAgentProfile(profileId, { confidence = 1, reason = "", pinned = false } = {}) {
+  const next = AI_AGENT_PROFILES[profileId] ? profileId : "general";
+  state.ai.agentProfileId = next;
+  state.ai.agentProfileConfidence = confidence;
+  state.ai.agentProfileReason = reason || getAiAgentProfile(next).summary;
+  state.ai.agentProfilePinned = Boolean(pinned);
+  state.ai.agentProfileLastUpdatedAt = new Date().toISOString();
+}
+
 function syncAiViewMeta() {
   const profile = getAiViewProfile();
+  const agentProfile = getAiAgentProfile();
   if (dom.aiChatInput) {
-    dom.aiChatInput.placeholder = profile.placeholder;
+    dom.aiChatInput.placeholder = agentProfile.label === "General"
+      ? profile.placeholder
+      : `${agentProfile.label}: ${agentProfile.summary}`;
   }
   if (dom.aiPanel) {
-    dom.aiPanel.setAttribute("aria-label", `${profile.role} panel`);
+    dom.aiPanel.setAttribute("aria-label", `${agentProfile.label} ${profile.role} panel`);
   }
 }
 
@@ -6129,6 +6348,7 @@ async function init() {
   renderTerrains();
   renderViewsheds();
   renderPlanningResults();
+  syncSiteStudyUi();
   renderMapContents();
   refreshTakLiveFeed({ immediate: true });
   renderMapTakDebugPanel();
@@ -6212,6 +6432,7 @@ async function init() {
   state.map.on(L.Draw.Event.CREATED, onPlanningRegionCreated);
   attachSimulationWorkerListener();
   state.planning.markersLayer.addTo(state.map);
+  state.siteStudy.markersLayer.addTo(state.map);
 }
 
 function setGpsStatusMessage(message, isError = false) {
@@ -6749,6 +6970,10 @@ function wireEvents() {
     }
   });
   dom.collapseAiPanelBtn.addEventListener("click", toggleAiPanelCollapse);
+  dom.aiAgentModeIndicator?.addEventListener("click", () => {
+    const profile = getAiAgentProfile();
+    setStatus(`${profile.label}: ${state.ai.agentProfileReason || profile.summary}`);
+  });
   dom.aiChatForm.addEventListener("submit", onAiChatSubmit);
   dom.aiChatModelSelect.addEventListener("change", onAiModelChanged);
   dom.aiClearChatBtn.addEventListener("click", clearAiChat);
@@ -6846,6 +7071,22 @@ function wireEvents() {
   dom.connectUsbGpsBtn.addEventListener("click", connectUsbGps);
   dom.drawPlanningRegionBtn.addEventListener("click", drawPlanningRegion);
   dom.runPlanningBtn.addEventListener("click", runPlanning);
+  dom.runSiteStudyBtn?.addEventListener("click", runSiteStudy);
+  [
+    dom.siteStudyTypeSelect,
+    dom.siteStudyPrimaryAsset,
+    dom.siteStudySecondaryAsset,
+    dom.siteStudyCandidateContent,
+    dom.siteStudyObjectiveContent,
+    dom.siteStudyLinkPreset,
+    dom.siteStudyClearancePolicy,
+    dom.siteStudyGridMeters,
+    dom.siteStudyMaxMastHeight,
+    dom.siteStudyTopCount,
+  ].forEach((control) => control?.addEventListener("change", () => {
+    syncSiteStudyDraftFromDom();
+    syncSiteStudyUi();
+  }));
   ["tempC", "humidity", "pressure", "windSpeed"].forEach((id) => {
     dom[id].addEventListener("input", updateWeatherState);
   });
@@ -7896,6 +8137,11 @@ function onWorkerMessage(event) {
     return;
   }
 
+  if (type === "site-study:complete") {
+    consumeSiteStudyResult(payload);
+    return;
+  }
+
   if (type === "engine:error") {
     closeSimulationProgress();
     setStatus(payload.message, true);
@@ -8295,6 +8541,17 @@ function loadAiProviderSettings() {
     if (typeof parsed.localModelUrl === "string") {
       state.ai.localModelUrl = parsed.localModelUrl.trim();
     }
+    if (typeof parsed.agentProfileId === "string" && AI_AGENT_PROFILES[parsed.agentProfileId]) {
+      state.ai.agentProfileId = parsed.agentProfileId;
+    }
+    state.ai.agentProfileConfidence = Number(parsed.agentProfileConfidence) || 0;
+    state.ai.agentProfileReason = typeof parsed.agentProfileReason === "string"
+      ? parsed.agentProfileReason
+      : state.ai.agentProfileReason;
+    state.ai.agentProfilePinned = Boolean(parsed.agentProfilePinned);
+    state.ai.agentProfileLastUpdatedAt = typeof parsed.agentProfileLastUpdatedAt === "string"
+      ? parsed.agentProfileLastUpdatedAt
+      : state.ai.agentProfileLastUpdatedAt;
     const isLocalProvider = getAiProviderMeta(state.ai.provider)?.isLocalModel;
     if (state.ai.provider && (state.ai.apiKey || isLocalProvider)) {
       state.ai.status = "pending";
@@ -8330,6 +8587,11 @@ function persistAiProviderSettings() {
     apiKey: state.ai.apiKey,
     model: state.ai.model,
     localModelUrl: state.ai.localModelUrl,
+    agentProfileId: state.ai.agentProfileId,
+    agentProfileConfidence: state.ai.agentProfileConfidence,
+    agentProfileReason: state.ai.agentProfileReason,
+    agentProfilePinned: state.ai.agentProfilePinned,
+    agentProfileLastUpdatedAt: state.ai.agentProfileLastUpdatedAt,
     panelOpen: state.ai.panelOpen,
     aiPanelWidth: state.ui.aiPanelWidth,
   }));
@@ -8890,6 +9152,12 @@ function syncAiUi() {
       ? "Connected"
       : "Offline";
   }
+  if (dom.aiAgentModeIndicator && dom.aiAgentModeLabel) {
+    const activeProfile = getAiAgentProfile();
+    dom.aiAgentModeLabel.textContent = activeProfile.indicatorLabel;
+    dom.aiAgentModeIndicator.dataset.mode = state.ai.agentProfileId || "general";
+    dom.aiAgentModeIndicator.title = `${activeProfile.label} · ${Math.round((state.ai.agentProfileConfidence || 0) * 100)}% confidence\n${state.ai.agentProfileReason || activeProfile.summary}`;
+  }
 
   renderAiEmptyState();
   const hasConfiguredProvider = Boolean(state.ai.provider && (state.ai.apiKey || isLocalModel));
@@ -8951,6 +9219,38 @@ async function onAiChatSubmit(event) {
   const contextIds = getAiContextIds(state.ai.contextItemIds);
   const contextItems = state.ai.contextItemIds.map((id) => ({ id, name: getMapContentName(id) })).filter((c) => c.name);
   const canUseLocalLookupOnly = images.length === 0 && files.length === 0;
+  const routing = resolveAiAgentProfile({
+    prompt,
+    currentView: state.ui.currentView,
+    contextIds,
+    recentMessages: state.ai.messages,
+  });
+  if (state.ai.agentProfilePinned && routing.profileId !== state.ai.agentProfileId && routing.confidence >= 0.95) {
+    setAiAgentProfile(routing.profileId, {
+      confidence: routing.confidence,
+      reason: `Previous pinned mode expired because this request strongly matched ${getAiAgentProfile(routing.profileId).label}.`,
+      pinned: false,
+    });
+  } else if (!state.ai.agentProfilePinned) {
+    if (routing.confidence >= 0.8 || routing.profileId === "general") {
+      setAiAgentProfile(routing.profileId, {
+        confidence: routing.confidence,
+        reason: routing.reason,
+        pinned: false,
+      });
+    } else if (routing.confidence >= 0.55 && routing.profileId !== state.ai.agentProfileId) {
+      appendAiModeSuggestionCard(
+        [routing.profileId, ...routing.alternatives].filter(Boolean),
+        `This request may fit ${getAiAgentProfile(routing.profileId).label}. You can keep the current mode or switch before the next request.`
+      );
+      setAiAgentProfile(state.ai.agentProfileId || "general", {
+        confidence: routing.confidence,
+        reason: `Ambiguous task cues. Suggested ${getAiAgentProfile(routing.profileId).label}.`,
+        pinned: false,
+      });
+    }
+    syncAiUi();
+  }
   let preResolvedLookup = null;
   if (!state.ai.provider || !state.ai.apiKey) {
     preResolvedLookup = canUseLocalLookupOnly ? await tryResolveAiMapLookup(prompt) : null;
@@ -9037,6 +9337,7 @@ async function onAiChatSubmit(event) {
 function clearAiChat() {
   clearAiChatHistory();
   state.ai.messages = [];
+  setAiAgentProfile("general", { confidence: 0.35, reason: "Chat cleared; reverted to general mode.", pinned: false });
   clearAiAttachments();
   renderAiEmptyState();
 }
@@ -9398,6 +9699,59 @@ function createAiMessageController(role, text = "", images = [], contextItems = 
       dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
     },
   };
+}
+
+function appendAiModeSuggestionCard(profileIds = [], introText = "I can handle this as one of several specialist modes.") {
+  const options = ["general", ...profileIds].filter((profileId, index, list) =>
+    AI_AGENT_PROFILES[profileId] && list.indexOf(profileId) === index
+  );
+  if (!options.length || !dom.aiChatMessages) {
+    return;
+  }
+
+  state.ai.messages.push({ role: "system", text: introText });
+  const article = document.createElement("article");
+  article.className = "ai-chat-message ai-chat-message-system ai-mode-suggestion";
+
+  const header = document.createElement("div");
+  header.className = "ai-chat-message-header";
+  const title = document.createElement("strong");
+  title.textContent = "Agent Mode";
+  header.appendChild(title);
+  article.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "ai-chat-message-body";
+  body.textContent = introText;
+  article.appendChild(body);
+
+  const actions = document.createElement("div");
+  actions.className = "ai-mode-suggestion-actions";
+  options.forEach((profileId) => {
+    const profile = getAiAgentProfile(profileId);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = profileId === "general" ? "ghost-button small" : "primary-button small";
+    button.textContent = profileId === "general" ? "Stay General" : `Use ${profile.label}`;
+    button.addEventListener("click", () => {
+      setAiAgentProfile(profileId, {
+        confidence: 1,
+        reason: `Pinned from conversation card: ${profile.label}.`,
+        pinned: profileId !== "general",
+      });
+      syncAiUi();
+      setStatus(`AI mode set to ${profile.label}.`);
+      const confirm = document.createElement("div");
+      confirm.className = "ai-chat-message-body";
+      confirm.textContent = `Mode pinned to ${profile.label}.`;
+      article.appendChild(confirm);
+      actions.remove();
+    });
+    actions.appendChild(button);
+  });
+  article.appendChild(actions);
+  dom.aiChatMessages.append(article);
+  dom.aiChatMessages.scrollTop = dom.aiChatMessages.scrollHeight;
 }
 
 function startAiThinkingIndicator(controller) {
@@ -10710,14 +11064,62 @@ function formatLookupLocation(record, preferMgrs = false) {
   return formatLookupCoordinateText(record, { preferMgrs });
 }
 
+function buildLookupCoordToken(record) {
+  if (!Number.isFinite(record?.lat) || !Number.isFinite(record?.lon)) {
+    return "";
+  }
+  return `[coord:${Number(record.lat).toFixed(6)}:${Number(record.lon).toFixed(6)}]`;
+}
+
 function formatLookupSentence(record, preferMgrs = false) {
-  return `${record.name} is located at ${formatLookupCoordinateText(record, { preferMgrs })}.`;
+  const coordToken = buildLookupCoordToken(record);
+  if (coordToken) {
+    return `**${record.name}** is located at ${coordToken}.`;
+  }
+  return `**${record.name}** is located at ${formatLookupCoordinateText(record, { preferMgrs })}.`;
 }
 
 function getLookupRecordsForContentIds(contentIds = []) {
   return contentIds
     .map((contentId) => buildCompactMapContentRecord(contentId))
     .filter(Boolean);
+}
+
+function buildDeterministicLookupReply(prompt) {
+  const raw = String(prompt ?? "").trim();
+  if (!raw || !isLookupPrompt(raw)) {
+    return "";
+  }
+  const terms = tokenizeLookupPrompt(raw);
+  if (!terms.length) {
+    return "";
+  }
+  const preferMgrs = wantsMgrsLookup(raw);
+  const linkedRecords = getLookupRecordsForContentIds(state.ai.contextItemIds);
+  const sections = terms.map((term) => {
+    const matches = findMapContentLookupMatches(term, 6);
+    return { term, matches: matches.length ? matches : linkedRecords };
+  });
+  if (!sections.some((section) => section.matches.length)) {
+    return "";
+  }
+  if (sections.length === 1 && sections[0].matches.length) {
+    return formatLookupSentence(sections[0].matches[0], preferMgrs);
+  }
+  const lines = [];
+  sections.forEach((section) => {
+    if (!section.matches.length) {
+      lines.push(`- ${section.term}: no match found`);
+      return;
+    }
+    section.matches.slice(0, 3).forEach((record, index) => {
+      const prefix = index === 0 ? `- ${section.term}:` : "  alt:";
+      const coordText = buildLookupCoordToken(record) || formatLookupCoordinateOnly(record, preferMgrs);
+      const suffix = record.path && !preferMgrs ? ` | ${record.path}` : "";
+      lines.push(`${prefix} **${record.name}** | ${coordText}${suffix}`);
+    });
+  });
+  return lines.join("\n");
 }
 
 async function fetchRemoteLookupMatches(term, limit = 6) {
@@ -10917,9 +11319,9 @@ async function tryResolveAiMapLookup(prompt) {
     }
     section.matches.slice(0, 3).forEach((record, index) => {
       const prefix = index === 0 ? `- ${section.term}:` : "  alt:";
-      const locationText = formatLookupCoordinateOnly(record, preferMgrs);
+      const locationText = buildLookupCoordToken(record) || formatLookupCoordinateOnly(record, preferMgrs);
       const suffix = record.path && !preferMgrs ? ` | ${record.path}` : "";
-      lines.push(`${prefix} ${record.name} | ${locationText}${suffix}`);
+      lines.push(`${prefix} **${record.name}** | ${locationText}${suffix}`);
     });
   });
 
@@ -12124,6 +12526,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
 
   const scenarioSummary = buildCompactAiScenarioSummary(contextIds);
   const activeViewProfile = getAiViewProfile();
+  const activeAgentProfile = getAiAgentProfile();
   const currentViewContext = buildCurrentViewAiContext();
 
   // Yield again after serialization — large KMZ imports make JSON.stringify expensive
@@ -12157,6 +12560,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "You have deep knowledge of military and civilian radio systems, link budget analysis, antenna theory, terrain effects on propagation, and spectrum management.",
     `The user is currently working in the ${activeViewProfile.label} view. Your active role is ${activeViewProfile.role}.`,
     activeViewProfile.systemGuidance,
+    `The inferred specialist agent mode is ${activeAgentProfile.label}.`,
+    activeAgentProfile.systemGuidance,
     "Each asset in the scenario may have a 'toUnit' field linking it to a unit in the Table of Organization (TO). When answering questions about why specific units can or cannot communicate, cross-reference their linked emitter's frequencyMHz, waveform, power, elevation, and distance. The TO also contains parent-child hierarchy via toLinks. Use this to answer questions like 'why can't Kilo 1st Platoon talk to Kilo 3rd Platoon' by finding their linked emitters and diagnosing the RF path.",
     "For map-item location questions ('where is X', 'what grid is X', 'find X'), always answer in a complete sentence: '<name> is located at <coordinate>.' — never return just a raw coordinate with no context.",
     "Keep responses terse by default. Do not preface answers with setup text like 'Map lookup results' or 'Based on the scenario'.",
@@ -12188,6 +12593,10 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
     "  set-planning-region   → polygon [{lat,lon}], name?",
     "  run-simulation        → assetId OR placedIndex (0-based index into assets placed THIS batch), propagationModel?, radiusKm?, gridMeters?, receiverHeight?, opacity?",
     "  run-planning          → (no fields)",
+    "  set-site-study        → studyType?, primaryAssetId?, secondaryAssetId?, candidateContentId?, objectiveContentId?, linkPreset?, clearancePolicy?, gridMeters?, maxMastHeightM?, topCount?",
+    "  run-site-study        → (no fields)",
+    "  inspect-site-candidate → index",
+    "  promote-site-candidate → index, promoteAs? (marker|relay|sensor|command-post)",
     "  toggle-3d             → enabled?",
     "  check-los             → candidates: [{lat, lon, name, antennaHeightM?}] — checks terrain LOS between candidate positions BEFORE placement. Returns BLOCKED/CLEAR for each pair. Use this when you are uncertain about terrain obstruction.",
     "  sample-terrain        → points?: [{lat, lon, name?}], bounds?: {north,south,east,west}, gridN?: number (default 5, max 20) — samples terrain elevation at the given points and/or a gridN×gridN grid over the given bounds. Returns peak, lowest, mean elevations plus per-point data. Use this to answer questions about elevation, highest/lowest terrain, or to find the best ridgeline placement. ALWAYS use this when the user asks about elevation, highest point, terrain, or similar geographic questions.",
@@ -12521,6 +12930,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       `CURRENT VIEW: ${activeViewProfile.label}`,
       `ACTIVE ROLE: ${activeViewProfile.role}`,
       activeViewProfile.systemGuidance,
+      `ACTIVE AGENT MODE: ${activeAgentProfile.label}`,
+      activeAgentProfile.systemGuidance,
       "",
       "SCENARIO SUMMARY (read coordinates from here):",
       trimmedSummary,
@@ -12535,7 +12946,7 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       "Answer briefly and precisely.",
       "If no map or simulation changes are needed, reply in plain text.",
       "If changes are needed, return JSON only with {\"assistantMessage\":\"string\",\"actions\":[...]}",
-      "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, place-marker, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, run-simulation, run-planning, toggle-3d, check-los, sample-terrain, generate-document.",
+      "Supported action types: set-map-view, focus-map-content, set-settings, set-weather, set-imagery, set-emitter-form, add-asset, update-asset, remove-asset, place-marker, draw-shape, update-shape, remove-shape, set-planning-parameters, set-planning-region, set-site-study, run-simulation, run-planning, run-site-study, inspect-site-candidate, promote-site-candidate, toggle-3d, check-los, sample-terrain, generate-document.",
       "place-marker: {\"type\":\"place-marker\",\"lat\":N,\"lon\":N,\"name\":\"string\",\"color\":\"#hex\",\"size\":pt,\"outlineColor\":\"#hex\",\"outlineWidth\":px}. Use this — NOT draw-shape — whenever the user asks to mark a city, location, landmark, or place a point/pin/marker. color sets dot color, size sets dot size in pt (8–64, default 24). One action per location. NEVER use draw-shape circle for this.",
       "draw-shape: {\"type\":\"draw-shape\",\"shapeType\":\"circle|rectangle|polyline|polygon\",\"name\":\"string\",\"color\":\"#hex\",\"fillOpacity\":0.0-1.0,\"weight\":pixels,\"radiusM\":meters(circle only),\"coordinates\":[{\"lat\":N,\"lon\":N}]}. For circles: shapeType=circle, coordinates[0] is center, radiusM is radius. ALWAYS use this when user asks to draw/highlight a circle area, polygon, or line.",
       "sample-terrain: {\"type\":\"sample-terrain\",\"points\":[{\"lat\":N,\"lon\":N,\"name\":\"string\"}],\"bounds\":{\"north\":N,\"south\":N,\"east\":N,\"west\":N},\"gridN\":5}. Use when user asks about elevation, highest/lowest point, or terrain height.",
@@ -12548,6 +12959,8 @@ async function callAiPlanningAssistant(prompt, images = [], files = [], contextI
       `CURRENT VIEW: ${activeViewProfile.label}`,
       `ACTIVE ROLE: ${activeViewProfile.role}`,
       activeViewProfile.systemGuidance,
+      `ACTIVE AGENT MODE: ${activeAgentProfile.label}`,
+      activeAgentProfile.systemGuidance,
       "SCENARIO SUMMARY:",
       scenarioSummaryFinal,
       currentViewContext ? `CURRENT VIEW CONTEXT:\n${currentViewContext}` : "",
@@ -12759,6 +13172,40 @@ function extractMgrsTokens(text) {
     .map((match) => match[0].toUpperCase());
 }
 
+function extractLatLonFromText(text) {
+  const raw = String(text ?? "");
+  const labeledLat = raw.match(/\bLat(?:itude)?\s*:\s*(-?\d{1,3}(?:\.\d+)?)\s*°?\s*([NS])?/i);
+  const labeledLon = raw.match(/\bLon(?:gitude)?\s*:\s*(-?\d{1,3}(?:\.\d+)?)\s*°?\s*([EW])?/i);
+  if (labeledLat && labeledLon) {
+    let lat = Number(labeledLat[1]);
+    let lon = Number(labeledLon[1]);
+    const latDir = (labeledLat[2] || "").toUpperCase();
+    const lonDir = (labeledLon[2] || "").toUpperCase();
+    if (latDir === "S") lat = -Math.abs(lat);
+    if (latDir === "N") lat = Math.abs(lat);
+    if (lonDir === "W") lon = -Math.abs(lon);
+    if (lonDir === "E") lon = Math.abs(lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      return { lat, lon };
+    }
+  }
+  const inlinePair = raw.match(/\b(-?\d{1,3}(?:\.\d+)?)\s*°?\s*([NS])?\s*[,\/]\s*(-?\d{1,3}(?:\.\d+)?)\s*°?\s*([EW])?\b/i);
+  if (inlinePair) {
+    let lat = Number(inlinePair[1]);
+    let lon = Number(inlinePair[3]);
+    const latDir = (inlinePair[2] || "").toUpperCase();
+    const lonDir = (inlinePair[4] || "").toUpperCase();
+    if (latDir === "S") lat = -Math.abs(lat);
+    if (latDir === "N") lat = Math.abs(lat);
+    if (lonDir === "W") lon = -Math.abs(lon);
+    if (lonDir === "E") lon = Math.abs(lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      return { lat, lon };
+    }
+  }
+  return null;
+}
+
 function looksLikeStructuredPayloadText(text) {
   const normalized = String(text ?? "").trim();
   if (!normalized) {
@@ -12800,7 +13247,18 @@ function normalizeAssistantMessageForPrompt(prompt, message) {
     return rawMessage;
   }
 
+  if (isLookupPrompt(rawPrompt)) {
+    const deterministicLookup = buildDeterministicLookupReply(rawPrompt);
+    if (deterministicLookup) {
+      return deterministicLookup;
+    }
+  }
+
   if (wantsMgrsLookup(rawPrompt)) {
+    const latLon = extractLatLonFromText(rawMessage);
+    if (latLon) {
+      return `Located at [coord:${latLon.lat.toFixed(6)}:${latLon.lon.toFixed(6)}].`;
+    }
     const mgrsTokens = extractMgrsTokens(rawMessage);
     if (mgrsTokens.length) {
       return normalizeMgrsToTenDigit(mgrsTokens[0]);
@@ -13177,12 +13635,35 @@ function buildAiScenarioSummary() {
       ceilingM: Number(dom.planningCeilingM.value),
       hasRegion: Boolean(state.planning.regionLayer),
     },
+    siteStudyDraft: {
+      type: state.siteStudy.type,
+      primaryAssetId: state.siteStudy.primaryAssetId,
+      secondaryAssetId: state.siteStudy.secondaryAssetId,
+      candidateContentId: state.siteStudy.candidateContentId,
+      objectiveContentId: state.siteStudy.objectiveContentId,
+      linkPreset: state.siteStudy.linkPreset,
+      clearancePolicy: state.siteStudy.clearancePolicy,
+      gridMeters: state.siteStudy.gridMeters,
+      maxMastHeightM: state.siteStudy.maxMastHeightM,
+      topCount: state.siteStudy.topCount,
+      resultCount: state.siteStudy.results.length,
+    },
     assets,
     viewsheds,
     importedItems,
     planning,
     planningRegion: serializePlanningRegionForAi(),
     planningResults: serializePlanningResultsForAi(),
+    siteStudyResults: state.siteStudy.results.slice(0, 8).map((result, index) => ({
+      index: index + 1,
+      name: result.name,
+      lat: roundAiNumber(result.lat),
+      lon: roundAiNumber(result.lon),
+      score: roundAiNumber(result.score, 2),
+      summary: result.summary,
+      confidenceLabel: result.confidenceLabel,
+      modeLabel: result.modeLabel,
+    })),
     mapContents,
     activeAiContextId: state.ai.activeContextId,
     activeAiContext,
@@ -13682,6 +14163,112 @@ async function executeAiAction(action, { placedAssetIds = [] } = {}) {
     return "Started terrain-aware site planning.";
   }
 
+  if (action.type === "set-site-study") {
+    if (typeof action.studyType === "string" && ["relay", "sensor", "command-post", "link"].includes(action.studyType)) {
+      state.siteStudy.type = action.studyType;
+    }
+    const primaryAsset = findAssetByReference(action.primaryAssetId ?? action.primaryAssetName);
+    const secondaryAsset = findAssetByReference(action.secondaryAssetId ?? action.secondaryAssetName);
+    if (primaryAsset) state.siteStudy.primaryAssetId = primaryAsset.id;
+    if (secondaryAsset) state.siteStudy.secondaryAssetId = secondaryAsset.id;
+    const candidateContentId = resolveMapContentId(action.candidateContentId ?? action.candidateContentName ?? action.candidateRef);
+    const objectiveContentId = resolveMapContentId(action.objectiveContentId ?? action.objectiveContentName ?? action.objectiveRef);
+    if (candidateContentId) state.siteStudy.candidateContentId = candidateContentId;
+    if (objectiveContentId) state.siteStudy.objectiveContentId = objectiveContentId;
+    if (typeof action.linkPreset === "string" && SITE_STUDY_LINK_PRESETS[action.linkPreset]) {
+      state.siteStudy.linkPreset = action.linkPreset;
+    }
+    if (typeof action.clearancePolicy === "string") {
+      state.siteStudy.clearancePolicy = action.clearancePolicy;
+    }
+    if (Number.isFinite(Number(action.gridMeters))) {
+      state.siteStudy.gridMeters = Number(action.gridMeters);
+    }
+    if (Number.isFinite(Number(action.maxMastHeightM))) {
+      state.siteStudy.maxMastHeightM = Number(action.maxMastHeightM);
+    }
+    if (Number.isFinite(Number(action.topCount))) {
+      state.siteStudy.topCount = Number(action.topCount);
+    }
+    syncSiteStudyUi();
+    return `Updated ${state.siteStudy.type} study inputs.`;
+  }
+
+  if (action.type === "run-site-study") {
+    await runSiteStudy();
+    return `Started ${state.siteStudy.type} study.`;
+  }
+
+  if (action.type === "inspect-site-candidate") {
+    const index = Number(action.index);
+    if (!Number.isFinite(index) || !state.siteStudy.results[index]) {
+      return "I couldn't inspect that candidate because the index was invalid.";
+    }
+    focusSiteStudyResult(index);
+    return `Focused site-study candidate ${index + 1}.`;
+  }
+
+  if (action.type === "promote-site-candidate") {
+    const index = Number(action.index);
+    const result = state.siteStudy.results[index];
+    if (!Number.isFinite(index) || !result) {
+      return "I couldn't promote that candidate because the index was invalid.";
+    }
+    const promoteAs = String(action.promoteAs || "marker").toLowerCase();
+    if (promoteAs === "marker" || promoteAs === "command-post") {
+      addDrawnFeature({
+        name: result.name || `Candidate ${index + 1}`,
+        geometryType: "Point",
+        coordinates: [result.lat, result.lon],
+        properties: {},
+        markerStyle: {
+          icon: "dot",
+          color: promoteAs === "command-post" ? "#f59e0b" : "#38bdf8",
+          size: 28,
+          outlineColor: "#0b1220",
+          outlineWidth: 2,
+        },
+      });
+      return `Promoted candidate ${index + 1} to a marker.`;
+    }
+
+    const preset = SITE_STUDY_LINK_PRESETS[state.siteStudy.linkPreset] ?? SITE_STUDY_LINK_PRESETS["rocket-m5-omni"];
+    const assetType = promoteAs === "sensor" ? "sensor" : "relay";
+    const asset = stampContentRecord({
+      id: generateId(),
+      type: assetType,
+      force: "friendly",
+      name: result.name || `${assetType === "sensor" ? "Sensor" : "Relay"} Candidate ${index + 1}`,
+      unit: assetType === "sensor" ? "Sensor" : "Relay",
+      frequencyMHz: preset.frequencyMHz,
+      powerW: preset.powerW,
+      antennaHeightM: Math.max(preset.antennaHeightM, result.requiredMastHeightM || 0),
+      antennaGainDbi: preset.antennaGainDbi,
+      receiverSensitivityDbm: preset.receiverSensitivityDbm,
+      systemLossDb: preset.systemLossDb,
+      icon: assetType === "sensor" ? "sensor" : "relay",
+      color: assetType === "sensor" ? "#22c55e" : "#38bdf8",
+      notes: `Promoted from ${state.siteStudy.type} study.`,
+      lat: result.lat,
+      lon: result.lon,
+      groundElevationM: sampleTerrainElevation(result.lat, result.lon),
+    });
+    const marker = L.marker([result.lat, result.lon], {
+      icon: createEmitterIcon(asset),
+      pane: getMapContentPaneName(`asset:${asset.id}`),
+    }).addTo(state.map);
+    marker.bindPopup(renderAssetPopup(asset));
+    marker.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); editMapContent(`asset:${asset.id}`); });
+    state.assetMarkers.set(asset.id, marker);
+    ensureTakMetadataForAsset(asset);
+    state.assets.push(asset);
+    renderAssets();
+    renderMapContents();
+    syncCesiumEntities();
+    saveMapState();
+    return `Promoted candidate ${index + 1} to a ${assetType}.`;
+  }
+
   if (action.type === "toggle-3d") {
     const nextEnabled = typeof action.enabled === "boolean" ? action.enabled : !state.view3dEnabled;
     if (nextEnabled !== state.view3dEnabled) {
@@ -14048,6 +14635,7 @@ function resolveMapContentId(reference) {
   if (!normalizedReference) {
     return null;
   }
+  renderSiteStudyContentOptions();
   const entries = getMapContentEntries();
   const direct = entries.find((entry) => entry.id === normalizedReference);
   if (direct) {
@@ -14321,6 +14909,59 @@ function buildPlacementReferenceGeometry(entry, importedItem = null) {
     };
   }
 
+  return null;
+}
+
+function serializeSiteStudyGeometry(contentId) {
+  if (!contentId) {
+    return null;
+  }
+  if (contentId.startsWith("asset:")) {
+    const asset = state.assets.find((entry) => `asset:${entry.id}` === contentId);
+    if (!asset) return null;
+    return {
+      type: "point",
+      name: asset.name,
+      points: [{ lat: asset.lat, lon: asset.lon }],
+    };
+  }
+  const importedItem = state.importedItems.find((entry) => `imported:${entry.id}` === contentId);
+  if (importedItem?.geometryType === "Point") {
+    const point = normalizeLeafletPoint(importedItem.layer.getLatLng?.());
+    if (!point) return null;
+    return {
+      type: "point",
+      name: importedItem.name,
+      points: [{ lat: point.lat, lon: point.lng }],
+    };
+  }
+  if (importedItem?.geometryType === "LineString") {
+    const line = flattenLeafletLatLngs(importedItem.layer.getLatLngs?.() ?? []);
+    if (!line.length) return null;
+    return {
+      type: "polyline",
+      name: importedItem.name,
+      points: line.map((point) => ({ lat: point.lat, lon: point.lng })),
+    };
+  }
+  if (importedItem?.layer) {
+    const polygon = flattenLeafletLatLngs(importedItem.layer.getLatLngs?.() ?? []);
+    if (!polygon.length) return null;
+    return {
+      type: "polygon",
+      name: importedItem.name,
+      points: polygon.map((point) => ({ lat: point.lat, lon: point.lng })),
+    };
+  }
+  if (contentId === "planning-region" && state.planning.regionLayer) {
+    const polygon = flattenLeafletLatLngs(state.planning.regionLayer.getLatLngs?.() ?? []);
+    if (!polygon.length) return null;
+    return {
+      type: "polygon",
+      name: state.planning.regionName,
+      points: polygon.map((point) => ({ lat: point.lat, lon: point.lng })),
+    };
+  }
   return null;
 }
 
@@ -14927,6 +15568,7 @@ function renderAssets() {
     dom.assetSelect.innerHTML = `<option value="">No emitters available</option>`;
     dom.planningTxAsset.innerHTML = `<option value="">No assets</option>`;
     dom.planningRxAsset.innerHTML = `<option value="">No assets</option>`;
+    renderSiteStudyAssetOptions();
     renderMapContents();
     return;
   }
@@ -15111,7 +15753,224 @@ function renderPlanningResults() {
     dom.planningList.appendChild(row);
   });
 
+  renderSiteStudyAssetOptions();
   renderMapContents();
+}
+
+const SITE_STUDY_LINK_PRESETS = {
+  "rocket-m5-omni": {
+    label: "Rocket M5 + Omni",
+    frequencyMHz: 5800,
+    powerW: 0.5,
+    antennaGainDbi: 8,
+    receiverSensitivityDbm: -74,
+    systemLossDb: 2,
+    antennaHeightM: 6,
+    requiredFadeMarginDb: 12,
+  },
+  "rocket-m5-sector": {
+    label: "Rocket M5 + Sector",
+    frequencyMHz: 5800,
+    powerW: 0.5,
+    antennaGainDbi: 16,
+    receiverSensitivityDbm: -74,
+    systemLossDb: 2,
+    antennaHeightM: 8,
+    requiredFadeMarginDb: 16,
+  },
+  "rocket-m5-dish": {
+    label: "Rocket M5 + Dish",
+    frequencyMHz: 5800,
+    powerW: 0.5,
+    antennaGainDbi: 25,
+    receiverSensitivityDbm: -74,
+    systemLossDb: 2.5,
+    antennaHeightM: 10,
+    requiredFadeMarginDb: 20,
+  },
+  "generic-5ghz-ptp": {
+    label: "Generic 5 GHz PtP",
+    frequencyMHz: 5500,
+    powerW: 1,
+    antennaGainDbi: 21,
+    receiverSensitivityDbm: -78,
+    systemLossDb: 2,
+    antennaHeightM: 8,
+    requiredFadeMarginDb: 18,
+  },
+  "generic-vhf-relay": {
+    label: "Generic VHF Relay",
+    frequencyMHz: 155,
+    powerW: 25,
+    antennaGainDbi: 5,
+    receiverSensitivityDbm: -108,
+    systemLossDb: 2,
+    antennaHeightM: 10,
+    requiredFadeMarginDb: 10,
+  },
+  "generic-uhf-relay": {
+    label: "Generic UHF Relay",
+    frequencyMHz: 460,
+    powerW: 20,
+    antennaGainDbi: 7,
+    receiverSensitivityDbm: -110,
+    systemLossDb: 2,
+    antennaHeightM: 10,
+    requiredFadeMarginDb: 10,
+  },
+};
+
+function getSiteStudyGeometryOptionEntries() {
+  return getMapContentEntries().filter((entry) => {
+    if (entry.id === "planning-region") return true;
+    if (!entry.id.startsWith("imported:")) return false;
+    const item = state.importedItems.find((candidate) => `imported:${candidate.id}` === entry.id);
+    return Boolean(item && ["Point", "LineString", "Polygon", "Rectangle"].includes(item.geometryType));
+  });
+}
+
+function renderSiteStudyAssetOptions() {
+  if (!dom.siteStudyPrimaryAsset || !dom.siteStudySecondaryAsset) {
+    return;
+  }
+  const selects = [dom.siteStudyPrimaryAsset, dom.siteStudySecondaryAsset];
+  selects.forEach((select, index) => {
+    const emptyLabel = index === 0 ? "Select asset or endpoint" : "Optional secondary asset";
+    const existingValue = select.value;
+    select.innerHTML = [`<option value="">${emptyLabel}</option>`]
+      .concat(state.assets.map((asset, assetIndex) =>
+        `<option value="${escapeHtml(asset.id)}">${escapeHtml(`${assetIndex + 1}. ${asset.name} (${asset.unit})`)}</option>`
+      ))
+      .join("");
+    select.value = state.assets.some((asset) => asset.id === existingValue) ? existingValue : "";
+  });
+}
+
+function renderSiteStudyContentOptions() {
+  const entries = getSiteStudyGeometryOptionEntries();
+  [
+    { select: dom.siteStudyCandidateContent, emptyLabel: "Select area, corridor, or polygon" },
+    { select: dom.siteStudyObjectiveContent, emptyLabel: "Optional objective / threat geometry" },
+  ].forEach(({ select, emptyLabel }) => {
+    if (!select) return;
+    const existingValue = select.value;
+    select.innerHTML = [`<option value="">${emptyLabel}</option>`]
+      .concat(entries.map((entry) => `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.name)}</option>`))
+      .join("");
+    select.value = entries.some((entry) => entry.id === existingValue) ? existingValue : "";
+  });
+}
+
+function syncSiteStudyDraftFromDom() {
+  state.siteStudy.type = dom.siteStudyTypeSelect?.value || state.siteStudy.type;
+  state.siteStudy.primaryAssetId = dom.siteStudyPrimaryAsset?.value || "";
+  state.siteStudy.secondaryAssetId = dom.siteStudySecondaryAsset?.value || "";
+  state.siteStudy.candidateContentId = dom.siteStudyCandidateContent?.value || "";
+  state.siteStudy.objectiveContentId = dom.siteStudyObjectiveContent?.value || "";
+  state.siteStudy.linkPreset = dom.siteStudyLinkPreset?.value || state.siteStudy.linkPreset;
+  state.siteStudy.clearancePolicy = dom.siteStudyClearancePolicy?.value || state.siteStudy.clearancePolicy;
+  state.siteStudy.gridMeters = Number(dom.siteStudyGridMeters?.value) || state.siteStudy.gridMeters;
+  state.siteStudy.maxMastHeightM = Number(dom.siteStudyMaxMastHeight?.value) || state.siteStudy.maxMastHeightM;
+  state.siteStudy.topCount = Number(dom.siteStudyTopCount?.value) || state.siteStudy.topCount;
+}
+
+function syncSiteStudyUi() {
+  if (!dom.siteStudyTypeSelect) {
+    return;
+  }
+  renderSiteStudyAssetOptions();
+  renderSiteStudyContentOptions();
+  dom.siteStudyTypeSelect.value = state.siteStudy.type;
+  dom.siteStudyPrimaryAsset.value = state.siteStudy.primaryAssetId;
+  dom.siteStudySecondaryAsset.value = state.siteStudy.secondaryAssetId;
+  dom.siteStudyCandidateContent.value = state.siteStudy.candidateContentId;
+  dom.siteStudyObjectiveContent.value = state.siteStudy.objectiveContentId;
+  dom.siteStudyLinkPreset.value = state.siteStudy.linkPreset;
+  dom.siteStudyClearancePolicy.value = state.siteStudy.clearancePolicy;
+  dom.siteStudyGridMeters.value = String(state.siteStudy.gridMeters);
+  dom.siteStudyMaxMastHeight.value = String(state.siteStudy.maxMastHeightM);
+  dom.siteStudyTopCount.value = String(state.siteStudy.topCount);
+  renderSiteStudyResults();
+}
+
+function formatSiteStudyBadges(result) {
+  const badges = [];
+  if (result?.confidenceLabel) badges.push(result.confidenceLabel);
+  if (result?.policyLabel) badges.push(result.policyLabel);
+  if (result?.modeLabel) badges.push(result.modeLabel);
+  if (result?.sourceLabel) badges.push(result.sourceLabel);
+  return badges.map((badge) => `<span class="site-study-badge">${escapeHtml(badge)}</span>`).join("");
+}
+
+function renderSiteStudyDetail() {
+  if (!dom.siteStudyDetail) {
+    return;
+  }
+  const result = state.siteStudy.results[state.siteStudy.activeResultIndex];
+  if (!result) {
+    dom.siteStudyDetail.textContent = "Select a study result to inspect terrain, clearance, and link details.";
+    return;
+  }
+  const legs = Array.isArray(result.legs) ? result.legs : [];
+  const legLines = legs.map((leg, index) => {
+    const label = leg.label || `Leg ${index + 1}`;
+    return `${label}: ${Number(leg.distanceKm).toFixed(2)} km · ${leg.geometricLosClear ? "LOS clear" : "LOS blocked"} · ${Number(leg.minClearanceM).toFixed(1)} m clearance · ${Number(leg.fadeMarginDb).toFixed(1)} dB fade margin`;
+  }).join("<br>");
+  dom.siteStudyDetail.innerHTML = `
+    <strong>${escapeHtml(result.name || `Candidate ${state.siteStudy.activeResultIndex + 1}`)}</strong><br>
+    Position: ${escapeHtml(formatCoordinate(result.lat, result.lon, state.settings.coordinateSystem))}<br>
+    Score: ${Number(result.score).toFixed(1)}<br>
+    Required mast height: ${Number(result.requiredMastHeightM || 0).toFixed(1)} m<br>
+    Worst point: ${escapeHtml(result.worstPointLabel || "Not available")}<br>
+    ${legLines || "No leg details available."}
+    <div class="site-study-badges">${formatSiteStudyBadges(result)}</div>
+  `;
+}
+
+function focusSiteStudyResult(index) {
+  const result = state.siteStudy.results[index];
+  if (!result) {
+    return;
+  }
+  state.siteStudy.activeResultIndex = index;
+  renderSiteStudyResults();
+  renderSiteStudyDetail();
+  state.map.setView([result.lat, result.lon], Math.max(state.map.getZoom(), 14));
+}
+
+function renderSiteStudyResults() {
+  if (!dom.siteStudyList || !dom.siteStudySummary) {
+    return;
+  }
+  dom.siteStudyList.innerHTML = "";
+  if (!state.siteStudy.results.length) {
+    dom.siteStudyList.innerHTML = `<div class="asset-item">No study results yet.</div>`;
+    dom.siteStudySummary.textContent = state.siteStudy.lastRunSummary || "Run deterministic relay, sensor, command-post, or direct-link studies using placed assets and map geometry.";
+    renderSiteStudyDetail();
+    return;
+  }
+
+  state.siteStudy.results.forEach((result, index) => {
+    const row = document.createElement("article");
+    row.className = `asset-item site-study-result-row${index === state.siteStudy.activeResultIndex ? " is-active" : ""}`;
+    row.innerHTML = `
+      <header>
+        <strong>${escapeHtml(result.name || `Candidate ${index + 1}`)}</strong>
+        <span>Score ${Number(result.score).toFixed(1)}</span>
+      </header>
+      <div class="terrain-bounds">
+        <span>${escapeHtml(formatCoordinate(result.lat, result.lon, state.settings.coordinateSystem))}</span>
+        <span>Mast ${Number(result.requiredMastHeightM || 0).toFixed(1)} m</span>
+        <span>${result.summary ? escapeHtml(result.summary) : `${Number(result.distanceKm || 0).toFixed(1)} km`}</span>
+      </div>
+      <div class="site-study-badges">${formatSiteStudyBadges(result)}</div>
+    `;
+    row.addEventListener("click", () => focusSiteStudyResult(index));
+    dom.siteStudyList.appendChild(row);
+  });
+
+  dom.siteStudySummary.textContent = state.siteStudy.lastRunSummary || `${state.siteStudy.results.length} study result(s) available.`;
+  renderSiteStudyDetail();
 }
 
 function onViewshedAction(event) {
@@ -16316,6 +17175,102 @@ function consumePlanningResult(payload) {
   syncCesiumEntities();
   renderMapContents();
   setStatus("Site planning complete.");
+}
+
+async function runSiteStudy() {
+  syncSiteStudyDraftFromDom();
+  const preset = SITE_STUDY_LINK_PRESETS[state.siteStudy.linkPreset] ?? SITE_STUDY_LINK_PRESETS["rocket-m5-omni"];
+  const primaryAsset = state.assets.find((asset) => asset.id === state.siteStudy.primaryAssetId) ?? null;
+  const secondaryAsset = state.assets.find((asset) => asset.id === state.siteStudy.secondaryAssetId) ?? null;
+  const candidateGeometry = serializeSiteStudyGeometry(state.siteStudy.candidateContentId);
+  const objectiveGeometry = serializeSiteStudyGeometry(state.siteStudy.objectiveContentId);
+
+  if (!candidateGeometry) {
+    setStatus("Select a candidate area or corridor first.", true);
+    return;
+  }
+  if ((state.siteStudy.type === "relay" || state.siteStudy.type === "link") && !primaryAsset) {
+    setStatus("Select a primary endpoint asset first.", true);
+    return;
+  }
+
+  try {
+    const studyBounds = candidateGeometry.points;
+    const terrainId = await resolveTerrainIdForPlanning(studyBounds, state.siteStudy.gridMeters);
+    state.pendingSiteStudyRequestId = generateId();
+    setStatus(`Running ${state.siteStudy.type} study...`);
+    state.worker.postMessage({
+      type: "site-study:start",
+      payload: {
+        requestId: state.pendingSiteStudyRequestId,
+        studyType: state.siteStudy.type,
+        primaryAsset,
+        secondaryAsset,
+        candidateGeometry,
+        objectiveGeometry,
+        gridMeters: state.siteStudy.gridMeters,
+        maxMastHeightM: state.siteStudy.maxMastHeightM,
+        topCount: state.siteStudy.topCount,
+        weather: state.weather,
+        terrainId,
+        propagationModel: dom.propagationModel.value,
+        clearancePolicy: state.siteStudy.clearancePolicy,
+        linkPreset: {
+          id: state.siteStudy.linkPreset,
+          ...preset,
+        },
+      },
+    });
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function consumeSiteStudyResult(payload) {
+  if (payload.requestId !== state.pendingSiteStudyRequestId) {
+    return;
+  }
+  state.siteStudy.terrainId = payload.terrainId ?? null;
+  state.siteStudy.results = Array.isArray(payload.results) ? payload.results : [];
+  state.siteStudy.activeResultIndex = state.siteStudy.results.length ? 0 : -1;
+  state.siteStudy.lastRunSummary = payload.summary || `${state.siteStudy.results.length} study result(s) generated.`;
+  state.siteStudy.markersLayer.clearLayers();
+
+  state.siteStudy.results.forEach((result, index) => {
+    const color = result.score >= 85 ? "#22c55e" : result.score >= 65 ? "#f59e0b" : "#ef4444";
+    const marker = L.circleMarker([result.lat, result.lon], {
+      pane: getMapContentPaneName("planning-results"),
+      radius: 7,
+      color,
+      fillColor: color,
+      fillOpacity: 0.92,
+      weight: 2,
+    }).bindPopup(`${escapeHtml(result.name || `Candidate ${index + 1}`)}<br>${escapeHtml(formatCoordinate(result.lat, result.lon, state.settings.coordinateSystem))}<br>Score ${Number(result.score).toFixed(1)}`);
+    marker.on("click", () => focusSiteStudyResult(index));
+    state.siteStudy.markersLayer.addLayer(marker);
+
+    if (Array.isArray(result.legs)) {
+      result.legs.forEach((leg) => {
+        if (!Array.isArray(leg.path) || leg.path.length < 2) {
+          return;
+        }
+        state.siteStudy.markersLayer.addLayer(L.polyline(
+          leg.path.map((point) => [point.lat, point.lon]),
+          {
+            pane: getMapContentPaneName("planning-results"),
+            color: leg.geometricLosClear ? "#d9e4ff" : "#f97316",
+            weight: 2,
+            dashArray: leg.geometricLosClear ? "" : "6 6",
+          },
+        ));
+      });
+    }
+  });
+
+  renderSiteStudyResults();
+  renderMapContents();
+  syncCesiumEntities();
+  setStatus("Site study complete.");
 }
 
 async function toggle3dView() {

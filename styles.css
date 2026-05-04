@@ -1249,6 +1249,56 @@ body:not(.ai-panel-open) .ai-panel {
   padding-left: 10px;
 }
 
+.ai-agent-mode-shell {
+  display: grid;
+  gap: 3px;
+  width: min(132px, 100%);
+  max-width: 132px;
+  align-self: start;
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+
+.ai-agent-mode-shell > .eyebrow {
+  padding-left: 10px;
+}
+
+.ai-agent-mode-indicator {
+  width: 100%;
+  min-height: 36px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 12px;
+  cursor: default;
+}
+
+.ai-agent-mode-indicator[data-mode="general"] .ai-agent-mode-dot { background: #94a3b8; }
+.ai-agent-mode-indicator[data-mode="relay_planning"] .ai-agent-mode-dot,
+.ai-agent-mode-indicator[data-mode="microwave_backhaul"] .ai-agent-mode-dot { background: #38bdf8; }
+.ai-agent-mode-indicator[data-mode="rf_sensor_site_selection"] .ai-agent-mode-dot { background: #22c55e; }
+.ai-agent-mode-indicator[data-mode="command_post_site_selection"] .ai-agent-mode-dot { background: #f59e0b; }
+.ai-agent-mode-indicator[data-mode="spectrum_deconfliction"] .ai-agent-mode-dot,
+.ai-agent-mode-indicator[data-mode="ew_threat_analysis"] .ai-agent-mode-dot,
+.ai-agent-mode-indicator[data-mode="movement_route_comms"] .ai-agent-mode-dot,
+.ai-agent-mode-indicator[data-mode="link_diagnosis"] .ai-agent-mode-dot,
+.ai-agent-mode-indicator[data-mode="terrain_masking"] .ai-agent-mode-dot,
+.ai-agent-mode-indicator[data-mode="site_comparison"] .ai-agent-mode-dot { background: #a78bfa; }
+
+.ai-agent-mode-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.14);
+  flex: 0 0 auto;
+}
+
 .ai-chat-model-select {
   width: 100%;
   min-width: 0;
@@ -1321,6 +1371,53 @@ body:not(.ai-panel-open) .ai-panel {
   font-size: 0.82rem;
   line-height: 1.6;
   margin-top: 4px;
+}
+
+.ai-chat-message.ai-mode-suggestion {
+  max-width: min(94%, 620px);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(10, 15, 24, 0.98));
+}
+
+.ai-mode-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.ai-mode-suggestion-actions button {
+  border-radius: 999px;
+}
+
+.site-study-detail-shell {
+  margin-top: 12px;
+}
+
+.site-study-result-row {
+  cursor: pointer;
+}
+
+.site-study-result-row.is-active {
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 12px 24px rgba(2, 132, 199, 0.16);
+}
+
+.site-study-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.site-study-badge {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text);
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .ai-chat-message-body br {
