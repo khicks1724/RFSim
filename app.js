@@ -9050,6 +9050,12 @@ function sanitizeAiHtmlToMarkdown(text) {
   // Convert common HTML tags the AI sometimes emits into their markdown equivalents,
   // then strip any remaining raw tags so they don't render as literal escaped text.
   return text
+    .replace(/&lt;(\/?(?:strong|b|em|i|code|br|p|div|span|h[1-6]|li|ul|ol|tr|td|th|thead|tbody|table)(?:\s[^&]*?)?)&gt;/gi, "<$1>")
+    .replace(/<\/strong>\s*([\s\S]*?)\s*<strong>/gi, "**$1**")
+    .replace(/<\/b>\s*([\s\S]*?)\s*<b>/gi, "**$1**")
+    .replace(/<\/em>\s*([\s\S]*?)\s*<em>/gi, "*$1*")
+    .replace(/<\/i>\s*([\s\S]*?)\s*<i>/gi, "*$1*")
+    .replace(/<\/code>\s*([\s\S]*?)\s*<code>/gi, "`$1`")
     .replace(/<strong>([\s\S]*?)<\/strong>/gi, "**$1**")
     .replace(/<b>([\s\S]*?)<\/b>/gi, "**$1**")
     .replace(/<em>([\s\S]*?)<\/em>/gi, "*$1*")
@@ -12955,6 +12961,17 @@ function enrichAiCoordinates(text) {
   return result;
 }
 
+function linkifyAiResponseEntity(text, label, target) {
+  if (!text || !label || !target) {
+    return text;
+  }
+
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`(?<!\[)\*\*${escaped}\*\*(?!\]\()`, "g"), `[**${label}**](${target})`)
+    .replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${label}**](${target})`);
+}
+
 function enrichAiResponseWithLinks(text, placedAssets = []) {
   if (!text) return text;
   let result = sanitizeAiHtmlToMarkdown(text);
@@ -12964,16 +12981,14 @@ function enrichAiResponseWithLinks(text, placedAssets = []) {
 
   // Link newly placed assets by name (always — these are directly relevant to this response)
   for (const asset of placedAssets) {
-    const escaped = asset.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${asset.name}**](asset:${asset.id})`);
+    result = linkifyAiResponseEntity(result, asset.name, `asset:${asset.id}`);
   }
 
   // Link existing assets by name — capped at 40 to prevent O(n) regex blowup
   const assetsToLink = state.assets.slice(0, 40);
   for (const asset of assetsToLink) {
     if (placedAssets.some((a) => a.id === asset.id)) continue;
-    const escaped = asset.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${asset.name}**](asset:${asset.id})`);
+    result = linkifyAiResponseEntity(result, asset.name, `asset:${asset.id}`);
   }
 
   // Link imported items only if the response text is short enough that regex won't block
@@ -12982,8 +12997,7 @@ function enrichAiResponseWithLinks(text, placedAssets = []) {
     const lowerResult = result.toLowerCase();
     for (const item of state.importedItems) {
       if (!lowerResult.includes(item.name.toLowerCase())) continue;
-      const escaped = item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      result = result.replace(new RegExp(`(?<![\\[\\*])\\b${escaped}\\b(?![\\]\\*])`, "g"), `[**${item.name}**](imported:${item.id})`);
+      result = linkifyAiResponseEntity(result, item.name, `imported:${item.id}`);
     }
   }
 
@@ -26744,8 +26758,13 @@ function redrawTopoLinks() {
 }
 
 let _topoAbortController = null;
+// Persisted across re-renders so pan/zoom survive data refreshes
+let _topoPanOffset = { x: 0, y: 0 };
+let _topoZoom = 1;
+let _topoViewInitialized = false;
+
 function wireTopoCanvasPanZoom() {
-  // Cancel any previous listeners before re-wiring
+  // Cancel any previous listeners before re-wiring (nodes changed, etc.)
   if (_topoAbortController) _topoAbortController.abort();
   _topoAbortController = new AbortController();
   const sig = _topoAbortController.signal;
@@ -26753,18 +26772,19 @@ function wireTopoCanvasPanZoom() {
   const canvas = document.getElementById("topoCanvas");
   if (!canvas) return;
 
-  let panOffset = { x: 0, y: 0 };
-  let zoom = 1;
   const getWorld = () => document.getElementById("topoNodes");
   const applyTransform = () => {
     const world = getWorld();
-    if (world) world.style.transform = `translate(${panOffset.x}px,${panOffset.y}px) scale(${zoom})`;
+    if (world) world.style.transform = `translate(${_topoPanOffset.x}px,${_topoPanOffset.y}px) scale(${_topoZoom})`;
   };
 
-  let dragging = null; // { node, key, startClientX, startClientY, origX, origY } | { panning, startClientX, startClientY }
+  // Apply whatever state we already have (survives re-renders)
+  applyTransform();
+
+  let dragging = null; // { node, key, startClientX, startClientY, origX, origY } | { panning, startX, startY }
 
   canvas.addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return; // left button only
+    if (e.button !== 0) return;
     const nodeEl = e.target.closest(".topo-node");
     if (nodeEl) {
       e.preventDefault();
@@ -26776,21 +26796,21 @@ function wireTopoCanvasPanZoom() {
       nodeEl.classList.add("topo-dragging");
       return;
     }
-    // Pan when clicking canvas background (no node hit)
-    dragging = { panning: true, startClientX: e.clientX - panOffset.x, startClientY: e.clientY - panOffset.y };
+    // Pan: anchor offset so pointer stays fixed relative to world
+    dragging = { panning: true, startX: e.clientX - _topoPanOffset.x, startY: e.clientY - _topoPanOffset.y };
   }, { signal: sig });
 
   document.addEventListener("mousemove", (e) => {
     if (!dragging) return;
     if (dragging.panning) {
-      panOffset.x = e.clientX - dragging.startClientX;
-      panOffset.y = e.clientY - dragging.startClientY;
+      _topoPanOffset.x = e.clientX - dragging.startX;
+      _topoPanOffset.y = e.clientY - dragging.startY;
       applyTransform();
       return;
     }
-    // Node drag: convert screen delta → world delta (divide by zoom)
-    const dx = (e.clientX - dragging.startClientX) / zoom;
-    const dy = (e.clientY - dragging.startClientY) / zoom;
+    // Node drag: convert screen delta → world delta
+    const dx = (e.clientX - dragging.startClientX) / _topoZoom;
+    const dy = (e.clientY - dragging.startClientY) / _topoZoom;
     const newX = dragging.origX + dx;
     const newY = dragging.origY + dy;
     _topoNodePositions.set(dragging.key, { x: newX, y: newY });
@@ -26806,13 +26826,24 @@ function wireTopoCanvasPanZoom() {
 
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    zoom = Math.max(0.3, Math.min(3, zoom * factor));
+    const factor = e.deltaY < 0 ? 1.1 : 0.909090; // symmetric: 1.1 * (1/1.1)
+    const newZoom = Math.max(0.3, Math.min(3, _topoZoom * factor));
+    if (newZoom === _topoZoom) return;
+
+    // Zoom toward cursor: adjust pan so the point under the cursor stays fixed
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    _topoPanOffset.x = mouseX - (mouseX - _topoPanOffset.x) * (newZoom / _topoZoom);
+    _topoPanOffset.y = mouseY - (mouseY - _topoPanOffset.y) * (newZoom / _topoZoom);
+    _topoZoom = newZoom;
     applyTransform();
   }, { passive: false, signal: sig });
 
   document.getElementById("topoFitBtn")?.addEventListener("click", () => {
-    panOffset = { x: 0, y: 0 }; zoom = 1; applyTransform();
+    _topoPanOffset = { x: 0, y: 0 };
+    _topoZoom = 1;
+    applyTransform();
   }, { signal: sig });
 
   document.getElementById("topoRefreshBtn")?.addEventListener("click", () => {

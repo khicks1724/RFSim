@@ -6973,7 +6973,7 @@ body.topo-debug-resizing {
 .map-tak-debug-panel {
   position: absolute;
   right: 12px;
-  bottom: 12px;
+  top: 12px;
   width: 360px;
   height: 240px;
   display: flex;
